@@ -1,0 +1,23 @@
+## Satori 02
+
+
+# ? '{"source": "satori", "author": "0331d4e41b1138cad5bdf3470e6de925f7308f40f852fa00744999882c1dad058a",
+#   "stream": "satori02-1", "target": ""}'
+# : headers: null
+#   history: null
+#   hook: "def postRequestHook(response: 'requests.Response'):\r\n    ''' extracts data\
+#     \ from the response. '''\r\n    import time\r\n    return time.time()"
+#   payload: null
+#   uri: https://google.com
+
+
+## Satori 03
+
+? '{"source": "satori", "author": "0318597a3c52ebdca622390a459db7c6b87a83c56631855453ab3aec44a28f8521",
+  "stream": "satori03-1", "target": ""}'
+: headers: null
+  history: null
+  hook: "def postRequestHook(response: 'requests.Response'):\r\n    ''' extracts data\
+    \ from the response. '''\r\n    import time\r\n    return time.time()"
+  payload: null
+  uri: https://google.com
