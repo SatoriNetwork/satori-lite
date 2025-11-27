@@ -448,10 +448,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.env in ['prod', 'local', 'testprod'] and
             EvrmoreWallet.addressIsValid(self.configRewardAddress)
         ):
-            self.server.setRewardAddress(
-                signature=self.wallet.sign(self.configRewardAddress),
-                pubkey=self.wallet.pubkey,
-                address=self.configRewardAddress)
+            self.server.setRewardAddress(address=self.configRewardAddress)
             return True
         return False
 
