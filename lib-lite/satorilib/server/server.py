@@ -46,8 +46,10 @@ class SatoriServerClient(object):
         *args, **kwargs
     ):
         self.wallet = wallet
-        self.url = url or 'https://stage.satorinet.io'
-        self.sendingUrl = sendingUrl or 'https://mundo.satorinet.io'
+        # Updated to point to local development server
+        # Original: 'https://stage.satorinet.io'
+        self.url = url or 'http://localhost:8000'
+        self.sendingUrl = sendingUrl or 'http://localhost:8000'
         self.topicTime: dict[str, float] = {}
         self.lastCheckin: int = 0
 
@@ -596,9 +598,10 @@ class SatoriServerClient(object):
             payload=json.dumps({'streamId': streamId})).text
 
     def getPowerBalance(self):
-        return self._makeAuthenticatedCall(
+        response = self._makeAuthenticatedCall(
             function=requests.get,
-            endpoint='/api/v0/balance/get').text
+            endpoint='/api/v1/balance/get').json()
+        return response['stake']
     
     def submitMaifestVote(self, wallet: Wallet, votes: dict[str, int]):
         # todo authenticate the vault instead
@@ -658,29 +661,20 @@ class SatoriServerClient(object):
 
     def setRewardAddress(
         self,
-        signature: Union[str, bytes],
-        pubkey: str,
         address: str,
-        usingVault: bool = False,
     ) -> tuple[bool, str]:
-        ''' just like mine to address but using the wallet '''
+        '''
+        Set reward address for authenticated peer.
+
+        Simplified to only require the address - auth is handled via
+        wallet headers from _makeAuthenticatedCall.
+        '''
         try:
-            if isinstance(signature, bytes):
-                signature = signature.decode()
-            if usingVault:
-                js = json.dumps({
-                    'vaultSignature': signature,
-                    'vaultPubkey': pubkey,
-                    'address': address})
-            else:
-                js = json.dumps({
-                    'signature': signature,
-                    'pubkey': pubkey,
-                    'address': address})
+            # Call new v1 API with simplified payload
             response = self._makeAuthenticatedCall(
                 function=requests.post,
-                endpoint='/mine/to/address',
-                payload=js)
+                endpoint='/api/v1/peer/reward-address',
+                payload=json.dumps({'reward_address': address}))
             return response.status_code < 400, response.text
         except Exception as e:
             logging.warning(
@@ -963,29 +957,22 @@ class SatoriServerClient(object):
             return
         self.setTopicTime(topic)
         try:
-            if useAuthorizedCall:
+            if isPrediction:
+                # Call our new v1 API for predictions
                 response = self._makeAuthenticatedCall(
                     function=requests.post,
-                    endpoint='/record/prediction/authed' if isPrediction else '/record/observation/authed',
+                    endpoint='/api/v1/prediction/post',
                     payload=json.dumps({
-                        'topic': topic,
-                        'data': str(data),
-                        'time': str(observationTime),
+                        'value': str(data),
+                        'observed_at': str(observationTime),
                         'hash': str(observationHash),
                     }))
             else:
-                response = self._makeUnauthenticatedCall(
-                    function=requests.post,
-                    endpoint='/record/prediction' if isPrediction else '/record/observation',
-                    payload=json.dumps({
-                        'topic': topic,
-                        'data': str(data),
-                        'time': str(observationTime),
-                        'hash': str(observationHash),
-                    }))
-            # response = self._makeAuthenticatedCall(
-            #    function=requests.get,
-            #    endpoint='/record/prediction')
+                # Observations not yet supported by our API
+                # TODO: Implement /api/v1/observation/post endpoint
+                logging.warning('Observation publishing not yet supported by API', color='yellow')
+                return None
+
             if response.status_code == 200:
                 return True
             if response.status_code > 399:
