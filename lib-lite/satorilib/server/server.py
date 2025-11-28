@@ -48,8 +48,11 @@ class SatoriServerClient(object):
         self.wallet = wallet
         # Updated to point to local development server
         # Original: 'https://stage.satorinet.io'
-        self.url = url or 'http://localhost:8000'
-        self.sendingUrl = sendingUrl or 'http://localhost:8000'
+        # Use environment variable or default to localhost
+        import os
+        default_url = os.environ.get('SATORI_CENTRAL_URL', 'http://localhost:8000')
+        self.url = url or default_url
+        self.sendingUrl = sendingUrl or default_url
         self.topicTime: dict[str, float] = {}
         self.lastCheckin: int = 0
 
@@ -57,7 +60,13 @@ class SatoriServerClient(object):
         self.topicTime[topic] = time.time()
 
     def _getChallenge(self):
-        # return requests.get(self.url + '/time').text
+        """Get challenge token from central-lite or fallback to timestamp."""
+        try:
+            response = requests.get(self.url + '/api/v1/auth/challenge')
+            if response.status_code == 200:
+                return response.json().get('challenge', str(time.time()))
+        except Exception:
+            pass
         return str(time.time())
 
     def _makeAuthenticatedCall(
@@ -214,7 +223,37 @@ class SatoriServerClient(object):
             payload=payload or json.dumps(stream or {}))
 
     def checkin(self, referrer: str = None, ip: str = None, vaultInfo: dict = None) -> dict:
+        """Check in with central server. For central-lite, returns minimal data."""
         challenge = self._getChallenge()
+
+        # Try central-lite health check to verify connection
+        try:
+            health_response = requests.get(self.url + '/health')
+            if health_response.status_code == 200:
+                logging.info('connected to central-lite', color='green')
+                # Return minimal checkin data for central-lite
+                # Worker mode doesn't need subscriptions/publications
+                self.lastCheckin = time.time()
+                return {
+                    'wallet': {
+                        'accepting': False,
+                        'rewardaddress': None,
+                    },
+                    'key': challenge,
+                    'oracleKey': challenge,
+                    'idKey': challenge,
+                    'subscriptionKeys': [],
+                    'publicationKeys': [],
+                    'subscriptions': '[]',
+                    'publications': '[]',
+                    'pins': '[]',
+                    'stakeRequired': 0,
+                    'rewardaddress': None,
+                }
+        except Exception as e:
+            logging.warning(f'central-lite health check failed: {e}', color='yellow')
+
+        # Fallback to original checkin for production central
         response = self._makeAuthenticatedCall(
             function=requests.post,
             endpoint='/checkin',
@@ -233,6 +272,16 @@ class SatoriServerClient(object):
         return response.json()
 
     def checkinCheck(self) -> bool:
+        """Check if there are updates since last checkin."""
+        # For central-lite, always return False (no stream updates)
+        try:
+            health_response = requests.get(self.url + '/health')
+            if health_response.status_code == 200:
+                return False  # central-lite doesn't have stream updates
+        except Exception:
+            pass
+
+        # Fallback to original for production central
         challenge = self._getChallenge()
         response = self._makeAuthenticatedCall(
             function=requests.post,

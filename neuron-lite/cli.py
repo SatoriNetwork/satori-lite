@@ -136,18 +136,21 @@ class NeuronCLI:
 
         if user_input == "/help":
             return """Available commands:
-  /neuron-logs - Show neuron logs
-  /status     - Show current status
-  /balance    - Show wallet balance
-  /streams    - Show stream assignments
-  /pause      - Pause the engine
-  /unpause    - Unpause the engine
-  /restart    - Restart the neuron
-  /stake      - Check stake status
-  /pool       - Show pool status
-  /clear      - Clear the screen
-  /help       - Show this help message
-  /exit       - Exit CLI (neuron keeps running)"""
+  /neuron-logs   - Show neuron logs
+  /status        - Show current status
+  /balance       - Show wallet balance
+  /streams       - Show stream assignments
+  /pause         - Pause the engine
+  /unpause       - Unpause the engine
+  /restart       - Restart the neuron
+  /stake         - Check stake status
+  /pool          - Show pool status
+  /vault-create  - Create a new vault with password
+  /vault-open    - Open existing vault with password
+  /vault-status  - Check vault status
+  /clear         - Clear the screen
+  /help          - Show this help message
+  /exit          - Exit CLI (neuron keeps running)"""
 
         elif user_input == "/neuron-logs":
             logs = _log_buffer[-50:]
@@ -224,6 +227,35 @@ class NeuronCLI:
                 return "Neuron is starting... Use /neuron-logs to see progress."
             return f"Pool Accepting: {self.startup.poolIsAccepting}"
 
+        elif user_input == "/vault-status":
+            if not self.neuron_started:
+                return "Neuron is starting... Use /neuron-logs to see progress."
+            vault = self.startup.vault
+            if vault is None:
+                return "Vault: Not created\nUse /vault-create to create a new vault."
+            status_lines = [
+                f"Vault Address: {vault.address}",
+                f"Decrypted: {vault.isDecrypted if hasattr(vault, 'isDecrypted') else 'Unknown'}",
+            ]
+            return "\n".join(status_lines)
+
+        elif user_input == "/vault-create":
+            if not self.neuron_started:
+                return "Neuron is starting... Use /neuron-logs to see progress."
+            if self.startup.vault is not None:
+                return "Vault already exists. Use /vault-open to unlock it."
+            return "VAULT_CREATE_PROMPT"
+
+        elif user_input == "/vault-open":
+            if not self.neuron_started:
+                return "Neuron is starting... Use /neuron-logs to see progress."
+            vault = self.startup.vault
+            if vault is None:
+                return "No vault exists. Use /vault-create to create one first."
+            if hasattr(vault, 'isDecrypted') and vault.isDecrypted:
+                return "Vault is already open."
+            return "VAULT_OPEN_PROMPT"
+
         elif user_input == "/clear":
             # ANSI escape code to clear screen and move cursor to top
             console_write("\033[2J\033[H")
@@ -237,6 +269,53 @@ class NeuronCLI:
 
         else:
             return "Type /help for available commands."
+
+    def prompt_vault_password(self, create: bool = False) -> str | None:
+        """Prompt for vault password securely."""
+        import getpass
+        try:
+            if create:
+                console_print("Creating new vault...")
+                console_write("Enter new vault password: ")
+                password1 = console_readline().strip()
+                console_write("Confirm password: ")
+                password2 = console_readline().strip()
+                if password1 != password2:
+                    return None, "Passwords do not match."
+                if len(password1) < 4:
+                    return None, "Password must be at least 4 characters."
+                return password1, None
+            else:
+                console_write("Enter vault password: ")
+                password = console_readline().strip()
+                return password, None
+        except Exception as e:
+            return None, str(e)
+
+    def create_vault(self, password: str) -> str:
+        """Create a new vault with the given password."""
+        try:
+            # Save password to config
+            from satorineuron import config
+            config.add(data={'vault password': password})
+
+            # Create vault
+            vault = self.startup.openVault(password=password, create=True)
+            if vault:
+                return f"Vault created successfully!\nVault Address: {vault.address}"
+            return "Failed to create vault."
+        except Exception as e:
+            return f"Error creating vault: {e}"
+
+    def open_vault(self, password: str) -> str:
+        """Open an existing vault with the given password."""
+        try:
+            vault = self.startup.openVault(password=password)
+            if vault and hasattr(vault, 'isDecrypted') and vault.isDecrypted:
+                return f"Vault opened successfully!\nVault Address: {vault.address}"
+            return "Failed to open vault. Wrong password?"
+        except Exception as e:
+            return f"Error opening vault: {e}"
 
     def run(self):
         """Run interactive CLI loop."""
@@ -259,6 +338,26 @@ class NeuronCLI:
                 if response == "EXIT_CLI":
                     console_print("Goodbye!")
                     break
+
+                if response == "VAULT_CREATE_PROMPT":
+                    password, error = self.prompt_vault_password(create=True)
+                    if error:
+                        console_print(error)
+                    elif password:
+                        result = self.create_vault(password)
+                        console_print(result)
+                    console_print()
+                    continue
+
+                if response == "VAULT_OPEN_PROMPT":
+                    password, error = self.prompt_vault_password(create=False)
+                    if error:
+                        console_print(error)
+                    elif password:
+                        result = self.open_vault(password)
+                        console_print(result)
+                    console_print()
+                    continue
 
                 console_print(response)
                 console_print()
