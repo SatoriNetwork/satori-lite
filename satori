@@ -1,6 +1,15 @@
 #!/bin/bash
 
 CONTAINER_NAME="satori"
+IMAGE_TAG="${SATORI_IMAGE_TAG:-dev}"
+IMAGE="satorinet/satori-lite:${IMAGE_TAG}"
+
+# Set central URL based on image tag
+if [ "$IMAGE_TAG" = "dev" ]; then
+    CENTRAL_URL="http://host.docker.internal:8000"
+else
+    CENTRAL_URL="https://network.satorinet.io"
+fi
 
 # Help
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
@@ -55,7 +64,8 @@ case "$1" in
                 docker run -d --name $CONTAINER_NAME \
                     --restart unless-stopped \
                     -v satori-data:/Satori/Neuron/data \
-                    satorinet/satori-lite:dev || {
+                    -e SATORI_CENTRAL_URL=$CENTRAL_URL \
+                    $IMAGE || {
                     echo "Error: Failed to create container. Is Docker running?"
                     exit 1
                 }

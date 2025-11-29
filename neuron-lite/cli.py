@@ -10,7 +10,8 @@ import time
 import threading
 import io
 import logging as stdlib_logging
-import readline  # Enables arrow keys and command history
+import tty
+import termios
 
 # Save original file descriptors BEFORE any redirection
 _original_stdout_fd = os.dup(1)
@@ -24,6 +25,10 @@ _console_in = os.fdopen(os.dup(_original_stdin_fd), 'r', buffering=1)
 # Global log buffer
 _log_buffer: list[str] = []
 _max_logs = 1000
+
+# Command history
+_command_history: list[str] = []
+_history_index: int = 0
 
 
 class LogInterceptHandler(stdlib_logging.Handler):
@@ -98,30 +103,87 @@ def console_readline() -> str:
 
 
 def console_input(prompt: str = "") -> str:
-    """Read input with readline support (arrow keys, history)."""
-    # Print prompt manually to our console output
+    """Read input with arrow key support for command history."""
+    global _history_index
+
     console_write(prompt)
 
-    # Only restore stdin fd for readline - keep stdout redirected to prevent leaks
-    saved_stdin = os.dup(0)
+    # Use the original stdin fd for reading
+    fd = _original_stdin_fd
+    old_settings = termios.tcgetattr(fd)
 
     try:
-        # Restore original stdin at fd level for readline
-        os.dup2(_original_stdin_fd, 0)
+        tty.setraw(fd)
 
-        # Temporarily point sys.stdin to original for readline
-        old_stdin = sys.stdin
-        sys.stdin = sys.__stdin__
+        line = ""
+        cursor_pos = 0
+        _history_index = len(_command_history)
+        saved_line = ""  # Save current line when browsing history
 
-        try:
-            # Use empty prompt since we printed it manually
-            return input()
-        finally:
-            sys.stdin = old_stdin
+        while True:
+            # Read one character
+            ch = os.read(fd, 1).decode('utf-8', errors='ignore')
+
+            if ch == '\r' or ch == '\n':  # Enter
+                console_write('\r\n')
+                break
+            elif ch == '\x03':  # Ctrl+C
+                console_write('\r\n')
+                raise KeyboardInterrupt
+            elif ch == '\x04':  # Ctrl+D
+                console_write('\r\n')
+                raise EOFError
+            elif ch == '\x7f' or ch == '\x08':  # Backspace
+                if cursor_pos > 0:
+                    line = line[:cursor_pos-1] + line[cursor_pos:]
+                    cursor_pos -= 1
+                    # Redraw line
+                    console_write(f'\r{prompt}{line} \r{prompt}{line[:cursor_pos]}')
+            elif ch == '\x1b':  # Escape sequence (arrow keys)
+                seq1 = os.read(fd, 1).decode('utf-8', errors='ignore')
+                if seq1 == '[':
+                    seq2 = os.read(fd, 1).decode('utf-8', errors='ignore')
+                    if seq2 == 'A':  # Up arrow - previous command
+                        if _command_history and _history_index > 0:
+                            if _history_index == len(_command_history):
+                                saved_line = line
+                            _history_index -= 1
+                            line = _command_history[_history_index]
+                            cursor_pos = len(line)
+                            # Clear and redraw
+                            console_write(f'\r{prompt}{" " * 50}\r{prompt}{line}')
+                    elif seq2 == 'B':  # Down arrow - next command
+                        if _history_index < len(_command_history):
+                            _history_index += 1
+                            if _history_index == len(_command_history):
+                                line = saved_line
+                            else:
+                                line = _command_history[_history_index]
+                            cursor_pos = len(line)
+                            # Clear and redraw
+                            console_write(f'\r{prompt}{" " * 50}\r{prompt}{line}')
+                    elif seq2 == 'C':  # Right arrow
+                        if cursor_pos < len(line):
+                            cursor_pos += 1
+                            console_write('\x1b[C')
+                    elif seq2 == 'D':  # Left arrow
+                        if cursor_pos > 0:
+                            cursor_pos -= 1
+                            console_write('\x1b[D')
+            elif ch >= ' ':  # Printable character
+                line = line[:cursor_pos] + ch + line[cursor_pos:]
+                cursor_pos += 1
+                # Redraw from cursor
+                console_write(f'{line[cursor_pos-1:]}\r{prompt}{line[:cursor_pos]}')
+
+        # Add to history if non-empty
+        if line.strip() and (not _command_history or _command_history[-1] != line):
+            _command_history.append(line)
+
+        return line
+
     finally:
-        # Restore redirected stdin
-        os.dup2(saved_stdin, 0)
-        os.close(saved_stdin)
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 class NeuronCLI:
@@ -352,9 +414,6 @@ class NeuronCLI:
 
         # Start neuron in background
         self.start_neuron_background()
-
-        # Configure readline for history and arrow keys
-        readline.parse_and_bind('set editing-mode emacs')
 
         while True:
             try:
