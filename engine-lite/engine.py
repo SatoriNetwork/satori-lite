@@ -24,6 +24,7 @@ from satorilib.server import SatoriServerClient
 from satoriengine.veda import config
 from satoriengine.veda.data import StreamForecast, validate_single_entry
 from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter
+from satoriengine.veda.storage import EngineStorageManager
 
 warnings.filterwarnings('ignore')
 setup(level=INFO)
@@ -82,6 +83,8 @@ class Engine:
         self.threads: list[threading.Thread] = []
         self.identity: EvrmoreIdentity = EvrmoreIdentity('/Satori/Neuron/wallet/wallet.yaml')
         self.transferProtocol: Union[str, None] = None
+        # SQLite storage manager for local data persistence
+        self.storage: EngineStorageManager = EngineStorageManager.getInstance()
         # TODO: Commented out for engine-neuron integration
         # self.centrifugo = None
         # self.centrifugoSubscriptions: list = []
@@ -300,7 +303,8 @@ class Engine:
                     subscriptionStream=sub,
                     publicationStream=matchingPub,
                     pauseAll=self.pause,
-                    resumeAll=self.resume)
+                    resumeAll=self.resume,
+                    storage=self.storage)
                 self.streamModels[subUuid].chooseAdapter(inplace=True)
                 self.streamModels[subUuid].run_forever()
                 info(f"Model initialized for stream {subUuid}", color='green')
@@ -397,6 +401,7 @@ class StreamModel:
         publicationStream: Stream,
         pauseAll: callable,
         resumeAll: callable,
+        storage: EngineStorageManager = None,
     ):
         """Factory method for creating StreamModel that uses Central Server directly"""
         streamModel = cls.__new__(cls)
@@ -423,6 +428,8 @@ class StreamModel:
         streamModel.dataClientOfIntServer = None
         streamModel.dataClientOfExtServer = None
         streamModel.identity = None
+        # SQLite storage manager for local persistence
+        streamModel.storage = storage or EngineStorageManager.getInstance()
         streamModel.initializeFromServer()
         return streamModel
 
@@ -478,26 +485,59 @@ class StreamModel:
         debug(f'AI Engine: stream id {self.streamUuid} using {self.adapter.__name__} (Central Server mode)', color='teal')
 
     def loadDataFromServer(self) -> pd.DataFrame:
-        """Load historical data from Central Server"""
+        """Load historical data - currently loads from local SQLite only."""
+        # TODO: Implement fetching from Central Server when API is ready
+        # For now, load from local SQLite if available
+        localData = self.storage.getStreamDataForEngine(self.streamUuid)
+        if not localData.empty:
+            info(f"Loaded {len(localData)} rows from local SQLite for stream {self.streamUuid}", color='green')
+            return localData
+        info(f"No local data for stream {self.streamUuid}, starting fresh", color='yellow')
+        return pd.DataFrame(columns=["date_time", "value", "id"])
+
+    def onDataReceived(self, data: pd.DataFrame):
+        """
+        Called when new data is received from Central Server.
+        Stores data in SQLite and passes to engine for predictions.
+
+        Args:
+            data: DataFrame with columns: ts (or date_time), value, hash (or id)
+                  Index should be timestamp or 'ts' column should contain timestamps.
+
+        TODO: Call this method when data arrives from Central Server.
+        """
         try:
-            # Use server to get stream data
-            response = self.server.getStreamData(self.streamUuid)
-            if response is not None and response.status_code == 200:
-                data = response.json()
-                if data and len(data) > 0:
-                    df = pd.DataFrame(data)
-                    # Conform to expected format
-                    if 'ts' in df.columns:
-                        df = df.rename(columns={'ts': 'date_time', 'hash': 'id'})
-                    if 'provider' in df.columns:
-                        del df['provider']
-                    info(f"Loaded {len(df)} rows from Central Server for stream {self.streamUuid}", color='green')
-                    return df
-            info(f"No data from Central Server for stream {self.streamUuid}, starting fresh", color='yellow')
-            return pd.DataFrame(columns=["date_time", "value", "id"])
+            if data.empty:
+                return
+
+            # Normalize column names for storage
+            storageDf = data.copy()
+            if 'date_time' in storageDf.columns:
+                storageDf = storageDf.set_index('date_time')
+            elif 'ts' in storageDf.columns:
+                storageDf = storageDf.set_index('ts')
+
+            # Store in SQLite (table name = streamUuid)
+            insertedRows = self.storage.storeStreamData(
+                self.streamUuid,
+                storageDf,
+                provider='central'
+            )
+            if insertedRows > 0:
+                info(f"Stored {insertedRows} new rows in SQLite for stream {self.streamUuid}", color='green')
+
+            # Also update in-memory data for predictions
+            engineDf = data.copy()
+            if 'ts' in engineDf.columns:
+                engineDf = engineDf.rename(columns={'ts': 'date_time', 'hash': 'id'})
+            if 'provider' in engineDf.columns:
+                del engineDf['provider']
+
+            self.data = pd.concat([self.data, engineDf], ignore_index=True)
+            self.data = self.data.drop_duplicates(subset=['date_time'], keep='last')
+
         except Exception as e:
-            warning(f"Failed to load data from Central Server: {e}")
-            return pd.DataFrame(columns=["date_time", "value", "id"])  
+            error(f"Error storing received data: {e}")  
 
     # TODO: Commented out for engine-neuron integration - P2P removed
     # async def p2pInit(self):
@@ -803,7 +843,7 @@ class StreamModel:
             error('Failed to send Prediction to server : ', e)
 
     def publishPredictionToServer(self, forecast: pd.DataFrame):
-        """Publish prediction directly to Central Server"""
+        """Publish prediction directly to Central Server and store locally."""
         try:
             predictionValue = str(forecast['value'].iloc[0])
             observationTime = str(forecast.index[0])
@@ -812,6 +852,18 @@ class StreamModel:
             observationHash = hashlib.sha256(
                 f"{predictionValue}{observationTime}".encode()
             ).hexdigest()[:16]
+
+            # Store prediction locally in SQLite (table name = predictionStreamUuid)
+            if hasattr(self, 'storage') and self.storage is not None:
+                stored = self.storage.storePrediction(
+                    predictionStreamUuid=self.predictionStreamUuid,
+                    timestamp=observationTime,
+                    value=float(predictionValue),
+                    hash_val=observationHash,
+                    provider='engine'
+                )
+                if stored:
+                    debug(f"Prediction stored locally for stream {self.predictionStreamUuid}")
 
             # Use publication stream's topic
             topic = self.publicationStream.streamId.jsonId
