@@ -14,6 +14,9 @@ from satorilib.server import SatoriServerClient
 from satorilib.server.api import CheckinDetails
 from satorilib.asynchronous import AsyncThread
 
+# Import secret module for encryption/decryption
+from satorilib.utils import secret
+
 # Optional centrifugo support
 try:
     from satorilib.centrifugo import publish_to_stream_rest
@@ -35,4 +38,5 @@ __all__ = [
     'AsyncThread',
     'publish_to_stream_rest',
     'CENTRIFUGO_AVAILABLE',
+    'secret',
 ]

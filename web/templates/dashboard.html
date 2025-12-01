@@ -1,0 +1,717 @@
+{% extends "base.html" %}
+
+{% block title %}Satori - Dashboard{% endblock %}
+
+{% block content %}
+<!-- Navigation -->
+<nav class="navbar navbar-expand-lg px-4">
+    <span class="navbar-brand">Satori</span>
+    <div class="ms-auto d-flex align-items-center">
+        <span class="me-3">
+            <span class="status-indicator status-online" id="statusIndicator"></span>
+            <span id="statusText">Connected</span>
+        </span>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
+            <i class="material-icons" id="themeIcon">light_mode</i>
+        </button>
+    </div>
+</nav>
+
+<div class="container-fluid py-4">
+    <div class="row g-4">
+        <!-- Wallet Section -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">account_balance_wallet</i>
+                        Wallet
+                    </h5>
+                    <a href="#" class="small text-muted" onclick="toggleIdentityWallet(); return false;">
+                        <i class="material-icons align-middle" style="font-size: 16px;">badge</i>
+                        Identity Wallet (Backup)
+                    </a>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- Left side: QR Code and Address -->
+                        <div class="col-lg-6 mb-4 mb-lg-0">
+                            <div class="text-center mb-3">
+                                <div id="walletQrCode" class="mb-3" style="display: inline-block; background: white; padding: 10px; border-radius: 10px;">
+                                    <p class="text-muted mb-0">Loading QR code...</p>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Wallet Address</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="walletAddress" readonly placeholder="Loading...">
+                                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('walletAddress')" title="Copy to clipboard">
+                                        <i class="material-icons align-middle">content_copy</i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="text-center">
+                                <p id="showPrivateKeyBtn" class="text-danger mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
+                                    <i class="material-icons align-middle" style="font-size: 18px;">visibility</i>
+                                    Show Private Key
+                                </p>
+                                <div id="privateKeySection" style="display: none;">
+                                    <p class="text-muted mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
+                                        <i class="material-icons align-middle" style="font-size: 18px;">visibility_off</i>
+                                        Hide Private Key
+                                    </p>
+                                    <div class="alert alert-warning" style="word-break: break-all;">
+                                        <small><strong>Private Key:</strong></small><br>
+                                        <code id="walletPrivateKey">Loading...</code>
+                                    </div>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="copyPrivateKey()">
+                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                                        Copy Private Key
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right side: Send Tokens -->
+                        <div class="col-lg-6">
+                            <h6 class="mb-3">
+                                <i class="material-icons align-middle me-1">send</i>
+                                Send SATORI
+                            </h6>
+                            <div class="mb-3">
+                                <label class="form-label">Destination Address</label>
+                                <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-8">
+                                    <label class="form-label">Amount</label>
+                                    <input type="number" class="form-control" id="sendAmount" placeholder="0.00" step="0.00000001" min="0">
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label">Sweep All</label>
+                                    <div class="form-check mt-2">
+                                        <input class="form-check-input" type="checkbox" id="sendSweep" onchange="toggleSweepAmount()">
+                                        <label class="form-check-label" for="sendSweep">Send All</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary w-100" onclick="sendTransaction()" id="sendBtn">
+                                <i class="material-icons align-middle me-1">send</i>
+                                Send Transaction
+                            </button>
+                            <div id="sendResult" class="mt-3" style="display: none;"></div>
+                            <p class="text-muted small mt-3 mb-0">
+                                Transaction fees will be paid during the send process. They typically amount to no more than 0.25 EVR.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Identity Wallet (Collapsed) -->
+                    <div id="identityWalletSection" style="display: none;" class="mt-4 pt-4 border-top">
+                        <h6 class="text-muted mb-3">
+                            <i class="material-icons align-middle me-1">badge</i>
+                            Identity Wallet (for digital identity only - do not send tokens here)
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6 mb-3 mb-md-0">
+                                <label class="form-label small">Identity Address</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="text" class="form-control" id="identityAddress" readonly placeholder="Loading...">
+                                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityAddress')" title="Copy">
+                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">Identity Private Key (Backup)</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="password" class="form-control" id="identityPrivateKey" readonly placeholder="Click to reveal...">
+                                    <button class="btn btn-outline-secondary" onclick="toggleIdentityPrivateKey()" title="Show/Hide">
+                                        <i class="material-icons align-middle" style="font-size: 16px;" id="identityKeyIcon">visibility</i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary" onclick="copyIdentityPrivateKey()" title="Copy">
+                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Balance Section -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">account_balance_wallet</i>
+                        Balance
+                    </h5>
+                    <button class="btn btn-primary btn-sm" onclick="refreshBalance()">
+                        <i class="material-icons align-middle">refresh</i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center py-3">
+                        <div class="col-6">
+                            <h3 id="tokenBalance">--</h3>
+                            <p class="text-muted mb-0">SATORI Token</p>
+                        </div>
+                        <div class="col-6">
+                            <h3 id="stakeBalance">--</h3>
+                            <p class="text-muted mb-0">SATORI Stake</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Reward Address Section -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">card_giftcard</i>
+                        Reward Address
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Current Address</label>
+                        <input type="text" class="form-control" id="currentRewardAddress" readonly placeholder="Not set">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">New Address</label>
+                        <input type="text" class="form-control" id="newRewardAddress" placeholder="Enter new reward address">
+                    </div>
+                    <button class="btn btn-primary" onclick="setRewardAddress()">Save Address</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pool Staking Section -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">handshake</i>
+                        Pool Staking
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Status</label>
+                        <div id="stakingStatus" class="alert alert-secondary">Not staking with a pool</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Pool Address</label>
+                        <input type="text" class="form-control" id="poolAddress" placeholder="Enter pool address">
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" id="addStakeBtn" onclick="addStakeToPool()">Add Stake to Pool</button>
+                        <button class="btn btn-danger" id="removeStakeBtn" onclick="removeStakeFromPool()">Remove Stake from Pool</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pool Management Section -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">groups</i>
+                        Pool Management
+                    </h5>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="poolToggle" onchange="togglePool()">
+                        <label class="form-check-label" for="poolToggle">Pool Open</label>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Workers</label>
+                        <div id="workerList" class="mb-3">
+                            <p class="text-muted">No workers</p>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Add Worker</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="newWorkerAddress" placeholder="Worker address">
+                            <button class="btn btn-primary" id="addWorkerBtn" onclick="addWorker()">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Status Messages -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="statusToast" class="toast" role="alert">
+        <div class="toast-header bg-dark text-white">
+            <strong class="me-auto">Satori</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body" id="toastMessage"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const API_URL = '/api';
+
+    // State tracking for mutual exclusion
+    let isStakingToPool = false;
+    let hasWorkers = false;
+
+    function showToast(message, isError = false) {
+        const toast = document.getElementById('statusToast');
+        const toastBody = document.getElementById('toastMessage');
+        toastBody.textContent = message;
+        toastBody.className = 'toast-body ' + (isError ? 'text-danger' : 'text-success');
+        const bsToast = new bootstrap.Toast(toast);
+        bsToast.show();
+    }
+
+    async function apiCall(endpoint, method = 'GET', data = null) {
+        try {
+            const options = {
+                method: method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (data) {
+                options.body = JSON.stringify(data);
+            }
+            const response = await fetch(API_URL + endpoint, options);
+            return await response.json();
+        } catch (error) {
+            console.error('API Error:', error);
+            showToast('API Error: ' + error.message, true);
+            return null;
+        }
+    }
+
+    // Update UI based on mutual exclusion rules
+    function updateMutualExclusionUI() {
+        const poolStakingReason = 'You cannot stake to a pool while you have workers in your own pool';
+        const poolManagementReason = 'You cannot manage workers while staking to another pool';
+
+        // Pool Staking elements
+        const poolAddressInput = document.getElementById('poolAddress');
+        const addStakeBtn = document.getElementById('addStakeBtn');
+        const removeStakeBtn = document.getElementById('removeStakeBtn');
+
+        // Pool Management elements
+        const poolToggle = document.getElementById('poolToggle');
+        const newWorkerInput = document.getElementById('newWorkerAddress');
+        const addWorkerBtn = document.getElementById('addWorkerBtn');
+
+        // If has workers, disable Pool Staking
+        if (hasWorkers) {
+            poolAddressInput.disabled = true;
+            poolAddressInput.title = poolStakingReason;
+            addStakeBtn.disabled = true;
+            addStakeBtn.title = poolStakingReason;
+        } else {
+            poolAddressInput.disabled = false;
+            poolAddressInput.title = '';
+            addStakeBtn.disabled = false;
+            addStakeBtn.title = '';
+        }
+
+        // If staking to pool, disable Pool Management
+        if (isStakingToPool) {
+            poolToggle.disabled = true;
+            poolToggle.title = poolManagementReason;
+            newWorkerInput.disabled = true;
+            newWorkerInput.title = poolManagementReason;
+            addWorkerBtn.disabled = true;
+            addWorkerBtn.title = poolManagementReason;
+        } else {
+            poolToggle.disabled = false;
+            poolToggle.title = '';
+            newWorkerInput.disabled = false;
+            newWorkerInput.title = '';
+            addWorkerBtn.disabled = false;
+            addWorkerBtn.title = '';
+        }
+    }
+
+    async function refreshBalance() {
+        const result = await apiCall('/balance/get');
+        if (result) {
+            document.getElementById('tokenBalance').textContent = result.balance !== undefined ? result.balance : '--';
+            document.getElementById('stakeBalance').textContent = result.stake !== undefined ? result.stake : '--';
+        }
+    }
+
+    async function loadRewardAddress() {
+        const result = await apiCall('/peer/reward-address');
+        if (result && result.address) {
+            document.getElementById('currentRewardAddress').value = result.address;
+        }
+    }
+
+    async function setRewardAddress() {
+        const address = document.getElementById('newRewardAddress').value.trim();
+        if (!address) {
+            showToast('Please enter an address', true);
+            return;
+        }
+        if (!isValidAddress(address)) {
+            showToast('Invalid address: must start with E and be 34 characters', true);
+            return;
+        }
+        const result = await apiCall('/peer/reward-address', 'POST', { address: address });
+        if (result) {
+            showToast('Reward address updated');
+            loadRewardAddress();
+            document.getElementById('newRewardAddress').value = '';
+        }
+    }
+
+    async function loadStakingStatus() {
+        const result = await apiCall('/lender/status');
+        const statusEl = document.getElementById('stakingStatus');
+        if (result && result.lending) {
+            isStakingToPool = true;
+            statusEl.className = 'alert alert-success';
+            statusEl.textContent = 'Staking with pool: ' + (result.employer || 'Unknown');
+        } else {
+            isStakingToPool = false;
+            statusEl.className = 'alert alert-secondary';
+            statusEl.textContent = 'Not staking with a pool';
+        }
+        updateMutualExclusionUI();
+    }
+
+    async function addStakeToPool() {
+        const pool = document.getElementById('poolAddress').value.trim();
+        if (!pool) {
+            showToast('Please enter a pool address', true);
+            return;
+        }
+        if (!isValidAddress(pool)) {
+            showToast('Invalid address: must start with E and be 34 characters', true);
+            return;
+        }
+        const result = await apiCall('/lender/lend', 'POST', { employer: pool });
+        if (result) {
+            showToast('Stake added to pool');
+            loadStakingStatus();
+        }
+    }
+
+    async function removeStakeFromPool() {
+        const result = await apiCall('/lender/lend', 'DELETE');
+        if (result) {
+            showToast('Stake removed from pool');
+            loadStakingStatus();
+        }
+    }
+
+    async function togglePool() {
+        const result = await apiCall('/pool/toggle-open', 'POST');
+        if (result) {
+            showToast('Pool status toggled');
+        }
+    }
+
+    async function loadWorkers() {
+        // TODO: Load workers from API when endpoint is available
+        // For now, check if there are workers based on workerList content
+        const workerListEl = document.getElementById('workerList');
+        // This would be replaced with actual API call
+        // const result = await apiCall('/pool/workers');
+        // hasWorkers = result && result.workers && result.workers.length > 0;
+        hasWorkers = false; // Default to no workers for now
+        updateMutualExclusionUI();
+    }
+
+    function isValidAddress(address) {
+        return address && address.length === 34 && address.startsWith('E');
+    }
+
+    async function addWorker() {
+        const address = document.getElementById('newWorkerAddress').value.trim();
+        if (!address) {
+            showToast('Please enter a worker address', true);
+            return;
+        }
+        if (!isValidAddress(address)) {
+            showToast('Invalid address: must start with E and be 34 characters', true);
+            return;
+        }
+        const result = await apiCall('/pool/worker', 'POST', { address: address });
+        if (result) {
+            showToast('Worker added');
+            document.getElementById('newWorkerAddress').value = '';
+            loadWorkers();
+        }
+    }
+
+    async function removeWorker(address) {
+        const result = await apiCall('/pool/worker', 'DELETE', { address: address });
+        if (result) {
+            showToast('Worker removed');
+            loadWorkers();
+        }
+    }
+
+    async function checkHealth() {
+        try {
+            const response = await fetch('/health');
+            const data = await response.json();
+            const indicator = document.getElementById('statusIndicator');
+            const text = document.getElementById('statusText');
+            if (data.status === 'ok') {
+                indicator.className = 'status-indicator status-online';
+                text.textContent = 'Connected';
+            } else {
+                indicator.className = 'status-indicator status-offline';
+                text.textContent = 'Disconnected';
+            }
+        } catch (error) {
+            document.getElementById('statusIndicator').className = 'status-indicator status-offline';
+            document.getElementById('statusText').textContent = 'Disconnected';
+        }
+    }
+
+    async function loadWalletAddresses() {
+        const result = await apiCall('/wallet/address');
+        if (result) {
+            // Main wallet uses vault address
+            if (result.vault_address) {
+                document.getElementById('walletAddress').value = result.vault_address;
+                loadQrCode(result.vault_address);
+            } else {
+                document.getElementById('walletAddress').value = 'Not available';
+                document.getElementById('walletQrCode').innerHTML = '<p class="text-muted mb-0">No address</p>';
+            }
+            // Identity wallet (for backup)
+            if (result.wallet_address) {
+                document.getElementById('identityAddress').value = result.wallet_address;
+            } else {
+                document.getElementById('identityAddress').value = 'Not available';
+            }
+        }
+    }
+
+    // Identity Wallet functions
+    let identityWalletVisible = false;
+    let identityPrivateKeyLoaded = false;
+    let identityPrivateKeyVisible = false;
+
+    function toggleIdentityWallet() {
+        const section = document.getElementById('identityWalletSection');
+        identityWalletVisible = !identityWalletVisible;
+        section.style.display = identityWalletVisible ? 'block' : 'none';
+    }
+
+    async function toggleIdentityPrivateKey() {
+        const input = document.getElementById('identityPrivateKey');
+        const icon = document.getElementById('identityKeyIcon');
+
+        if (!identityPrivateKeyLoaded) {
+            // Load the identity private key from API
+            const result = await apiCall('/wallet/identity-private-key');
+            if (result && result.private_key) {
+                input.value = result.private_key;
+                identityPrivateKeyLoaded = true;
+            } else {
+                input.value = 'Unable to load';
+            }
+        }
+
+        identityPrivateKeyVisible = !identityPrivateKeyVisible;
+        input.type = identityPrivateKeyVisible ? 'text' : 'password';
+        icon.textContent = identityPrivateKeyVisible ? 'visibility_off' : 'visibility';
+    }
+
+    function copyIdentityPrivateKey() {
+        const input = document.getElementById('identityPrivateKey');
+        if (input.value && input.value !== 'Click to reveal...' && input.value !== 'Unable to load') {
+            navigator.clipboard.writeText(input.value).then(() => {
+                showToast('Identity private key copied to clipboard');
+            }).catch(() => {
+                showToast('Failed to copy', true);
+            });
+        } else {
+            showToast('Please reveal the private key first', true);
+        }
+    }
+
+    function copyToClipboard(elementId) {
+        const input = document.getElementById(elementId);
+        const value = input.value;
+        if (value && value !== 'Loading...' && value !== 'Not available') {
+            navigator.clipboard.writeText(value).then(() => {
+                showToast('Address copied to clipboard');
+            }).catch(() => {
+                // Fallback for older browsers
+                input.select();
+                document.execCommand('copy');
+                showToast('Address copied to clipboard');
+            });
+        }
+    }
+
+    // Wallet Card Functions
+    let privateKeyLoaded = false;
+
+    async function loadQrCode(address) {
+        const qrContainer = document.getElementById('walletQrCode');
+        const result = await apiCall('/wallet/qr/' + encodeURIComponent(address));
+        if (result && result.qr_code) {
+            qrContainer.innerHTML = '<img src="' + result.qr_code + '" alt="QR Code" style="max-width: 150px;">';
+        } else {
+            qrContainer.innerHTML = '<p class="text-muted mb-0">QR code unavailable</p>';
+        }
+    }
+
+    async function togglePrivateKey() {
+        const showBtn = document.getElementById('showPrivateKeyBtn');
+        const section = document.getElementById('privateKeySection');
+
+        if (section.style.display === 'none') {
+            // Show private key (vault private key)
+            if (!privateKeyLoaded) {
+                const result = await apiCall('/wallet/private-key');
+                if (result && result.private_key) {
+                    document.getElementById('walletPrivateKey').textContent = result.private_key;
+                    privateKeyLoaded = true;
+                } else {
+                    document.getElementById('walletPrivateKey').textContent = 'Unable to load private key';
+                }
+            }
+            showBtn.style.display = 'none';
+            section.style.display = 'block';
+        } else {
+            // Hide private key
+            showBtn.style.display = 'block';
+            section.style.display = 'none';
+        }
+    }
+
+    function copyPrivateKey() {
+        const privateKey = document.getElementById('walletPrivateKey').textContent;
+        if (privateKey && privateKey !== 'Loading...' && privateKey !== 'Unable to load private key') {
+            navigator.clipboard.writeText(privateKey).then(() => {
+                showToast('Private key copied to clipboard');
+            }).catch(() => {
+                showToast('Failed to copy private key', true);
+            });
+        }
+    }
+
+    function toggleSweepAmount() {
+        const sweepCheckbox = document.getElementById('sendSweep');
+        const amountInput = document.getElementById('sendAmount');
+        if (sweepCheckbox.checked) {
+            amountInput.disabled = true;
+            amountInput.value = '';
+            amountInput.placeholder = 'All tokens';
+        } else {
+            amountInput.disabled = false;
+            amountInput.placeholder = '0.00';
+        }
+    }
+
+    async function sendTransaction() {
+        const address = document.getElementById('sendDestAddress').value.trim();
+        const amount = document.getElementById('sendAmount').value;
+        const sweep = document.getElementById('sendSweep').checked;
+        const sendBtn = document.getElementById('sendBtn');
+        const resultDiv = document.getElementById('sendResult');
+
+        // Validate
+        if (!address) {
+            showToast('Please enter a destination address', true);
+            return;
+        }
+        if (!isValidAddress(address)) {
+            showToast('Invalid address: must start with E and be 34 characters', true);
+            return;
+        }
+        if (!sweep && (!amount || parseFloat(amount) <= 0)) {
+            showToast('Please enter an amount or select "Send All"', true);
+            return;
+        }
+
+        // Confirm
+        const confirmMsg = sweep
+            ? 'Send ALL tokens to ' + address + '?'
+            : 'Send ' + amount + ' SATORI to ' + address + '?';
+        if (!confirm(confirmMsg)) {
+            return;
+        }
+
+        // Send
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Sending...';
+        resultDiv.style.display = 'none';
+
+        try {
+            const data = { address: address, sweep: sweep };
+            if (!sweep) {
+                data.amount = parseFloat(amount);
+            }
+
+            const result = await apiCall('/wallet/send', 'POST', data);
+
+            if (result && result.success) {
+                resultDiv.className = 'mt-3 alert alert-success';
+                resultDiv.innerHTML = '<strong>Success!</strong><br>Transaction ID: <code style="word-break: break-all;">' + result.txid + '</code>';
+                resultDiv.style.display = 'block';
+                showToast('Transaction sent successfully!');
+                // Clear form
+                document.getElementById('sendDestAddress').value = '';
+                document.getElementById('sendAmount').value = '';
+                document.getElementById('sendSweep').checked = false;
+                toggleSweepAmount();
+            } else {
+                const errorMsg = result ? (result.error || 'Transaction failed') : 'Transaction failed';
+                resultDiv.className = 'mt-3 alert alert-danger';
+                resultDiv.innerHTML = '<strong>Error:</strong> ' + errorMsg;
+                resultDiv.style.display = 'block';
+                showToast('Transaction failed: ' + errorMsg, true);
+            }
+        } catch (error) {
+            resultDiv.className = 'mt-3 alert alert-danger';
+            resultDiv.innerHTML = '<strong>Error:</strong> ' + error.message;
+            resultDiv.style.display = 'block';
+            showToast('Transaction error: ' + error.message, true);
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="material-icons align-middle me-1">send</i> Send Transaction';
+        }
+    }
+
+    // Initialize dashboard
+    document.addEventListener('DOMContentLoaded', function() {
+        // Update theme icon based on stored theme
+        const storedTheme = localStorage.getItem('satori-theme') || 'dark';
+        const themeIcon = document.getElementById('themeIcon');
+        if (themeIcon) {
+            themeIcon.textContent = storedTheme === 'dark' ? 'light_mode' : 'dark_mode';
+        }
+
+        checkHealth();
+        loadWalletAddresses();
+        refreshBalance();
+        loadRewardAddress();
+        loadStakingStatus();
+        loadWorkers();
+
+        // Periodic health check
+        setInterval(checkHealth, 30000);
+    });
+</script>
+{% endblock %}

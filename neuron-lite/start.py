@@ -599,7 +599,50 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return self.details.stakeRequired or constants.stakeRequired
 
 
+def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 5000):
+    """Start the Flask web UI in a background thread."""
+    try:
+        from web.app import create_app
+        from web.routes import set_vault
+
+        app = create_app()
+
+        # Connect vault to web routes
+        set_vault(startupDag.walletManager)
+
+        def run_flask():
+            # Use werkzeug server (not for production, but fine for local use)
+            app.run(host=host, port=port, debug=False, use_reloader=False)
+
+        web_thread = threading.Thread(target=run_flask, daemon=True)
+        web_thread.start()
+        logging.info(f"Web UI started at http://{host}:{port}", color="green")
+        return web_thread
+    except ImportError as e:
+        logging.warning(f"Web UI not available: {e}")
+        return None
+    except Exception as e:
+        logging.error(f"Failed to start Web UI: {e}")
+        return None
+
+
 if __name__ == "__main__":
     logging.info("Starting Satori Neuron", color="green")
+
+    # Start web UI early (before blocking server connection)
+    def start_web_early():
+        """Start web UI after a brief delay to let StartupDag initialize."""
+        import time
+        time.sleep(2)  # Wait for StartupDag to be created
+        try:
+            startup = getStart()
+            startWebUI(startup)
+        except Exception as e:
+            logging.warning(f"Early web UI start failed: {e}")
+
+    web_early_thread = threading.Thread(target=start_web_early, daemon=True)
+    web_early_thread.start()
+
     startup = StartupDag.create(env='prod', runMode='worker')
+
     threading.Event().wait()

@@ -17,17 +17,21 @@ RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron
 COPY lib-lite /Satori/Lib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
+COPY web /Satori/web
 
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /Satori/requirements.txt
 
-# Set Python path
-ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine"
+# Set Python path - include /Satori so 'from web.app' imports work
+ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
 
 # Working directory
-WORKDIR /Satori/Neuron
+WORKDIR /Satori
 
-# Default command - run neuron (CLI available via docker exec)
-CMD ["python", "start.py"]
+# Expose web UI port
+EXPOSE 5000
+
+# Default command - starts neuron + web UI on port 5000
+CMD ["python", "/Satori/Neuron/start.py"]

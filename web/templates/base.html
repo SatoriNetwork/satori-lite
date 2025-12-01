@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>{% block title %}Satori Lite{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        /* CSS Variables for theming */
+        :root {
+            /* Dark theme (default) */
+            --bg-primary: #0d0d0d;
+            --bg-secondary: #1a1a1a;
+            --bg-card: #141414;
+            --bg-card-header: rgba(255, 255, 255, 0.03);
+            --bg-input: #0a0a0a;
+            --bg-input-focus: #111111;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-color-focus: rgba(255, 255, 255, 0.2);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --text-muted: #666666;
+            --accent-primary: #5a5aff;
+            --accent-secondary: #4040cc;
+            --accent-gradient: linear-gradient(135deg, #5a5aff 0%, #3a3acc 100%);
+            --danger-bg: rgba(220, 53, 69, 0.15);
+            --danger-border: rgba(220, 53, 69, 0.4);
+            --success-bg: rgba(40, 167, 69, 0.15);
+            --success-border: rgba(40, 167, 69, 0.4);
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        [data-theme="light"] {
+            --bg-primary: #f5f5f7;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --bg-card-header: rgba(0, 0, 0, 0.02);
+            --bg-input: #f0f0f2;
+            --bg-input-focus: #ffffff;
+            --border-color: rgba(0, 0, 0, 0.08);
+            --border-color-focus: rgba(0, 0, 0, 0.2);
+            --text-primary: #1a1a1a;
+            --text-secondary: #555555;
+            --text-muted: #888888;
+            --accent-primary: #4a4aff;
+            --accent-secondary: #3030cc;
+            --accent-gradient: linear-gradient(135deg, #4a4aff 0%, #3030cc 100%);
+            --danger-bg: rgba(220, 53, 69, 0.1);
+            --danger-border: rgba(220, 53, 69, 0.3);
+            --success-bg: rgba(40, 167, 69, 0.1);
+            --success-border: rgba(40, 167, 69, 0.3);
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        * {
+            transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            font-weight: 400;
+            letter-spacing: -0.01em;
+        }
+
+        /* Navbar - sleek and minimal */
+        .navbar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0.75rem 1.5rem;
+        }
+        .navbar-brand {
+            font-weight: 600;
+            font-size: 1.25rem;
+            color: var(--text-primary) !important;
+            letter-spacing: -0.02em;
+        }
+
+        /* Cards - sharp edges, minimal */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+        }
+        .card-header {
+            background: var(--bg-card-header);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 1.25rem;
+            border-radius: 8px 8px 0 0;
+        }
+        .card-body {
+            padding: 1.25rem;
+        }
+
+        /* Buttons - modern and sleek */
+        .btn {
+            border-radius: 6px;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            letter-spacing: -0.01em;
+        }
+        .btn-primary {
+            background: var(--accent-gradient);
+            border: none;
+            color: #ffffff;
+        }
+        .btn-primary:hover {
+            background: var(--accent-secondary);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-sm);
+        }
+        .btn-danger {
+            background: linear-gradient(135deg, #dc3545 0%, #b02a37 100%);
+            border: none;
+            color: #ffffff;
+        }
+        .btn-danger:hover {
+            background: #b02a37;
+        }
+        .btn-outline-secondary {
+            border-color: var(--border-color);
+            color: var(--text-secondary);
+        }
+        .btn-outline-secondary:hover {
+            background: var(--bg-input);
+            border-color: var(--border-color-focus);
+            color: var(--text-primary);
+        }
+        .btn-outline-light {
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+        .btn-outline-light:hover {
+            background: var(--bg-input);
+            border-color: var(--border-color-focus);
+        }
+
+        /* Form controls - clean and modern */
+        .form-control {
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 6px;
+            padding: 0.625rem 0.875rem;
+            font-size: 0.9375rem;
+        }
+        .form-control:focus {
+            background: var(--bg-input-focus);
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+            box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.15);
+        }
+        .form-control::placeholder {
+            color: var(--text-muted);
+        }
+        .form-control:disabled {
+            background: var(--bg-input);
+            opacity: 0.6;
+        }
+
+        .form-label, label {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.8125rem;
+            margin-bottom: 0.375rem;
+        }
+
+        .form-check-input {
+            background-color: var(--bg-input);
+            border-color: var(--border-color);
+        }
+        .form-check-input:checked {
+            background-color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+        .form-check-label {
+            color: var(--text-secondary);
+        }
+
+        /* Input groups */
+        .input-group .btn {
+            border-color: var(--border-color);
+        }
+
+        /* Status indicators */
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-online { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.5); }
+        .status-offline { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+
+        /* Alerts */
+        .alert-error, .alert-danger {
+            background: var(--danger-bg);
+            border: 1px solid var(--danger-border);
+            color: #f87171;
+            border-radius: 6px;
+        }
+        .alert-success {
+            background: var(--success-bg);
+            border: 1px solid var(--success-border);
+            color: #4ade80;
+            border-radius: 6px;
+        }
+        .alert-secondary {
+            background: rgba(128, 128, 128, 0.1);
+            border: 1px solid rgba(128, 128, 128, 0.2);
+            color: var(--text-secondary);
+            border-radius: 6px;
+        }
+        .alert-warning {
+            background: rgba(250, 204, 21, 0.1);
+            border: 1px solid rgba(250, 204, 21, 0.3);
+            color: #fbbf24;
+            border-radius: 6px;
+        }
+
+        /* Typography */
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--text-primary);
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+        .text-muted {
+            color: var(--text-muted) !important;
+        }
+        .text-secondary {
+            color: var(--text-secondary) !important;
+        }
+        .card, .card-body, .card-header {
+            color: var(--text-primary);
+        }
+
+        /* Toast */
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+        .toast-header {
+            background: var(--bg-card-header);
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+        .toast-body {
+            color: var(--text-primary);
+        }
+
+        /* Theme toggle button */
+        .theme-toggle {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.375rem 0.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .theme-toggle:hover {
+            background: var(--bg-input);
+            color: var(--text-primary);
+        }
+        .theme-toggle .material-icons {
+            font-size: 20px;
+        }
+
+        /* Form switch */
+        .form-switch .form-check-input {
+            width: 2.5em;
+            height: 1.25em;
+        }
+
+        /* Smooth scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* Links */
+        a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+        a:hover {
+            color: var(--accent-secondary);
+        }
+
+        /* Small text */
+        .small, small {
+            font-size: 0.8125rem;
+        }
+
+        /* Code */
+        code {
+            background: var(--bg-input);
+            padding: 0.125rem 0.375rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            color: var(--accent-primary);
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    {% block content %}{% endblock %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Theme management
+        function getStoredTheme() {
+            return localStorage.getItem('satori-theme') || 'dark';
+        }
+        function setStoredTheme(theme) {
+            localStorage.setItem('satori-theme', theme);
+        }
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            setStoredTheme(theme);
+            // Update toggle icon
+            const icon = document.getElementById('themeIcon');
+            if (icon) {
+                icon.textContent = theme === 'dark' ? 'light_mode' : 'dark_mode';
+            }
+        }
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            setTheme(newTheme);
+        }
+        // Apply stored theme on load
+        document.documentElement.setAttribute('data-theme', getStoredTheme());
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
