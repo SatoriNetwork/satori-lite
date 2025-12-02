@@ -418,7 +418,8 @@
     }
 
     async function togglePool() {
-        const result = await apiCall('/pool/toggle-open', 'POST');
+        const checkbox = document.getElementById('poolToggle');
+        const result = await apiCall('/pool/toggle-open', 'POST', { open: checkbox.checked });
         if (result) {
             showToast('Pool status toggled');
         }
