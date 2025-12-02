@@ -249,9 +249,10 @@ def register_routes(app):
 
             signature = wallet.sign(message=challenge)
 
-            # Convert binary signature to base64 string for HTTP header
+            # Signature from wallet.sign() is already base64-encoded as bytes
+            # Just decode to string - do NOT base64 encode again
             if isinstance(signature, bytes):
-                signature = base64.b64encode(signature).decode('utf-8')
+                signature = signature.decode('utf-8')
 
             # Step 3: Return auth headers
             return {
