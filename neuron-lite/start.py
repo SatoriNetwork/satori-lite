@@ -363,11 +363,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                             'vaultpubkey': vault.pubkey,
                         } if isinstance(vault, EvrmoreWallet) else None))
 
-                if self.details.get('sponsor') != self.invitedBy:
-                    if self.invitedBy is None:
-                        self.setInvitedBy(self.details.get('sponsor'))
-                    if isinstance(self.invitedBy, str) and len(self.invitedBy) == 34 and self.invitedBy.startswith('E'):
-                        self.server.invitedBy(self.invitedBy)
+                # Removed invitedBy call - central-lite doesn't use referrer system
 
                 if config.get().get('prediction stream', 'notExisting') == 'notExisting':
                     config.add(data={'prediction stream': None})

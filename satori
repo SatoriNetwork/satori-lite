@@ -63,6 +63,7 @@ case "$1" in
                 echo "Container not found. Creating..."
                 docker run -d --name $CONTAINER_NAME \
                     --restart unless-stopped \
+                    -p 5001:5000 \
                     -v satori-data:/Satori/Neuron/data \
                     -e SATORI_CENTRAL_URL=$CENTRAL_URL \
                     $IMAGE || {
@@ -72,7 +73,7 @@ case "$1" in
             fi
             sleep 2
         fi
-        docker exec -it $CONTAINER_NAME python cli.py
+        docker exec -it $CONTAINER_NAME python /Satori/Neuron/cli.py
         ;;
     *)
         echo "Unknown command: $1"

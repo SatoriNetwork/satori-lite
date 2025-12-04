@@ -223,7 +223,7 @@ class SatoriServerClient(object):
             payload=payload or json.dumps(stream or {}))
 
     def checkin(self, referrer: str = None, ip: str = None, vaultInfo: dict = None) -> dict:
-        """Check in with central server. For central-lite, returns minimal data."""
+        """Check in with central server. For central-lite, uses auth challenge system."""
         challenge = self._getChallenge()
 
         # Try central-lite health check to verify connection
@@ -231,8 +231,24 @@ class SatoriServerClient(object):
             health_response = requests.get(self.url + '/health')
             if health_response.status_code == 200:
                 logging.info('connected to central-lite', color='green')
+
+                # For central-lite: Peer registration happens automatically during authentication
+                # via the authenticate() dependency. No separate checkin endpoint needed.
+                # Just verify we can authenticate by making a simple authenticated call
+                try:
+                    # Test authentication with balance endpoint
+                    balance_response = self._makeAuthenticatedCall(
+                        function=requests.get,
+                        endpoint='/api/v1/balance/get',
+                        challenge=challenge,
+                        raiseForStatus=False)
+
+                    if balance_response.status_code == 200:
+                        logging.info('authenticated with central-lite', color='green')
+                except Exception as e:
+                    logging.warning(f'central-lite auth test failed: {e}', color='yellow')
+
                 # Return minimal checkin data for central-lite
-                # Worker mode doesn't need subscriptions/publications
                 self.lastCheckin = time.time()
                 return {
                     'wallet': {
