@@ -194,20 +194,32 @@
         <!-- Pool Staking Section -->
         <div class="col-12 col-lg-6">
             <div class="card h-100">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">handshake</i>
                         Pool Staking
                     </h5>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadAvailablePools()">
+                        <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                    </button>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label">Status</label>
                         <div id="stakingStatus" class="alert alert-secondary">Not staking with a pool</div>
                     </div>
+
+                    <!-- Available Pools List -->
+                    <div class="mb-3">
+                        <label class="form-label">Available Open Pools</label>
+                        <div id="availablePoolsList" class="list-group mb-2" style="max-height: 200px; overflow-y: auto;">
+                            <div class="text-muted small p-2">Loading pools...</div>
+                        </div>
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label">Pool Address</label>
-                        <input type="text" class="form-control" id="poolAddress" placeholder="Enter pool address">
+                        <input type="text" class="form-control" id="poolAddress" placeholder="Enter pool address or select from list above">
                     </div>
                     <div class="d-flex gap-2">
                         <button class="btn btn-primary" id="addStakeBtn" onclick="addStakeToPool()">Add Stake to Pool</button>
@@ -220,17 +232,26 @@
         <!-- Pool Management Section -->
         <div class="col-12 col-lg-6">
             <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="card-header">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">groups</i>
                         Pool Management
                     </h5>
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="poolToggle" onchange="togglePool()">
-                        <label class="form-check-label" for="poolToggle">Pool Open</label>
-                    </div>
                 </div>
                 <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Pool Commission (%)</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="poolCommission"
+                                   placeholder="0 = closed, 1-100 = open"
+                                   min="0" max="100" step="1"
+                                   onchange="setPoolCommission()">
+                            <span class="input-group-text">%</span>
+                        </div>
+                        <small class="form-text text-muted">
+                            Empty or 0 = pool closed. Any value 1-100 = pool open with that commission %.
+                        </small>
+                    </div>
                     <div class="mb-3">
                         <label class="form-label">Workers</label>
                         <div id="workerList" class="mb-3">
@@ -309,7 +330,7 @@
         const removeStakeBtn = document.getElementById('removeStakeBtn');
 
         // Pool Management elements
-        const poolToggle = document.getElementById('poolToggle');
+        const poolCommission = document.getElementById('poolCommission');
         const newWorkerInput = document.getElementById('newWorkerAddress');
         const addWorkerBtn = document.getElementById('addWorkerBtn');
 
@@ -328,15 +349,15 @@
 
         // If staking to pool, disable Pool Management
         if (isStakingToPool) {
-            poolToggle.disabled = true;
-            poolToggle.title = poolManagementReason;
+            poolCommission.disabled = true;
+            poolCommission.title = poolManagementReason;
             newWorkerInput.disabled = true;
             newWorkerInput.title = poolManagementReason;
             addWorkerBtn.disabled = true;
             addWorkerBtn.title = poolManagementReason;
         } else {
-            poolToggle.disabled = false;
-            poolToggle.title = '';
+            poolCommission.disabled = false;
+            poolCommission.title = '';
             newWorkerInput.disabled = false;
             newWorkerInput.title = '';
             addWorkerBtn.disabled = false;
@@ -344,11 +365,22 @@
         }
     }
 
-    async function refreshBalance() {
+    async function loadBalance() {
+        // Load balance and stake from Satori API server (may be stale)
         const result = await apiCall('/balance/get');
         if (result) {
             document.getElementById('tokenBalance').textContent = result.balance !== undefined ? result.balance : '--';
             document.getElementById('stakeBalance').textContent = result.stake !== undefined ? result.stake : '--';
+        }
+    }
+
+    async function refreshBalance() {
+        // Get real-time balance from electrumx blockchain (wallet + vault)
+        // Only updates token balance, NOT stake (stake is only known by Satori API)
+        const result = await apiCall('/wallet/balance/direct');
+        if (result) {
+            document.getElementById('tokenBalance').textContent = result.total !== undefined ? result.total.toFixed(8) : '--';
+            // Stake value is NOT updated - it's only available from Satori API
         }
     }
 
@@ -417,11 +449,70 @@
         }
     }
 
-    async function togglePool() {
-        const checkbox = document.getElementById('poolToggle');
-        const result = await apiCall('/pool/toggle-open', 'POST', { open: checkbox.checked });
+    async function loadAvailablePools() {
+        const listEl = document.getElementById('availablePoolsList');
+        listEl.innerHTML = '<div class="text-muted small p-2">Loading pools...</div>';
+
+        const result = await apiCall('/pool/open', 'GET');
+        if (result && result.pools && result.pools.length > 0) {
+            listEl.innerHTML = '';
+            result.pools.forEach(pool => {
+                const item = document.createElement('a');
+                item.href = '#';
+                item.className = 'list-group-item list-group-item-action';
+                item.onclick = (e) => {
+                    e.preventDefault();
+                    document.getElementById('poolAddress').value = pool.address;
+                };
+                item.innerHTML = `
+                    <div class="d-flex w-100 justify-content-between align-items-center">
+                        <div>
+                            <small class="text-muted">Address:</small><br>
+                            <code class="small">${pool.address}</code>
+                        </div>
+                        <div class="text-end">
+                            ${pool.alias ? `<span class="badge bg-primary">${pool.alias}</span><br>` : ''}
+                            <small class="text-success fw-bold">${pool.commission}% commission</small>
+                        </div>
+                    </div>
+                `;
+                listEl.appendChild(item);
+            });
+        } else {
+            listEl.innerHTML = '<div class="text-muted small p-2">No open pools available</div>';
+        }
+    }
+
+    async function setPoolCommission() {
+        const commissionInput = document.getElementById('poolCommission');
+        let commission = commissionInput.value ? parseInt(commissionInput.value) : null;
+
+        // Validate
+        if (commission !== null && (commission < 0 || commission > 100)) {
+            showToast('Commission must be between 0 and 100', true);
+            return;
+        }
+
+        // Convert 0 to null (closed)
+        if (commission === 0) {
+            commission = null;
+        }
+
+        const result = await apiCall('/pool/toggle-open', 'POST', { commission: commission });
         if (result) {
-            showToast('Pool status toggled');
+            const msg = commission === null ? 'Pool closed' : `Pool open with ${commission}% commission`;
+            showToast(msg);
+            await loadPoolCommission();
+            updateMutualExclusionUI();
+        }
+    }
+
+    async function loadPoolCommission() {
+        const result = await apiCall('/pool/commission', 'GET');
+        if (result) {
+            const commissionInput = document.getElementById('poolCommission');
+            commissionInput.value = result.commission || '';
+            hasWorkers = result.commission !== null && result.commission > 0;
         }
     }
 
@@ -706,10 +797,12 @@
 
         checkHealth();
         loadWalletAddresses();
-        refreshBalance();
+        loadBalance();
         loadRewardAddress();
         loadStakingStatus();
         loadWorkers();
+        loadAvailablePools();
+        loadPoolCommission();
 
         // Periodic health check
         setInterval(checkHealth, 30000);

@@ -399,6 +399,18 @@ def register_routes(app):
         """Proxy pool toggle request."""
         return proxy_api('/pool/toggle-open', 'POST', request.json)
 
+    @app.route('/api/pool/open', methods=['GET'])
+    @login_required
+    def api_pool_open():
+        """Get list of open pools."""
+        return proxy_api('/pool/open', 'GET')
+
+    @app.route('/api/pool/commission', methods=['GET'])
+    @login_required
+    def api_pool_commission():
+        """Get pool commission status."""
+        return proxy_api('/pool/commission', 'GET')
+
     @app.route('/api/wallet/address')
     @login_required
     def api_wallet_address():
@@ -511,4 +523,54 @@ def register_routes(app):
         except ImportError:
             return jsonify({'error': 'QR code library not available'}), 500
         except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/balance/direct')
+    @login_required
+    def api_wallet_balance_direct():
+        """Get combined wallet and vault balance directly from electrumx.
+
+        This bypasses the Satori API server and queries the blockchain directly
+        via the electromax server using the wallet objects.
+        """
+        wallet_manager = get_vault()
+        if not wallet_manager:
+            return jsonify({'error': 'Wallet manager not initialized'}), 500
+
+        try:
+            # Ensure electrumx connection
+            if hasattr(wallet_manager, 'connect'):
+                connected = wallet_manager.connect()
+                if not connected:
+                    return jsonify({'error': 'Could not connect to electrumx'}), 500
+
+            total_satori = 0.0
+            wallet_balance = 0.0
+            vault_balance = 0.0
+
+            # Get wallet (identity) balance
+            if wallet_manager.wallet:
+                wallet = wallet_manager.wallet
+                if hasattr(wallet, 'getBalances'):
+                    wallet.getBalances()
+                    if hasattr(wallet, 'balance') and wallet.balance:
+                        wallet_balance = wallet.balance.amount if hasattr(wallet.balance, 'amount') else 0.0
+
+            # Get vault balance
+            if wallet_manager.vault:
+                vault = wallet_manager.vault
+                if hasattr(vault, 'getBalances'):
+                    vault.getBalances()
+                    if hasattr(vault, 'balance') and vault.balance:
+                        vault_balance = vault.balance.amount if hasattr(vault.balance, 'amount') else 0.0
+
+            total_satori = wallet_balance + vault_balance
+
+            return jsonify({
+                'total': total_satori,
+                'wallet_balance': wallet_balance,
+                'vault_balance': vault_balance
+            })
+        except Exception as e:
+            logger.warning(f"Failed to get direct balance: {e}")
             return jsonify({'error': str(e)}), 500
