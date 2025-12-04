@@ -234,19 +234,6 @@ class SatoriServerClient(object):
 
                 # For central-lite: Peer registration happens automatically during authentication
                 # via the authenticate() dependency. No separate checkin endpoint needed.
-                # Just verify we can authenticate by making a simple authenticated call
-                try:
-                    # Test authentication with balance endpoint
-                    balance_response = self._makeAuthenticatedCall(
-                        function=requests.get,
-                        endpoint='/api/v1/balance/get',
-                        challenge=challenge,
-                        raiseForStatus=False)
-
-                    if balance_response.status_code == 200:
-                        logging.info('authenticated with central-lite', color='green')
-                except Exception as e:
-                    logging.warning(f'central-lite auth test failed: {e}', color='yellow')
 
                 # Return minimal checkin data for central-lite
                 self.lastCheckin = time.time()

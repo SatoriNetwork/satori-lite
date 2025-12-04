@@ -84,21 +84,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.pauseThread: Union[threading.Thread, None] = None
         self.details: CheckinDetails = CheckinDetails(raw={})
         self.balances: dict = {}
-        self.key: str
-        self.oracleKey: str
-        self.idKey: str
-        self.subscriptionKeys: str
-        self.publicationKeys: str
+        # Central-lite only needs basic fields - no subscriptions/publications/keys
         self.aiengine: Union[Engine, None] = None
-        self.publications: list[Stream] = []
-        self.subscriptions: list[Stream] = []
+        self.publications: list[Stream] = []  # Keep for engine
+        self.subscriptions: list[Stream] = []  # Keep for engine
         self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
-        self.stakeStatus: bool = False
-        self.miningMode: bool = False
-        self.lastBlockTime = time.time()
-        self.poolIsAccepting: bool = False
-        self.invitedBy: str = None
-        self.setInvitedBy()
         self.latestObservationTime: float = 0
         self.configRewardAddress: str = None
         self.setRewardAddress()
@@ -297,14 +287,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.recordServerConnection()
         if self.walletOnlyMode:
             self.createServerConn()
-            self.checkin()
-            self.getBalances()
+            self.authWithCentral()
             logging.info("in WALLETONLYMODE")
             return
         self.setMiningMode()
         self.createServerConn()
-        self.checkin()
-        self.getBalances()
+        self.authWithCentral()
         self.spawnEngine()
 
     def startWalletOnly(self):
@@ -318,8 +306,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         logging.info("running in worker mode", color="blue")
         self.setMiningMode()
         self.createServerConn()
-        self.checkin()
-        self.getBalances()
+        self.authWithCentral()
         threading.Event().wait()
 
     def serverConnectedRecently(self, threshold_minutes: int = 10) -> bool:
@@ -340,14 +327,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.wallet, url=self.urlServer, sendingUrl=self.urlMundo
         )
 
-    def checkin(self):
-        try:
-            referrer = (
-                open(config.root("config", "referral.txt"), mode="r")
-                .read()
-                .strip())
-        except Exception as _:
-            referrer = None
+    def authWithCentral(self):
+        """Authenticate with central-lite server.
+
+        Central-lite uses challenge-response auth and auto-creates peers.
+        No subscriptions/publications - just authentication and balance tracking.
+        """
         x = 30
         attempt = 0
         while True:
@@ -356,71 +341,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 vault = self.getVault()
                 self.details = CheckinDetails(
                     self.server.checkin(
-                        referrer=referrer,
                         ip=self.ip,
                         vaultInfo={
                             'vaultaddress': vault.address,
                             'vaultpubkey': vault.pubkey,
                         } if isinstance(vault, EvrmoreWallet) else None))
 
-                # Removed invitedBy call - central-lite doesn't use referrer system
-
-                if config.get().get('prediction stream', 'notExisting') == 'notExisting':
-                    config.add(data={'prediction stream': None})
-
+                # For central-lite: no subscriptions/publications/keys needed
+                # Just store minimal response data
                 if self.details.get('rewardaddress') != self.configRewardAddress:
                     if self.configRewardAddress is None:
                         self.setRewardAddress(address=self.details.get('rewardaddress'))
                     else:
                         self.setRewardAddress(globally=True)
 
-                self.key = self.details.key
-                self.poolIsAccepting = bool(
-                    self.details.wallet.get("accepting", False))
-                self.oracleKey = self.details.oracleKey
-                self.idKey = self.details.idKey
-                self.subscriptionKeys = self.details.subscriptionKeys
-                self.publicationKeys = self.details.publicationKeys
-                self.subscriptions = [
-                    Stream.fromMap(x)
-                    for x in json.loads(self.details.subscriptions)]
-                if (
-                    attempt < 5 and (
-                        self.details is None or len(self.subscriptions) == 0)
-                ):
-                    time.sleep(30)
-                    continue
-                logging.debug("subscriptions:", len(
-                    self.subscriptions), print=True)
-                self.publications = [
-                    Stream.fromMap(x)
-                    for x in json.loads(self.details.publications)]
-                logging.debug(
-                    "publications:",
-                    len(self.publications),
-                    print=True)
-                logging.info("checked in with Satori", color="green")
+                logging.info("authenticated with central-lite", color="green")
                 break
             except Exception as e:
                 logging.warning(f"connecting to central err: {e}")
             x = x * 1.5 if x < 60 * 60 * 6 else 60 * 60 * 6
             logging.warning(f"trying again in {x}")
             time.sleep(x)
-
-    def getBalances(self):
-        '''
-        we get this from the server, not electrumx
-        example:
-        {
-            'currency': 100,
-            'chain_balance': 0,
-            'liquidity_balance': None,
-        }
-        '''
-        success, self.balances = self.server.getBalances()
-        if not success:
-            logging.warning("Failed to get balances from server")
-        return self.getBalance()
 
     def getBalance(self, currency: str = 'currency') -> float:
         return self.balances.get(currency, 0)
@@ -577,12 +518,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         config.add(data={'engine version': self.engineVersion})
         return self.engineVersion
 
-    def setInvitedBy(self, address: Union[str, None] = None) -> str:
-        address = address or config.get().get('invited by', address)
-        if address:
-            self.invitedBy = address
-            config.add(data={'invited by': self.invitedBy})
-        return self.invitedBy
+    # Removed setInvitedBy - central-lite doesn't use referrer system
 
     def poolAccepting(self, status: bool):
         success, result = self.server.poolAccepting(status)
