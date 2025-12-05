@@ -151,15 +151,16 @@ class EngineSqliteDatabase:
 
                 prov = str(row['provider']) if 'provider' in df.columns else provider
 
-                # Check for duplicates
-                self.cursor.execute(
-                    f'SELECT 1 FROM "{table_uuid}" WHERE ts = ?', (ts,))
-                if not self.cursor.fetchone():
+                # Try to insert - PRIMARY KEY constraint prevents duplicates
+                try:
                     self.cursor.execute(
                         f'''INSERT INTO "{table_uuid}" (ts, value, hash, provider)
                         VALUES (?, ?, ?, ?)''',
                         (ts, value, hash_val, prov))
                     inserted += 1
+                except sqlite3.IntegrityError:
+                    # Duplicate timestamp - skip silently
+                    pass
 
             self.conn.commit()
             if inserted > 0:
