@@ -343,6 +343,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
+        self.setupDefaultStream()
         self.spawnEngine()
 
     def startWalletOnly(self):
@@ -464,6 +465,36 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if stream.predicting == streamId:
                 return stream.streamId
         return None
+
+    def setupDefaultStream(self):
+        """Setup hard-coded default stream for central-lite.
+
+        Central-lite has a single observation stream, so we create one
+        subscription/publication pair for the engine to work with.
+        """
+        # Create subscription stream (input observations)
+        sub_id = StreamId(
+            source="central-lite",
+            author="satori",
+            stream="observations",
+            target=""
+        )
+        subscription = Stream(streamId=sub_id)
+
+        # Create publication stream (output predictions)
+        pub_id = StreamId(
+            source="central-lite",
+            author="satori",
+            stream="predictions",
+            target=""
+        )
+        publication = Stream(streamId=pub_id, predicting=sub_id)
+
+        # Assign to neuron
+        self.subscriptions = [subscription]
+        self.publications = [publication]
+
+        logging.info(f"Default stream configured: {sub_id.uuid}", color="green")
 
     def spawnEngine(self):
         """Spawn the AI Engine with stream assignments from Neuron"""
