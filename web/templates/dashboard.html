@@ -219,11 +219,17 @@
 
                     <div class="mb-3">
                         <label class="form-label">Pool Address</label>
-                        <input type="text" class="form-control" id="poolAddress" placeholder="Enter pool address or select from list above">
+                        <span class="d-inline-block w-100" id="poolAddressWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                            <input type="text" class="form-control" id="poolAddress" placeholder="Enter pool address or select from list above">
+                        </span>
                     </div>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-primary" id="addStakeBtn" onclick="addStakeToPool()">Add Stake to Pool</button>
-                        <button class="btn btn-danger" id="removeStakeBtn" onclick="removeStakeFromPool()">Remove Stake from Pool</button>
+                        <span class="d-inline-block" id="addStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                            <button class="btn btn-primary" id="addStakeBtn" onclick="addStakeToPool()">Add Stake to Pool</button>
+                        </span>
+                        <span class="d-inline-block" id="removeStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                            <button class="btn btn-danger" id="removeStakeBtn" onclick="removeStakeFromPool()">Remove Stake from Pool</button>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -241,13 +247,15 @@
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label">Lender Commission (%)</label>
-                        <div class="input-group">
-                            <input type="number" class="form-control" id="poolCommission"
-                                   placeholder="0 = closed, 1-100 = open"
-                                   min="0" max="100" step="1"
-                                   onchange="setPoolCommission()">
-                            <span class="input-group-text">%</span>
-                        </div>
+                        <span class="d-inline-block w-100" id="poolCommissionWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="poolCommission"
+                                       placeholder="0 = closed, 1-100 = open"
+                                       min="0" max="100" step="1"
+                                       onchange="setPoolCommission()">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </span>
                         <small class="form-text text-muted">
                             Commission you pay to lenders. Empty or 0 = pool closed. 1-100 = pool open with that commission %.
                         </small>
@@ -260,10 +268,12 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Add Worker</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="newWorkerAddress" placeholder="Worker address">
-                            <button class="btn btn-primary" id="addWorkerBtn" onclick="addWorker()">Add</button>
-                        </div>
+                        <span class="d-inline-block w-100" id="addWorkerWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="newWorkerAddress" placeholder="Worker address">
+                                <button class="btn btn-primary" id="addWorkerBtn" onclick="addWorker()">Add</button>
+                            </div>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -326,52 +336,55 @@
 
         // Pool Staking elements
         const poolAddressInput = document.getElementById('poolAddress');
+        const poolAddressWrapper = document.getElementById('poolAddressWrapper');
         const addStakeBtn = document.getElementById('addStakeBtn');
+        const addStakeBtnWrapper = document.getElementById('addStakeBtnWrapper');
         const removeStakeBtn = document.getElementById('removeStakeBtn');
+        const removeStakeBtnWrapper = document.getElementById('removeStakeBtnWrapper');
 
         // Pool Management elements
         const poolCommission = document.getElementById('poolCommission');
+        const poolCommissionWrapper = document.getElementById('poolCommissionWrapper');
         const newWorkerInput = document.getElementById('newWorkerAddress');
         const addWorkerBtn = document.getElementById('addWorkerBtn');
+        const addWorkerWrapper = document.getElementById('addWorkerWrapper');
 
         // If you're an open pool (have commission set), disable Pool Staking
         if (isOpenPool) {
             poolAddressInput.disabled = true;
-            poolAddressInput.title = poolStakingReason;
+            poolAddressWrapper.setAttribute('title', poolStakingReason);
             addStakeBtn.disabled = true;
-            addStakeBtn.title = poolStakingReason;
+            addStakeBtnWrapper.setAttribute('title', poolStakingReason);
             removeStakeBtn.disabled = true;
-            removeStakeBtn.title = poolStakingReason;
+            removeStakeBtnWrapper.setAttribute('title', poolStakingReason);
         } else {
             poolAddressInput.disabled = false;
-            poolAddressInput.title = '';
+            poolAddressWrapper.setAttribute('title', '');
             addStakeBtn.disabled = false;
-            addStakeBtn.title = '';
+            addStakeBtnWrapper.setAttribute('title', '');
             // Remove button only enabled if actually staking to a pool
             if (isStakingToPool) {
                 removeStakeBtn.disabled = false;
-                removeStakeBtn.title = '';
+                removeStakeBtnWrapper.setAttribute('title', '');
             } else {
                 removeStakeBtn.disabled = true;
-                removeStakeBtn.title = 'You are not currently staking to a pool';
+                removeStakeBtnWrapper.setAttribute('title', 'You are not currently staking to a pool');
             }
         }
 
         // If staking to pool, disable Pool Management
         if (isStakingToPool) {
             poolCommission.disabled = true;
-            poolCommission.title = poolManagementReason;
+            poolCommissionWrapper.setAttribute('title', poolManagementReason);
             newWorkerInput.disabled = true;
-            newWorkerInput.title = poolManagementReason;
             addWorkerBtn.disabled = true;
-            addWorkerBtn.title = poolManagementReason;
+            addWorkerWrapper.setAttribute('title', poolManagementReason);
         } else {
             poolCommission.disabled = false;
-            poolCommission.title = '';
+            poolCommissionWrapper.setAttribute('title', '');
             newWorkerInput.disabled = false;
-            newWorkerInput.title = '';
             addWorkerBtn.disabled = false;
-            addWorkerBtn.title = '';
+            addWorkerWrapper.setAttribute('title', '');
         }
     }
 
@@ -805,6 +818,12 @@
         if (themeIcon) {
             themeIcon.textContent = storedTheme === 'dark' ? 'light_mode' : 'dark_mode';
         }
+
+        // Initialize Bootstrap tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
 
         checkHealth();
         loadWalletAddresses();
