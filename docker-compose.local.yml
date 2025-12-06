@@ -7,12 +7,12 @@ services:
   # Satori-Lite Web UI + Neuron
   satori-lite:
     build:
-      context: .
+      context: ./satori-lite
       dockerfile: Dockerfile
     container_name: satori-lite
     environment:
-      # Connect to the API server
-      SATORI_API_URL: http://satori-api:8000
+      # Connect to the API server (use container name for local, remote URL for production)
+      SATORI_CENTRAL_URL: http://satori-api:8000
       # Wallet/vault paths inside container
       WALLET_PATH: /data/wallet.yaml
       VAULT_PATH: /data/vault.yaml

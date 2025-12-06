@@ -322,6 +322,44 @@
             font-size: 0.875rem;
             color: var(--accent-primary);
         }
+
+        /* List groups - for pool lists */
+        .list-group {
+            background: transparent;
+        }
+        .list-group-item {
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+            border-radius: 6px;
+        }
+        .list-group-item:first-child {
+            border-radius: 6px;
+        }
+        .list-group-item:last-child {
+            border-radius: 6px;
+        }
+        .list-group-item-action {
+            color: var(--text-primary);
+        }
+        .list-group-item-action:hover {
+            background: var(--bg-input-focus);
+            border-color: var(--border-color-focus);
+            color: var(--text-primary);
+        }
+        .list-group-item-action:focus {
+            background: var(--bg-input-focus);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.15);
+        }
+        .list-group-item .badge {
+            background: var(--accent-primary);
+            color: #ffffff;
+        }
+        .list-group-item .text-success {
+            color: #4ade80 !important;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
