@@ -262,7 +262,8 @@
                                 <input type="number" class="form-control" id="poolCommission"
                                        placeholder="0 = closed, 1-100 = open"
                                        min="0" max="100" step="1"
-                                       onchange="setPoolCommission()">
+                                       onchange="setPoolCommission()"
+                                       onkeypress="if(event.key === 'Enter') { setPoolCommission(); event.preventDefault(); }">
                                 <span class="input-group-text">%</span>
                             </div>
                         </span>
@@ -482,14 +483,18 @@
     async function loadStakingStatus() {
         const result = await apiCall('/lender/status');
         const statusEl = document.getElementById('stakingStatus');
-        if (result && result.lending) {
+        if (result && result.pool_address) {
             isStakingToPool = true;
             statusEl.className = 'alert alert-success';
-            statusEl.textContent = 'Staking with pool: ' + (result.employer || 'Unknown');
+            statusEl.textContent = 'Staking with pool: ' + result.pool_address;
+            // Update the pool address input field
+            document.getElementById('poolAddress').value = result.pool_address;
         } else {
             isStakingToPool = false;
             statusEl.className = 'alert alert-secondary';
             statusEl.textContent = 'Not staking with a pool';
+            // Clear the pool address input field
+            document.getElementById('poolAddress').value = '';
         }
         updateMutualExclusionUI();
     }
@@ -504,7 +509,7 @@
             showToast('Invalid address: must start with E and be 34 characters', true);
             return;
         }
-        const result = await apiCall('/lender/lend', 'POST', { employer: pool });
+        const result = await apiCall('/lender/lend', 'POST', { pool_address: pool });
         if (result) {
             showToast('Stake added to pool');
             loadStakingStatus();
