@@ -87,10 +87,12 @@ def get_or_create_session_vault():
                 from satorineuron import config
 
                 # Create NEW WalletManager instance for this session
+                # Don't auto-decrypt vault - user must provide password via login
                 logger.info(f"Creating new WalletManager for session: {session_id}")
                 _session_vaults[session_id] = WalletManager.create(
                     walletPath=config.walletPath('wallet.yaml'),
-                    vaultPath=config.walletPath('vault.yaml')
+                    vaultPath=config.walletPath('vault.yaml'),
+                    useConfigPassword=False  # Don't auto-decrypt with config password
                     # cachePath is optional and defaults to None
                 )
             except Exception as e:
@@ -650,38 +652,60 @@ def register_routes(app):
 
         try:
             # Ensure electrumx connection
+            logger.info("Attempting to connect to ElectrumX...")
             if hasattr(wallet_manager, 'connect'):
                 connected = wallet_manager.connect()
+                logger.info(f"ElectrumX connection result: {connected}")
                 if not connected:
+                    logger.warning("Failed to connect to ElectrumX")
                     return jsonify({'error': 'Could not connect to electrumx'}), 500
+            else:
+                logger.warning("WalletManager has no connect method")
 
             total_satori = 0.0
             wallet_balance = 0.0
             vault_balance = 0.0
+            total_evr = 0.0
+            wallet_evr = 0.0
+            vault_evr = 0.0
 
             # Get wallet (identity) balance
             if wallet_manager.wallet:
                 wallet = wallet_manager.wallet
                 if hasattr(wallet, 'getBalances'):
+                    logger.info("Getting wallet balances...")
                     wallet.getBalances()
                     if hasattr(wallet, 'balance') and wallet.balance:
                         wallet_balance = wallet.balance.amount if hasattr(wallet.balance, 'amount') else 0.0
+                    if hasattr(wallet, 'currency') and wallet.currency:
+                        wallet_evr = wallet.currency.amount if hasattr(wallet.currency, 'amount') else 0.0
+                    logger.info(f"Wallet balance: SATORI={wallet_balance}, EVR={wallet_evr}")
 
             # Get vault balance
             if wallet_manager.vault:
                 vault = wallet_manager.vault
                 if hasattr(vault, 'getBalances'):
+                    logger.info("Getting vault balances...")
                     vault.getBalances()
                     if hasattr(vault, 'balance') and vault.balance:
                         vault_balance = vault.balance.amount if hasattr(vault.balance, 'amount') else 0.0
+                    if hasattr(vault, 'currency') and vault.currency:
+                        vault_evr = vault.currency.amount if hasattr(vault.currency, 'amount') else 0.0
+                    logger.info(f"Vault balance: SATORI={vault_balance}, EVR={vault_evr}")
 
             total_satori = wallet_balance + vault_balance
+            total_evr = wallet_evr + vault_evr
 
             return jsonify({
                 'total': total_satori,
                 'wallet_balance': wallet_balance,
-                'vault_balance': vault_balance
+                'vault_balance': vault_balance,
+                'total_evr': total_evr,
+                'wallet_evr': wallet_evr,
+                'vault_evr': vault_evr
             })
         except Exception as e:
-            logger.warning(f"Failed to get direct balance: {e}")
+            import traceback
+            logger.error(f"Failed to get direct balance: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return jsonify({'error': str(e)}), 500

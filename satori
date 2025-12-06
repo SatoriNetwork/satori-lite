@@ -6,7 +6,7 @@ IMAGE="satorinet/satori-lite:${IMAGE_TAG}"
 
 # Set central URL based on image tag
 if [ "$IMAGE_TAG" = "dev" ]; then
-    CENTRAL_URL="http://host.docker.internal:8000"
+    CENTRAL_URL="http://satori-api:8000"
 else
     CENTRAL_URL="https://network.satorinet.io"
 fi
@@ -65,6 +65,7 @@ case "$1" in
                 if [ "$IMAGE_TAG" = "dev" ]; then
                     docker run -d --name $CONTAINER_NAME \
                         --restart unless-stopped \
+                        --network central-lite_default \
                         -p 5001:5000 \
                         -v "$(pwd)/lib-lite:/Satori/Lib" \
                         -v "$(pwd)/neuron-lite:/Satori/Neuron" \
@@ -80,6 +81,7 @@ case "$1" in
                 else
                     docker run -d --name $CONTAINER_NAME \
                         --restart unless-stopped \
+                        --network central-lite_default \
                         -p 5001:5000 \
                         -v satori-data:/Satori/Neuron/data \
                         -e SATORI_CENTRAL_URL=$CENTRAL_URL \

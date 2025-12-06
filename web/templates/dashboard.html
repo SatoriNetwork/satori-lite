@@ -155,13 +155,23 @@
                 </div>
                 <div class="card-body">
                     <div class="row text-center py-3">
-                        <div class="col-6">
-                            <h3 id="tokenBalance">--</h3>
+                        <div class="col-md-4 col-6 mb-3 mb-md-0">
+                            <h3 id="tokenBalance">
+                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                            </h3>
                             <p class="text-muted mb-0">SATORI Token</p>
                         </div>
-                        <div class="col-6">
-                            <h3 id="stakeBalance">--</h3>
+                        <div class="col-md-4 col-6 mb-3 mb-md-0">
+                            <h3 id="stakeBalance">
+                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                            </h3>
                             <p class="text-muted mb-0">SATORI Stake</p>
+                        </div>
+                        <div class="col-md-4 col-12">
+                            <h3 id="evrBalance">
+                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                            </h3>
+                            <p class="text-muted mb-0">Evrmore (EVR)</p>
                         </div>
                     </div>
                 </div>
@@ -388,23 +398,60 @@
         }
     }
 
+    function setBalanceLoading(elementId, isLoading) {
+        const element = document.getElementById(elementId);
+        if (isLoading) {
+            element.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+        }
+    }
+
     async function loadBalance() {
-        // Load balance and stake from Satori API server (may be stale)
-        const result = await apiCall('/balance/get');
-        if (result) {
-            document.getElementById('tokenBalance').textContent = result.balance !== undefined ? result.balance : '--';
-            document.getElementById('stakeBalance').textContent = result.stake !== undefined ? result.stake : '--';
+        // Load stake from Satori API server (only source for stake info)
+        try {
+            const result = await apiCall('/balance/get');
+            if (result && result.stake !== undefined) {
+                document.getElementById('stakeBalance').textContent = result.stake;
+            } else {
+                document.getElementById('stakeBalance').textContent = '--';
+            }
+        } catch (error) {
+            console.error('Failed to load stake balance:', error);
+            document.getElementById('stakeBalance').textContent = '--';
         }
     }
 
     async function refreshBalance() {
         // Get real-time balance from electrumx blockchain (wallet + vault)
-        // Only updates token balance, NOT stake (stake is only known by Satori API)
-        const result = await apiCall('/wallet/balance/direct');
-        if (result) {
-            document.getElementById('tokenBalance').textContent = result.total !== undefined ? result.total.toFixed(8) : '--';
-            // Stake value is NOT updated - it's only available from Satori API
+        // Fetches SATORI token and EVR balance
+        setBalanceLoading('tokenBalance', true);
+        setBalanceLoading('evrBalance', true);
+
+        try {
+            const result = await apiCall('/wallet/balance/direct');
+            if (result && !result.error) {
+                document.getElementById('tokenBalance').textContent = result.total !== undefined ? result.total.toFixed(8) : '--';
+                document.getElementById('evrBalance').textContent = result.total_evr !== undefined ? result.total_evr.toFixed(8) : '--';
+            } else {
+                // If there's an error, show dashes
+                document.getElementById('tokenBalance').textContent = '--';
+                document.getElementById('evrBalance').textContent = '--';
+                if (result && result.error) {
+                    console.error('ElectrumX balance fetch error:', result.error);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch balance from ElectrumX:', error);
+            document.getElementById('tokenBalance').textContent = '--';
+            document.getElementById('evrBalance').textContent = '--';
         }
+    }
+
+    async function loadAllBalances() {
+        // Load both stake (from API) and live balances (from ElectrumX)
+        await Promise.all([
+            loadBalance(),      // Stake from Satori API
+            refreshBalance()    // SATORI and EVR from ElectrumX
+        ]);
     }
 
     async function loadRewardAddress() {
@@ -827,7 +874,7 @@
 
         checkHealth();
         loadWalletAddresses();
-        loadBalance();
+        loadAllBalances();  // Load both stake and live balances from ElectrumX
         loadRewardAddress();
         loadStakingStatus();
         loadWorkers();

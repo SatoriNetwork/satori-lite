@@ -18,7 +18,8 @@ class WalletManager:
         vaultPassword: Optional[str] = None,
         cachePath: Optional[str] = None,
         peersCache: Optional[str] = None,
-        updateConnectionStatus: Optional[Callable] = None
+        updateConnectionStatus: Optional[Callable] = None,
+        useConfigPassword: bool = True
     ) -> 'WalletManager':
         """
         Create a new WalletManager instance with wallet and vault.
@@ -29,10 +30,12 @@ class WalletManager:
             vaultPassword: Password for the vault
             cachePath: Path to cache directory
             peersCache: Path to peers cache file
+            useConfigPassword: If True, read vault password from config if not provided
         """
         walletPath = walletPath or config.walletPath('wallet.yaml')
         vaultPath = vaultPath or config.walletPath('vault.yaml')
-        vaultPassword = vaultPassword or config.get().get('vault password')
+        if useConfigPassword:
+            vaultPassword = vaultPassword or config.get().get('vault password')
 
         # Only create vault if we have both a password and the file doesn't exist yet
         createVault = vaultPassword is not None and not os.path.exists(vaultPath)
@@ -174,13 +177,15 @@ class WalletManager:
                     self._wallet.electrumx = self._electrumx
                 if self._vault:
                     self._vault.electrumx = self._electrumx
+                if self._updateConnectionStatus:
+                    self._updateConnectionStatus(
+                        connTo=ConnectionTo.electrumx,
+                        status=True)
+                return True
+            if self._updateConnectionStatus:
                 self._updateConnectionStatus(
                     connTo=ConnectionTo.electrumx,
-                    status=True)
-                return True
-            self._updateConnectionStatus(
-                connTo=ConnectionTo.electrumx,
-                status=False)
+                    status=False)
             return False
         except Exception as e:
             logging.error(f"Failed to establish Electrumx connection: {e}")
