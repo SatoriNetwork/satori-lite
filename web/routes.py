@@ -553,11 +553,17 @@ def register_routes(app):
         data = request.get_json(silent=True) if request.method == 'POST' else None
         return proxy_api('/lender/lend', request.method, data)
 
-    @app.route('/api/pool/worker', methods=['POST', 'DELETE'])
+    @app.route('/api/pool/worker', methods=['POST'])
     @login_required
-    def api_pool_worker():
-        """Proxy pool worker request."""
-        return proxy_api('/pool/worker', request.method, request.json)
+    def api_pool_worker_add():
+        """Proxy pool worker add request."""
+        return proxy_api('/pool/worker', 'POST', request.json)
+
+    @app.route('/api/pool/worker/<worker_address>', methods=['DELETE'])
+    @login_required
+    def api_pool_worker_delete(worker_address):
+        """Proxy pool worker delete request."""
+        return proxy_api(f'/pool/worker/{worker_address}', 'DELETE')
 
     @app.route('/api/pool/toggle-open', methods=['POST'])
     @login_required

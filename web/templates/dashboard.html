@@ -666,7 +666,7 @@
     }
 
     async function removeWorker(address) {
-        const result = await apiCall('/pool/worker', 'DELETE', { address: address });
+        const result = await apiCall(`/pool/worker/${address}`, 'DELETE');
         if (result) {
             showToast('Worker removed');
             loadWorkers();
