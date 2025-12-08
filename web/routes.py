@@ -77,7 +77,7 @@ def get_or_create_session_vault():
     if not session_id:
         session_id = str(uuid.uuid4())
         session['session_id'] = session_id
-        session.permanent = True  # Make session persistent
+        session.permanent = False  # Don't persist sessions indefinitely
         logger.info(f"Generated new session ID: {session_id}")
 
     # Get or create vault for this session
@@ -245,16 +245,35 @@ def login_required(f):
         # Ensure session ID exists for tracking
         if not session.get('session_id'):
             session['session_id'] = str(uuid.uuid4())
-            session.permanent = True
+            session.permanent = False  # Don't persist sessions indefinitely
 
         # Check if user is logged in via session flag
         if not session.get('vault_open'):
             # Not logged in - check if vault file exists
             if not check_vault_file_exists():
                 # No vault file - redirect to create password
-                return redirect(url_for('create_password'))
+                return redirect(url_for('vault_setup'))
             # Vault exists but not logged in - redirect to login
             return redirect(url_for('login'))
+
+        # Validate that vault actually exists and is open (handles container restart)
+        # Check _session_vaults directly - don't call get_or_create (which creates new vault)
+        session_id = session.get('session_id')
+        if session_id and session_id not in _session_vaults:
+            # Vault doesn't exist (container restarted) - require re-login
+            logger.info(f"Session vault missing for {session_id} - forcing re-login")
+            session.pop('vault_open', None)
+            session['logged_out'] = True  # Prevent auto-login
+            return redirect(url_for('login'))
+
+        # Also validate vault is actually decrypted
+        if session_id and session_id in _session_vaults:
+            wallet_manager = _session_vaults[session_id]
+            if not wallet_manager or not wallet_manager.vault or not wallet_manager.vault.isDecrypted:
+                logger.info(f"Session vault not decrypted for {session_id} - forcing re-login")
+                session.pop('vault_open', None)
+                session['logged_out'] = True  # Prevent auto-login
+                return redirect(url_for('login'))
 
         return f(*args, **kwargs)
     return decorated_function

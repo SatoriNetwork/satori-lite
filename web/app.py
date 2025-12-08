@@ -6,6 +6,7 @@ Minimal web interface for satori-lite functionality:
 - Dashboard with balance, rewards, lending, and pool management
 """
 import os
+from datetime import timedelta
 from flask import Flask
 
 
@@ -26,6 +27,9 @@ def create_app(testing=False):
     # Configuration
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     app.config['TESTING'] = testing
+
+    # Session configuration - sessions expire after 24 hours
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
     # Server API URL (for proxying requests)
     app.config['SATORI_API_URL'] = os.environ.get('SATORI_API_URL', 'http://satori-api:8000')
