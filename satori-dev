@@ -5,7 +5,7 @@ CONTAINER_NAME="satori"
 # Dev mode - always mount local code
 IMAGE_TAG="dev"
 IMAGE="satorinet/satori-lite:${IMAGE_TAG}"
-CENTRAL_URL="http://satori-api:8000"
+CENTRAL_URL="http://137.184.38.13:8000"
 
 # Function to create data directories
 create_data_dirs() {
@@ -74,9 +74,9 @@ case "$1" in
                 create_data_dirs
 
                 # Dev mode: mount code + data
+                    # --network central-lite_default \ # for testing locally
                 docker run -d --name $CONTAINER_NAME \
                     --restart unless-stopped \
-                    --network central-lite_default \
                     -p 5001:5000 \
                     -v "$(pwd)/lib-lite:/Satori/Lib" \
                     -v "$(pwd)/neuron-lite:/Satori/Neuron" \

@@ -1,88 +1,26 @@
 #!/usr/bin/env python3
 """
-Satori Neuron CLI - Interactive command-line interface.
-Starts the neuron in the background and provides commands to interact with it.
+Satori Neuron CLI - Interactive command-line interface for wallet and vault management.
+Provides commands to check balances and manage vault.
 """
 
 import sys
 import os
 import time
-import threading
-import io
-import logging as stdlib_logging
 import tty
 import termios
 
-# Save original file descriptors BEFORE any redirection
+# Save original file descriptors for console I/O
 _original_stdout_fd = os.dup(1)
-_original_stderr_fd = os.dup(2)
 _original_stdin_fd = os.dup(0)
 
 # Create file objects from the duplicated fds
 _console_out = os.fdopen(os.dup(_original_stdout_fd), 'w', buffering=1)
 _console_in = os.fdopen(os.dup(_original_stdin_fd), 'r', buffering=1)
 
-# Global log buffer
-_log_buffer: list[str] = []
-_max_logs = 1000
-
 # Command history
 _command_history: list[str] = []
 _history_index: int = 0
-
-
-class LogInterceptHandler(stdlib_logging.Handler):
-    """Handler that captures all logs to buffer."""
-    def emit(self, record):
-        msg = self.format(record)
-        timestamp = time.strftime("%H:%M:%S")
-        _log_buffer.append(f"[{timestamp}] {msg}")
-        if len(_log_buffer) > _max_logs:
-            _log_buffer.pop(0)
-
-
-class OutputCapture:
-    """Captures stdout/stderr to buffer."""
-    def __init__(self, original):
-        self.original = original
-        # Need fileno for subprocess compatibility
-        self._devnull = open(os.devnull, 'w')
-
-    def write(self, msg):
-        msg = msg.strip()
-        if msg:
-            timestamp = time.strftime("%H:%M:%S")
-            _log_buffer.append(f"[{timestamp}] {msg}")
-            if len(_log_buffer) > _max_logs:
-                _log_buffer.pop(0)
-
-    def flush(self):
-        pass
-
-    def fileno(self):
-        # Return devnull's fileno so subprocesses write there
-        return self._devnull.fileno()
-
-
-def setup_log_capture():
-    """Set up log capture before importing neuron modules."""
-    # Install our handler on root logger
-    root = stdlib_logging.getLogger()
-    root.handlers.clear()
-    handler = LogInterceptHandler()
-    handler.setFormatter(stdlib_logging.Formatter('%(levelname)s - %(message)s'))
-    root.addHandler(handler)
-    root.setLevel(stdlib_logging.DEBUG)
-
-    # Capture stdout/stderr
-    sys.stdout = OutputCapture(sys.__stdout__)
-    sys.stderr = OutputCapture(sys.__stderr__)
-
-    # Also redirect the actual file descriptors for subprocess output
-    devnull_fd = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull_fd, 1)  # stdout
-    os.dup2(devnull_fd, 2)  # stderr
-    os.close(devnull_fd)
 
 
 def console_print(msg: str = ""):
@@ -192,14 +130,8 @@ class NeuronCLI:
     def __init__(self, env: str = 'prod', runMode: str = 'worker'):
         self.env = env
         self.runMode = runMode
-        self.startup = None
-        self.neuron_started = False
+        self.wallet_manager = None
         self._vault_password = None  # Store password in memory for session
-
-    def add_log(self, message: str):
-        """Add a log message to buffer."""
-        timestamp = time.strftime("%H:%M:%S")
-        _log_buffer.append(f"[{timestamp}] {message}")
 
     def check_vault_file_exists(self) -> bool:
         """Check if vault.yaml file exists (like web UI does)."""
@@ -424,46 +356,6 @@ class NeuronCLI:
         except Exception:
             return False
 
-    def start_neuron_background(self):
-        """Start the neuron in a background thread."""
-        def run():
-            try:
-                # Import here after log capture is set up
-                from start import StartupDag
-                self.add_log("Creating StartupDag...")
-                # Create instance without calling startFunction yet
-                startupDag = StartupDag(
-                    env=self.env,
-                    runMode=self.runMode)
-                # Assign to self.startup BEFORE the blocking call
-                self.startup = startupDag
-
-                # Unlock the vault with the password we got during CLI startup
-                if self._vault_password:
-                    if startupDag.walletManager:
-                        try:
-                            vault = startupDag.walletManager.openVault(password=self._vault_password)
-                            if vault and hasattr(vault, 'isDecrypted') and vault.isDecrypted:
-                                self.add_log("Vault unlocked successfully in StartupDag")
-                            else:
-                                self.add_log("Warning: Vault unlock failed - vault not decrypted")
-                        except Exception as e:
-                            self.add_log(f"Warning: Could not unlock vault in StartupDag: {e}")
-                    else:
-                        self.add_log("Warning: walletManager not available in StartupDag")
-                else:
-                    self.add_log("Warning: No vault password stored from CLI startup")
-
-                self.add_log("Neuron started successfully")
-                # Now call the blocking startFunction
-                startupDag.startFunction()
-            except Exception as e:
-                self.add_log(f"Neuron startup error: {e}")
-                import traceback
-                self.add_log(traceback.format_exc())
-
-        self.add_log("Starting neuron in background...")
-        threading.Thread(target=run, daemon=True).start()
 
     def interactive_menu(self, title: str, options: list[dict]) -> int | None:
         """
@@ -568,24 +460,19 @@ class NeuronCLI:
 
     def get_wallet_balance_electrumx(self) -> str:
         """Fetch wallet balance from ElectrumX servers."""
-        if not self.startup or not hasattr(self.startup, 'walletManager'):
-            return "Neuron is starting... Use /logs neuron to see progress."
+        if not self.wallet_manager:
+            return "Wallet manager not initialized."
 
         console_print("Fetching wallet balance...")
         console_print()
 
         try:
-            # Get wallet manager
-            wallet_manager = self.startup.walletManager
-            if not wallet_manager:
-                return "Wallet manager not initialized."
-
             # Ensure ElectrumX connection
-            if hasattr(wallet_manager, 'connect'):
-                wallet_manager.connect()
+            if hasattr(self.wallet_manager, 'connect'):
+                self.wallet_manager.connect()
 
             # Get wallet
-            wallet = wallet_manager.wallet
+            wallet = self.wallet_manager.wallet
             if not wallet:
                 return "Wallet not available."
 
@@ -618,34 +505,29 @@ class NeuronCLI:
 
     def get_vault_balance_electrumx(self) -> str:
         """Fetch vault balance from ElectrumX servers."""
-        if not self.startup or not hasattr(self.startup, 'walletManager'):
-            return "Neuron is starting... Use /logs neuron to see progress."
+        if not self.wallet_manager:
+            return "Wallet manager not initialized."
 
         console_print("Fetching vault balance...")
         console_print()
 
         try:
-            # Get wallet manager
-            wallet_manager = self.startup.walletManager
-            if not wallet_manager:
-                return "Wallet manager not initialized."
-
             # Ensure ElectrumX connection
-            if hasattr(wallet_manager, 'connect'):
-                wallet_manager.connect()
+            if hasattr(self.wallet_manager, 'connect'):
+                self.wallet_manager.connect()
 
             # Re-open vault with stored password to ensure it's decrypted
             if self._vault_password:
-                vault = wallet_manager.openVault(password=self._vault_password)
+                vault = self.wallet_manager.openVault(password=self._vault_password)
             else:
-                vault = wallet_manager.vault
+                vault = self.wallet_manager.vault
 
             if not vault:
                 return "Vault not available.\nPlease create or unlock your vault first."
 
             # Check if vault is decrypted
             if hasattr(vault, 'isDecrypted') and not vault.isDecrypted:
-                return "Vault is locked.\nPlease unlock your vault first with /vault-open."
+                return "Vault is locked.\nPlease unlock your vault first."
 
             # Fetch balances from ElectrumX
             if hasattr(vault, 'getBalances'):
@@ -681,105 +563,21 @@ class NeuronCLI:
         if user_input == "/help":
             return """Satori Neuron CLI - Available Commands
 
-Monitoring:
-  /logs          - View neuron or engine logs (interactive menu)
-
-Wallet & Rewards:
+Wallet & Vault:
   /balance       - Show wallet or vault balance (interactive menu)
-  /stake         - Check stake status
-  /pool          - Show pool status
-
-Streams & Engine:
-  /streams       - Show stream assignments
-  /pause         - Pause the engine
-  /unpause       - Unpause the engine
+  /vault-status  - Show vault status
 
 System:
-  /restart       - Restart the neuron
   /clear         - Clear the screen
   /help          - Show this help message
-  /exit          - Exit CLI (neuron keeps running)"""
-
-        elif user_input == "/logs":
-            # Interactive menu for logs
-            options = [
-                {'label': 'Neuron Logs', 'action': 'neuron'},
-                {'label': 'Engine Logs', 'action': 'engine'}
-            ]
-
-            selected = self.interactive_menu("Logs Menu", options)
-
-            if selected is None:
-                return "Cancelled."
-
-            # Execute the selected option
-            action = options[selected]['action']
-            if action == 'neuron':
-                logs = _log_buffer[-50:]
-                if not logs:
-                    return "No logs yet."
-                return "\n".join(logs)
-            elif action == 'engine':
-                # Filter logs for engine-related messages
-                engine_keywords = [
-                    'engine', 'Engine', 'adapter', 'Adapter', 'prediction',
-                    'Prediction', 'StreamModel', 'stream model', 'forecast',
-                    'XgbAdapter', 'StarterAdapter', 'XgbChronosAdapter',
-                    'model training', 'inference', 'Engine DB'
-                ]
-                engine_logs = [
-                    log for log in _log_buffer
-                    if any(keyword in log for keyword in engine_keywords)
-                ]
-                logs = engine_logs[-50:]
-                if not logs:
-                    return "No engine logs yet."
-                return "\n".join(logs)
-
-        elif user_input == "/logs neuron":
-            logs = _log_buffer[-50:]
-            if not logs:
-                return "No logs yet."
-            return "\n".join(logs)
-
-        elif user_input == "/logs engine":
-            # Filter logs for engine-related messages
-            engine_keywords = [
-                'engine', 'Engine', 'adapter', 'Adapter', 'prediction',
-                'Prediction', 'StreamModel', 'stream model', 'forecast',
-                'XgbAdapter', 'StarterAdapter', 'XgbChronosAdapter',
-                'model training', 'inference', 'Engine DB'
-            ]
-            engine_logs = [
-                log for log in _log_buffer
-                if any(keyword in log for keyword in engine_keywords)
-            ]
-            logs = engine_logs[-50:]
-            if not logs:
-                return "No engine logs yet."
-            return "\n".join(logs)
-
-        elif user_input == "/status":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            status_lines = [
-                f"Mode: {self.startup.runMode.name}",
-                f"Paused: {self.startup.paused}",
-                f"Mining Mode: {self.startup.miningMode}",
-                f"Environment: {self.startup.env}",
-                f"Version: {self.startup.version}",
-            ]
-            if self.startup.wallet:
-                status_lines.append(f"Wallet: {self.startup.wallet.address}")
-            return "\n".join(status_lines)
+  /exit          - Exit CLI"""
 
         elif user_input == "/balance":
-            # Check if startup object exists and has wallet manager
-            if not self.startup or not hasattr(self.startup, 'walletManager'):
-                return "Neuron is starting... Please wait a moment and try again."
+            # Check if wallet manager exists
+            if not self.wallet_manager:
+                return "Wallet manager not initialized."
 
             # Interactive menu for balance
-            # Both options always shown since vault is unlocked at CLI startup
             options = [
                 {'label': 'Wallet Balance', 'action': 'wallet'},
                 {'label': 'Vault Balance', 'action': 'vault'}
@@ -797,77 +595,19 @@ System:
             elif action == 'vault':
                 return self.get_vault_balance_electrumx()
 
-        elif user_input == "/streams":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            lines = [f"Subscriptions: {len(self.startup.subscriptions)}"]
-            for s in self.startup.subscriptions[:5]:
-                lines.append(f"  - {s.streamId.source}/{s.streamId.stream}")
-            if len(self.startup.subscriptions) > 5:
-                lines.append(f"  ... and {len(self.startup.subscriptions) - 5} more")
-            lines.append(f"Publications: {len(self.startup.publications)}")
-            for p in self.startup.publications[:5]:
-                lines.append(f"  - {p.streamId.source}/{p.streamId.stream}")
-            if len(self.startup.publications) > 5:
-                lines.append(f"  ... and {len(self.startup.publications) - 5} more")
-            return "\n".join(lines)
-
-        elif user_input == "/pause":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            self.startup.pause()
-            return "Engine paused"
-
-        elif user_input == "/unpause":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            self.startup.unpause()
-            return "Engine unpaused"
-
-        elif user_input == "/restart":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            self.startup.triggerRestart()
-
-        elif user_input == "/stake":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            status = self.startup.performStakeCheck()
-            return f"Stake Status: {status}\nStake Required: {self.startup.stakeRequired}"
-
-        elif user_input == "/pool":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            return f"Pool Accepting: {self.startup.poolIsAccepting}"
-
         elif user_input == "/vault-status":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            vault = self.startup.vault
+            if not self.wallet_manager:
+                return "Wallet manager not initialized."
+
+            vault = self.wallet_manager.vault
             if vault is None:
-                return "Vault: Not created\nUse /vault-create to create a new vault."
+                return "Vault: Not created"
+
             status_lines = [
                 f"Vault Address: {vault.address}",
                 f"Decrypted: {vault.isDecrypted if hasattr(vault, 'isDecrypted') else 'Unknown'}",
             ]
             return "\n".join(status_lines)
-
-        elif user_input == "/vault-create":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            if self.startup.vault is not None:
-                return "Vault already exists. Use /vault-open to unlock it."
-            return "VAULT_CREATE_PROMPT"
-
-        elif user_input == "/vault-open":
-            if not self.neuron_started:
-                return "Neuron is starting... Use /logs neuron to see progress."
-            vault = self.startup.vault
-            if vault is None:
-                return "No vault exists. Use /vault-create to create one first."
-            if hasattr(vault, 'isDecrypted') and vault.isDecrypted:
-                return "Vault is already open."
-            return "VAULT_OPEN_PROMPT"
 
         elif user_input == "/clear":
             # ANSI escape code to clear screen and move cursor to top
@@ -883,56 +623,71 @@ System:
         else:
             return "Type /help for available commands."
 
-    def prompt_vault_password(self, create: bool = False) -> str | None:
-        """Prompt for vault password securely."""
-        import getpass
-        try:
-            if create:
-                console_print("Creating new vault...")
-                console_write("Enter new vault password: ")
-                password1 = console_readline().strip()
-                console_write("Confirm password: ")
-                password2 = console_readline().strip()
-                if password1 != password2:
-                    return None, "Passwords do not match."
-                if len(password1) < 4:
-                    return None, "Password must be at least 4 characters."
-                return password1, None
-            else:
-                console_write("Enter vault password: ")
-                password = console_readline().strip()
-                return password, None
-        except Exception as e:
-            return None, str(e)
 
-    def create_vault(self, password: str) -> str:
-        """Create a new vault with the given password."""
-        try:
-            # Save password to config
-            from satorineuron import config
-            config.add(data={'vault password': password})
+    def show_main_menu(self) -> str | None:
+        """Show interactive main menu and return selected action."""
+        # Clear screen and show logo
+        console_write("\033[2J\033[H")
+        console_print()
+        console_print("           @@@@")
+        console_print("      @@@@@@@@@@@@@@@@@")
+        console_print("    @@@@@@@@@@@@@@@@@@@@@@@")
+        console_print("  @@@@@@@@      @@@@@  @@@@@@")
+        console_print(" @@@@@@@           @@@ @@@@@@")
+        console_print("@@@@@@               @@@@@@@@@")
+        console_print("@@@@@                  @@@@@@@")
+        console_print("@@@@                    @@@@@@")
+        console_print("@@@@                     @@@@@")
+        console_print("@@@@           @         @@@@@")
+        console_print("@@@@         @@@@@       @@@@@")
+        console_print("@@@@@        @@@@@      @@@@@@")
+        console_print(" @@@@@    @@@@@@@@@    @@@@@")
+        console_print("  @@@@@@  @@@@@@@@@   @@@@@")
+        console_print("   @@@@@@ @@@@@@@@@ @@@@@@")
+        console_print("     @@@@@@@@@@@@@@@@@@@@")
+        console_print("        @@@@@@@@@@@@@@")
+        console_print()
+        console_print("    Satori Neuron CLI")
+        console_print()
 
-            # Create vault
-            vault = self.startup.openVault(password=password, create=True)
-            if vault:
-                return f"Vault created successfully!\nVault Address: {vault.address}"
-            return "Failed to create vault."
-        except Exception as e:
-            return f"Error creating vault: {e}"
+        options = [
+            {'label': 'Check Balance', 'action': 'balance'},
+            {'label': 'Vault Status', 'action': 'vault-status'},
+            {'label': 'Help', 'action': 'help'},
+            {'label': 'Clear Screen', 'action': 'clear'},
+            {'label': 'Exit', 'action': 'exit'}
+        ]
 
-    def open_vault(self, password: str) -> str:
-        """Open an existing vault with the given password."""
-        try:
-            vault = self.startup.openVault(password=password)
-            if vault and hasattr(vault, 'isDecrypted') and vault.isDecrypted:
-                return f"Vault opened successfully!\nVault Address: {vault.address}"
-            return "Failed to open vault. Wrong password?"
-        except Exception as e:
-            return f"Error opening vault: {e}"
+        selected = self.interactive_menu("Main Menu", options)
+
+        if selected is None:
+            return None
+
+        return options[selected]['action']
 
     def run(self):
         """Run interactive CLI loop."""
-        console_print("Satori Neuron CLI. Type /help for commands, /exit to quit.")
+        console_print()
+        console_print("           @@@@")
+        console_print("      @@@@@@@@@@@@@@@@@")
+        console_print("    @@@@@@@@@@@@@@@@@@@@@@@")
+        console_print("  @@@@@@@@      @@@@@  @@@@@@")
+        console_print(" @@@@@@@           @@@ @@@@@@")
+        console_print("@@@@@@               @@@@@@@@@")
+        console_print("@@@@@                  @@@@@@@")
+        console_print("@@@@                    @@@@@@")
+        console_print("@@@@                     @@@@@")
+        console_print("@@@@           @         @@@@@")
+        console_print("@@@@         @@@@@       @@@@@")
+        console_print("@@@@@        @@@@@      @@@@@@")
+        console_print(" @@@@@    @@@@@@@@@    @@@@@")
+        console_print("  @@@@@@  @@@@@@@@@   @@@@@")
+        console_print("   @@@@@@ @@@@@@@@@ @@@@@@")
+        console_print("     @@@@@@@@@@@@@@@@@@@@")
+        console_print("        @@@@@@@@@@@@@@")
+        console_print()
+        console_print("    Satori Neuron CLI")
+        console_print("    Wallet & Vault Manager")
         console_print()
 
         # Prompt for vault setup or unlock (matches web UI behavior)
@@ -945,45 +700,54 @@ System:
             console_print("Exiting...")
             return
 
-        # Start neuron in background
-        self.start_neuron_background()
+        # Initialize wallet manager after vault is unlocked
+        try:
+            from satorineuron.init.wallet import WalletManager
+            self.wallet_manager = WalletManager.create(useConfigPassword=False)
+
+            # Unlock vault with stored password
+            if self._vault_password:
+                vault = self.wallet_manager.openVault(password=self._vault_password)
+                if vault and hasattr(vault, 'isDecrypted') and vault.isDecrypted:
+                    console_print()  # Just add blank line after vault unlock
+                else:
+                    console_print("Warning: Could not unlock vault in wallet manager.")
+                    console_print()
+        except Exception as e:
+            console_print(f"Error initializing wallet manager: {e}")
+            console_print("Exiting.")
+            return
 
         while True:
             try:
-                # Use console_input() for readline support (arrow keys, history)
-                user_input = console_input("> ").strip()
+                # Show interactive main menu
+                action = self.show_main_menu()
 
-                if not user_input:
+                if action is None:
                     continue
 
-                response = self.handle_command(user_input)
-
-                if response == "EXIT_CLI":
+                if action == 'exit':
                     console_print("Goodbye!")
                     break
 
-                if response == "VAULT_CREATE_PROMPT":
-                    password, error = self.prompt_vault_password(create=True)
-                    if error:
-                        console_print(error)
-                    elif password:
-                        result = self.create_vault(password)
-                        console_print(result)
-                    console_print()
-                    continue
+                # Execute the selected action
+                if action == 'balance':
+                    response = self.handle_command("/balance")
+                elif action == 'vault-status':
+                    response = self.handle_command("/vault-status")
+                elif action == 'help':
+                    response = self.handle_command("/help")
+                elif action == 'clear':
+                    response = self.handle_command("/clear")
+                    continue  # Don't print response for clear
+                else:
+                    response = "Unknown action"
 
-                if response == "VAULT_OPEN_PROMPT":
-                    password, error = self.prompt_vault_password(create=False)
-                    if error:
-                        console_print(error)
-                    elif password:
-                        result = self.open_vault(password)
-                        console_print(result)
+                if response:
+                    console_print(response)
                     console_print()
-                    continue
-
-                console_print(response)
-                console_print()
+                    console_print("Press Enter to continue...")
+                    console_readline()
 
             except KeyboardInterrupt:
                 console_print("\nGoodbye!")
@@ -994,8 +758,5 @@ System:
 
 
 if __name__ == "__main__":
-    # Set up log capture FIRST before any imports
-    setup_log_capture()
-
     cli = NeuronCLI(env='prod', runMode='worker')
     cli.run()

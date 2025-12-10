@@ -100,7 +100,7 @@ class WalletManager:
             persistent=False,  # We want lazy connection
             cachedPeersFile=peersCache
         )
-        logging.info('initialized wallet', color='green')
+        logging.info('initialized wallet')
         return self._wallet
 
     def _initializeVault(
@@ -144,11 +144,11 @@ class WalletManager:
                 persistent=False,  # We want lazy connection
                 cachedPeersFile=peersCache
             )
-            logging.info('initialized vault', color='green')
+            logging.info('initialized vault')
             return self._vault
 
         except Exception as e:
-            logging.error(f'failed to open Vault: {str(e)}', color='red')
+            logging.error(f'failed to open Vault: {str(e)}')
             raise e
 
     def connect(self) -> bool:
