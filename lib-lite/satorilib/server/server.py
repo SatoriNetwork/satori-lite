@@ -88,15 +88,22 @@ class SatoriServerClient(object):
                 f'outgoing: {endpoint}',
                 payload[0:40], f'{"..." if len(payload) > 40 else ""}',
                 print=True)
+
+        headers = {
+            **(useWallet or self.wallet).authPayload(
+                asDict=True,
+                challenge=challenge or self._getChallenge()),
+            **(extraHeaders or {}),
+        }
+
+        # Add Content-Type header if payload is present
+        if payload is not None:
+            headers['Content-Type'] = 'application/json'
+
         r = function(
             (url or self.url) + endpoint,
-            headers={
-                **(useWallet or self.wallet).authPayload(
-                    asDict=True,
-                    challenge=challenge or self._getChallenge()),
-                **(extraHeaders or {}),
-            },
-            json=payload)
+            headers=headers,
+            data=payload)
         if raiseForStatus:
             try:
                 r.raise_for_status()
@@ -1037,18 +1044,23 @@ class SatoriServerClient(object):
             return None
         return True
 
-    def getObservation(self) -> Union[dict, None]:
+    def getObservation(self, stream: str = 'bitcoin') -> Union[dict, None]:
         """
         Get the latest observation from the Central Server.
 
+        Args:
+            stream: The stream/topic to get observations for (default: 'bitcoin')
+                    NOTE: This is a temporary testing endpoint - will be updated later
+
         Returns:
-            dict with keys: id, value, observed_at, hash, ts
+            dict with keys: observation_id, value, observed_at, ts, bitcoin_price, sources
             None if request fails or no observation available
         """
         try:
+            # NOTE: Using POST /api/v1/observation/{stream} as temporary testing endpoint
             response = self._makeAuthenticatedCall(
-                function=requests.get,
-                endpoint='/api/v1/observation/get',
+                function=requests.post,
+                endpoint=f'/api/v1/observation/{stream}',
                 raiseForStatus=False
             )
             if response.status_code == 200:
@@ -1058,12 +1070,12 @@ class SatoriServerClient(object):
                 return data
             else:
                 logging.warning(
-                    f"Failed to get observation. Status code: {response.status_code}",
+                    f"Failed to get observation for stream '{stream}'. Status code: {response.status_code}",
                     color='yellow')
                 return None
         except Exception as e:
             logging.error(
-                f"Error occurred while fetching observation: {str(e)}",
+                f"Error occurred while fetching observation for stream '{stream}': {str(e)}",
                 color='red')
             return None
 

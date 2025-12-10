@@ -70,6 +70,11 @@ def xgbDataPreprocess(data: pd.DataFrame) -> XgbProcessedData:
             minutes=offset_minutes,
             seconds=offset_seconds)
         total_seconds = (round_to_hours * 3600) + (round_to_minutes * 60) + round_to_seconds
+
+        # Prevent division by zero - if no rounding interval specified, return as-is
+        if total_seconds == 0:
+            return dt - timedelta(hours=offset_hours, minutes=offset_minutes, seconds=offset_seconds)
+
         seconds_since_first = round((dt - first_day).total_seconds())
         rounded_seconds = round(seconds_since_first / total_seconds) * total_seconds
         rounded_dt = first_day + timedelta(seconds=rounded_seconds)

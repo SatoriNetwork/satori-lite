@@ -263,7 +263,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         def pollForever():
             while True:
-                time.sleep(60 * 60 * 11)
+                time.sleep(60 * 60 * 11)  # 11 hours
                 try:
                     if not hasattr(self, 'server') or self.server is None:
                         logging.warning("Server not initialized, skipping observation poll", color='yellow')
@@ -282,10 +282,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                     # Convert observation to DataFrame for engine
                     # Expected format: columns = [ts, value, hash/id]
+                    value = observation.get('value') or observation.get('bitcoin_price')
+                    hash_val = observation.get('hash') or observation.get('id') or observation.get('observation_id')
                     df = pd.DataFrame([{
                         'ts': observation.get('observed_at') or observation.get('ts'),
-                        'value': observation.get('value'),
-                        'hash': observation.get('hash') or observation.get('id'),
+                        'value': float(value) if value is not None else None,
+                        'hash': str(hash_val) if hash_val is not None else None,
                     }])
 
                     # Pass to each stream in the engine
@@ -358,6 +360,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
+        self.setupDefaultStream()
+        self.spawnEngine()
         threading.Event().wait()
 
     def serverConnectedRecently(self, threshold_minutes: int = 10) -> bool:
