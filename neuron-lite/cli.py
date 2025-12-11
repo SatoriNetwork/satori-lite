@@ -467,18 +467,28 @@ class NeuronCLI:
         console_print()
 
         try:
-            # Ensure ElectrumX connection
+            # Ensure ElectrumX connection with retry
             if hasattr(self.wallet_manager, 'connect'):
-                self.wallet_manager.connect()
+                for _ in range(3):
+                    if self.wallet_manager.connect():
+                        break
+                    time.sleep(1)
 
             # Get wallet
             wallet = self.wallet_manager.wallet
             if not wallet:
                 return "Wallet not available."
 
-            # Fetch balances from ElectrumX
+            # Fetch balances from ElectrumX (retry if connection not ready)
             if hasattr(wallet, 'getBalances'):
-                wallet.getBalances()
+                for _ in range(3):
+                    if wallet.electrumx and wallet.electrumx.connected():
+                        wallet.getBalances()
+                        break
+                    time.sleep(1)
+                else:
+                    # Final attempt even if connection check failed
+                    wallet.getBalances()
 
             # Format and return balance information
             lines = ["Wallet Balance:"]
@@ -512,9 +522,12 @@ class NeuronCLI:
         console_print()
 
         try:
-            # Ensure ElectrumX connection
+            # Ensure ElectrumX connection with retry
             if hasattr(self.wallet_manager, 'connect'):
-                self.wallet_manager.connect()
+                for _ in range(3):
+                    if self.wallet_manager.connect():
+                        break
+                    time.sleep(1)
 
             # Re-open vault with stored password to ensure it's decrypted
             if self._vault_password:
@@ -529,9 +542,16 @@ class NeuronCLI:
             if hasattr(vault, 'isDecrypted') and not vault.isDecrypted:
                 return "Vault is locked.\nPlease unlock your vault first."
 
-            # Fetch balances from ElectrumX
+            # Fetch balances from ElectrumX (retry if connection not ready)
             if hasattr(vault, 'getBalances'):
-                vault.getBalances()
+                for _ in range(3):
+                    if vault.electrumx and vault.electrumx.connected():
+                        vault.getBalances()
+                        break
+                    time.sleep(1)
+                else:
+                    # Final attempt even if connection check failed
+                    vault.getBalances()
 
             # Format and return balance information
             lines = ["Vault Balance:"]

@@ -94,16 +94,14 @@ class Electrumx(ElectrumxConnection):
     #})
 
     electrumxServers: list[str] = [
-        'electrumx1.satorinet.io:50002',
-        'electrumx2.satorinet.io:50002',
-        'electrumx3.satorinet.io:50002',
+        '167.71.11.203:50002',
+        'evrx-1.satoriog.com:50002',
     ]
 
     # subscriptions work better without ssl for some reason
     electrumxServersWithoutSSL: list[str] = [
-        'electrumx1.satorinet.io:50001',
-        'electrumx2.satorinet.io:50001',
-        'electrumx3.satorinet.io:50001',
+        '167.71.11.203:50001',
+        'evrx-1.satoriog.com:50001',
     ]
 
     @staticmethod
