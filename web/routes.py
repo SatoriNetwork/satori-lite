@@ -753,13 +753,18 @@ def register_routes(app):
             return jsonify({'error': 'Wallet manager not initialized'}), 500
 
         try:
-            # Ensure electrumx connection
+            # Ensure electrumx connection with retry
             logger.info("Attempting to connect to ElectrumX...")
+            connected = False
             if hasattr(wallet_manager, 'connect'):
-                connected = wallet_manager.connect()
-                logger.info(f"ElectrumX connection result: {connected}")
+                for attempt in range(5):
+                    connected = wallet_manager.connect()
+                    logger.info(f"ElectrumX connection attempt {attempt + 1}: {connected}")
+                    if connected:
+                        break
+                    time.sleep(2)  # Give more time for connection to establish
                 if not connected:
-                    logger.warning("Failed to connect to ElectrumX")
+                    logger.warning("Failed to connect to ElectrumX after retries")
                     return jsonify({'error': 'Could not connect to electrumx'}), 500
             else:
                 logger.warning("WalletManager has no connect method")
@@ -776,7 +781,14 @@ def register_routes(app):
                 wallet = wallet_manager.wallet
                 if hasattr(wallet, 'getBalances'):
                     logger.info("Getting wallet balances...")
-                    wallet.getBalances()
+                    # Retry if connection not ready yet
+                    for _ in range(3):
+                        if wallet.electrumx and wallet.electrumx.connected():
+                            wallet.getBalances()
+                            break
+                        time.sleep(1)
+                    else:
+                        wallet.getBalances()  # Final attempt
                     if hasattr(wallet, 'balance') and wallet.balance:
                         wallet_balance = wallet.balance.amount if hasattr(wallet.balance, 'amount') else 0.0
                     if hasattr(wallet, 'currency') and wallet.currency:
@@ -788,7 +800,14 @@ def register_routes(app):
                 vault = wallet_manager.vault
                 if hasattr(vault, 'getBalances'):
                     logger.info("Getting vault balances...")
-                    vault.getBalances()
+                    # Retry if connection not ready yet
+                    for _ in range(3):
+                        if vault.electrumx and vault.electrumx.connected():
+                            vault.getBalances()
+                            break
+                        time.sleep(1)
+                    else:
+                        vault.getBalances()  # Final attempt
                     if hasattr(vault, 'balance') and vault.balance:
                         vault_balance = vault.balance.amount if hasattr(vault.balance, 'amount') else 0.0
                     if hasattr(vault, 'currency') and vault.currency:
