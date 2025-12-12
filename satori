@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Check if Docker is installed and running
+if ! command -v docker &> /dev/null; then
+    echo "Error: Docker is not installed. Please install Docker first."
+    echo "Visit: https://docs.docker.com/get-docker/"
+    exit 1
+fi
+
+if ! docker info &> /dev/null; then
+    echo "Error: Docker is not running. Please start Docker and try again."
+    exit 1
+fi
+
 # Production mode - uses Docker image code
 IMAGE_TAG="latest"
 IMAGE="satorinet/satori-lite:${IMAGE_TAG}"
