@@ -129,6 +129,46 @@ def test_remove_worker_url_parameter(server_url, server_available, challenge_tok
 
 @pytest.mark.integration
 @pytest.mark.pool
+def test_get_workers_requires_auth(server_url, server_available):
+    """Test GET /api/v1/pool/workers requires authentication."""
+    response = requests.get(f"{server_url}/api/v1/pool/workers")
+
+    # Should reject unauthenticated request
+    assert response.status_code in [401, 422]
+
+
+@pytest.mark.integration
+@pytest.mark.pool
+def test_get_workers_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+    """Test GET workers with invalid authentication."""
+    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+
+    response = requests.get(
+        f"{server_url}/api/v1/pool/workers",
+        headers=headers
+    )
+
+    # Should reject invalid signature (mock wallet)
+    assert response.status_code == 401
+
+
+@pytest.mark.integration
+@pytest.mark.pool
+def test_get_workers_endpoint_exists(server_url, server_available, challenge_token, test_wallet):
+    """Test GET /api/v1/pool/workers endpoint exists."""
+    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+
+    response = requests.get(
+        f"{server_url}/api/v1/pool/workers",
+        headers=headers
+    )
+
+    # Should not be 404 (endpoint exists)
+    assert response.status_code != 404
+
+
+@pytest.mark.integration
+@pytest.mark.pool
 def test_pool_endpoints_exist(server_url, server_available, challenge_token, test_wallet):
     """Test all pool endpoints exist and are configured."""
     headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
@@ -154,3 +194,10 @@ def test_pool_endpoints_exist(server_url, server_available, challenge_token, tes
         headers=headers
     )
     assert response3.status_code != 404
+
+    # Test GET /api/v1/pool/workers
+    response4 = requests.get(
+        f"{server_url}/api/v1/pool/workers",
+        headers=headers
+    )
+    assert response4.status_code != 404
