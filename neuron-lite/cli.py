@@ -77,7 +77,7 @@ def console_input(prompt: str = "") -> str:
                     cursor_pos -= 1
                     # Redraw line
                     console_write(f'\r{prompt}{line} \r{prompt}{line[:cursor_pos]}')
-            elif ch == '\x1b':  # Escape sequence (arrow keys)
+            elif ch == '\x1b':  # Escape sequence (arrow keys or Esc)
                 seq1 = os.read(fd, 1).decode('utf-8', errors='ignore')
                 if seq1 == '[':
                     seq2 = os.read(fd, 1).decode('utf-8', errors='ignore')
@@ -108,6 +108,10 @@ def console_input(prompt: str = "") -> str:
                         if cursor_pos > 0:
                             cursor_pos -= 1
                             console_write('\x1b[D')
+                else:
+                    # Esc key pressed (not followed by '[')
+                    console_write('\r\n')
+                    return None  # Return None to indicate cancellation
             elif ch >= ' ':  # Printable character
                 line = line[:cursor_pos] + ch + line[cursor_pos:]
                 cursor_pos += 1
@@ -612,6 +616,227 @@ class NeuronCLI:
         except Exception as e:
             return f"Error fetching vault balance: {e}"
 
+    def send_transaction_wallet(self) -> str:
+        """Send SATORI transaction from wallet."""
+        if not self.wallet_manager:
+            return "Wallet manager not initialized."
+
+        try:
+            # Ensure ElectrumX connection
+            if hasattr(self.wallet_manager, 'connect'):
+                for _ in range(3):
+                    if self.wallet_manager.connect():
+                        break
+                    time.sleep(1)
+
+            # Get wallet
+            wallet = self.wallet_manager.wallet
+            if not wallet:
+                return "Wallet not available."
+
+            # Fetch current balance
+            console_print("Fetching current balance...")
+            if hasattr(wallet, 'getBalances'):
+                wallet.getBalances()
+
+            console_print()
+            console_print("Send Transaction from Wallet                    [Esc to cancel]")
+            console_print("=" * 60)
+            console_print()
+            console_print("Current Balance:")
+            console_print(f"  SATORI: {wallet.balance.amount:.8f}")
+            console_print(f"  EVR:    {wallet.currency.amount:.8f}")
+            console_print()
+
+            # Get recipient address
+            address = console_input("Enter recipient address: ")
+            if address is None:
+                return "Transaction cancelled. Returning to main menu."
+            address = address.strip()
+            if not address:
+                return "Transaction cancelled. Returning to main menu."
+
+            # Validate address
+            from satorilib.wallet.utils.validate import Validate
+            if not Validate.address(address, wallet.symbol):
+                return f"Invalid address: {address}\nReturning to main menu."
+
+            # Clear screen and show amount prompt
+            console_write("\033[2J\033[H")
+            console_print()
+            console_print("Send Transaction from Wallet                    [Esc to cancel]")
+            console_print("=" * 60)
+            console_print(f"Recipient: {address}")
+            console_print()
+            console_print("Current Balance:")
+            console_print(f"  SATORI: {wallet.balance.amount:.8f}")
+            console_print(f"  EVR:    {wallet.currency.amount:.8f}")
+            console_print()
+
+            # Get amount
+            amount_str = console_input("Enter amount of SATORI to send: ")
+            if amount_str is None:
+                return "Transaction cancelled. Returning to main menu."
+            amount_str = amount_str.strip()
+            if not amount_str:
+                return "Transaction cancelled. Returning to main menu."
+
+            try:
+                amount = float(amount_str)
+            except ValueError:
+                return f"Invalid amount: {amount_str}\nReturning to main menu."
+
+            if amount <= 0:
+                return "Amount must be greater than 0.\nReturning to main menu."
+
+            if amount > wallet.balance.amount:
+                return f"Insufficient balance. You have {wallet.balance.amount:.8f} SATORI\nReturning to main menu."
+
+            # Show confirmation
+            console_print()
+            console_print("Transaction Confirmation                        [Esc to cancel]")
+            console_print("=" * 60)
+            console_print(f"  From:   Wallet")
+            console_print(f"  To:     {address}")
+            console_print(f"  Amount: {amount} SATORI")
+            console_print("=" * 60)
+            console_print()
+
+            confirm = console_input("Type 'yes' to confirm: ")
+            if confirm is None:
+                return "Transaction cancelled. Returning to main menu."
+            confirm = confirm.strip().lower()
+            if confirm not in ['yes', 'y']:
+                return "Transaction cancelled. Returning to main menu."
+
+            # Prepare for transaction
+            console_print()
+            console_print("Preparing transaction...")
+            wallet.getReadyToSend(balance=True, save=True)
+
+            # Send transaction
+            console_print("Sending transaction...")
+            txid = wallet.satoriTransaction(amount=amount, address=address)
+
+            return f"\nTransaction successful!\nTransaction ID: {txid}"
+
+        except Exception as e:
+            return f"Error sending transaction: {e}"
+
+    def send_transaction_vault(self) -> str:
+        """Send SATORI transaction from vault."""
+        if not self.wallet_manager:
+            return "Wallet manager not initialized."
+
+        try:
+            # Ensure ElectrumX connection
+            if hasattr(self.wallet_manager, 'connect'):
+                for _ in range(3):
+                    if self.wallet_manager.connect():
+                        break
+                    time.sleep(1)
+
+            # Get vault
+            if self._vault_password:
+                vault = self.wallet_manager.openVault(password=self._vault_password)
+            else:
+                vault = self.wallet_manager.vault
+
+            if not vault:
+                return "Vault not available.\nPlease create or unlock your vault first."
+
+            if hasattr(vault, 'isDecrypted') and not vault.isDecrypted:
+                return "Vault is locked.\nPlease unlock your vault first."
+
+            # Fetch current balance
+            console_print("Fetching current balance...")
+            if hasattr(vault, 'getBalances'):
+                vault.getBalances()
+
+            console_print()
+            console_print("Send Transaction from Vault                     [Esc to cancel]")
+            console_print("=" * 60)
+            console_print()
+            console_print("Current Balance:")
+            console_print(f"  SATORI: {vault.balance.amount:.8f}")
+            console_print(f"  EVR:    {vault.currency.amount:.8f}")
+            console_print()
+
+            # Get recipient address
+            address = console_input("Enter recipient address: ")
+            if address is None:
+                return "Transaction cancelled. Returning to main menu."
+            address = address.strip()
+            if not address:
+                return "Transaction cancelled. Returning to main menu."
+
+            # Validate address
+            from satorilib.wallet.utils.validate import Validate
+            if not Validate.address(address, vault.symbol):
+                return f"Invalid address: {address}\nReturning to main menu."
+
+            # Clear screen and show amount prompt
+            console_write("\033[2J\033[H")
+            console_print()
+            console_print("Send Transaction from Vault                     [Esc to cancel]")
+            console_print("=" * 60)
+            console_print(f"Recipient: {address}")
+            console_print()
+            console_print("Current Balance:")
+            console_print(f"  SATORI: {vault.balance.amount:.8f}")
+            console_print(f"  EVR:    {vault.currency.amount:.8f}")
+            console_print()
+
+            # Get amount
+            amount_str = console_input("Enter amount of SATORI to send: ")
+            if amount_str is None:
+                return "Transaction cancelled. Returning to main menu."
+            amount_str = amount_str.strip()
+            if not amount_str:
+                return "Transaction cancelled. Returning to main menu."
+
+            try:
+                amount = float(amount_str)
+            except ValueError:
+                return f"Invalid amount: {amount_str}\nReturning to main menu."
+
+            if amount <= 0:
+                return "Amount must be greater than 0.\nReturning to main menu."
+
+            if amount > vault.balance.amount:
+                return f"Insufficient balance. You have {vault.balance.amount:.8f} SATORI\nReturning to main menu."
+
+            # Show confirmation
+            console_print()
+            console_print("Transaction Confirmation                        [Esc to cancel]")
+            console_print("=" * 60)
+            console_print(f"  From:   Vault")
+            console_print(f"  To:     {address}")
+            console_print(f"  Amount: {amount} SATORI")
+            console_print("=" * 60)
+            console_print()
+
+            confirm = console_input("Type 'yes' to confirm: ")
+            if confirm is None:
+                return "Transaction cancelled. Returning to main menu."
+            confirm = confirm.strip().lower()
+            if confirm not in ['yes', 'y']:
+                return "Transaction cancelled. Returning to main menu."
+
+            # Prepare for transaction
+            console_print()
+            console_print("Preparing transaction...")
+            vault.getReadyToSend(balance=True, save=True)
+
+            # Send transaction
+            console_print("Sending transaction...")
+            txid = vault.satoriTransaction(amount=amount, address=address)
+
+            return f"\nTransaction successful!\nTransaction ID: {txid}"
+
+        except Exception as e:
+            return f"Error sending transaction: {e}"
+
     def handle_command(self, user_input: str) -> str | None:
         """Process user commands and return response."""
         user_input = user_input.strip()
@@ -636,7 +861,8 @@ System:
             # Interactive menu for balance
             options = [
                 {'label': 'Wallet Balance', 'action': 'wallet'},
-                {'label': 'Vault Balance', 'action': 'vault'}
+                {'label': 'Vault Balance', 'action': 'vault'},
+                {'label': 'Back to Main Menu', 'action': 'back'}
             ]
 
             selected = self.interactive_menu("Balance Menu", options)
@@ -646,7 +872,9 @@ System:
 
             # Execute the selected option
             action = options[selected]['action']
-            if action == 'wallet':
+            if action == 'back':
+                return None
+            elif action == 'wallet':
                 return self.get_wallet_balance_electrumx()
             elif action == 'vault':
                 return self.get_vault_balance_electrumx()
@@ -709,6 +937,7 @@ System:
 
         options = [
             {'label': 'Check Balance', 'action': 'balance'},
+            {'label': 'Send Transaction', 'action': 'send'},
             {'label': 'Vault Status', 'action': 'vault-status'},
             {'label': 'Clear Screen', 'action': 'clear'},
             {'label': 'Exit', 'action': 'exit'}
@@ -790,6 +1019,27 @@ System:
                 # Execute the selected action
                 if action == 'balance':
                     response = self.handle_command("/balance")
+                elif action == 'send':
+                    # Show submenu for wallet vs vault
+                    send_options = [
+                        {'label': 'From Wallet', 'action': 'wallet'},
+                        {'label': 'From Vault', 'action': 'vault'},
+                        {'label': 'Back to Main Menu', 'action': 'back'}
+                    ]
+                    send_selected = self.interactive_menu("Send Transaction", send_options)
+
+                    if send_selected is None:
+                        continue
+
+                    send_action = send_options[send_selected]['action']
+                    if send_action == 'back':
+                        continue
+                    elif send_action == 'wallet':
+                        response = self.send_transaction_wallet()
+                    elif send_action == 'vault':
+                        response = self.send_transaction_vault()
+                    else:
+                        response = "Unknown send action"
                 elif action == 'vault-status':
                     response = self.handle_command("/vault-status")
                 elif action == 'clear':
