@@ -684,6 +684,58 @@ def register_routes(app):
                 return jsonify({'error': str(e)}), 500
         return jsonify({'error': 'Identity wallet not initialized'}), 500
 
+    @app.route('/api/wallet/send-from-wallet', methods=['POST'])
+    @login_required
+    def api_wallet_send_from_wallet():
+        """Send SATORI tokens from wallet (identity wallet)."""
+        wallet_manager = get_or_create_session_vault()
+        if not wallet_manager or not wallet_manager.wallet:
+            return jsonify({'error': 'Wallet not initialized'}), 500
+
+        data = request.json or {}
+        address = data.get('address', '').strip()
+        amount = data.get('amount')
+        sweep = data.get('sweep', False)
+
+        # Validate address
+        if not address:
+            return jsonify({'error': 'Address is required'}), 400
+        if not address.startswith('E') or len(address) != 34:
+            return jsonify({'error': 'Invalid address format'}), 400
+
+        # Validate amount (unless sweep)
+        if not sweep:
+            try:
+                amount = float(amount)
+                if amount <= 0:
+                    return jsonify({'error': 'Amount must be greater than 0'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Invalid amount'}), 400
+
+        try:
+            wallet = wallet_manager.wallet
+            # Get ready to send
+            wallet.get()
+            wallet.getReadyToSend()
+
+            if sweep:
+                # Send all tokens - returns string (txid)
+                txid = wallet.sendAllTransaction(address)
+                if txid and len(txid) == 64:
+                    return jsonify({'success': True, 'txid': txid})
+                else:
+                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
+            else:
+                # Send specific amount - use satoriTransaction for wallet (like CLI does)
+                txid = wallet.satoriTransaction(amount=amount, address=address)
+
+                if txid and len(txid) == 64:
+                    return jsonify({'success': True, 'txid': txid})
+                else:
+                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/wallet/send', methods=['POST'])
     @login_required
     def api_wallet_send():
