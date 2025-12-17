@@ -724,6 +724,71 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/lender/pay', methods=['POST'])
+    @login_required
+    def api_lender_pay():
+        """Pay lenders from audit - simple single-transaction approach."""
+        try:
+            # Get wallet manager
+            wallet_manager = get_or_create_session_vault()
+            if not wallet_manager:
+                return jsonify({'error': 'Wallet not initialized'}), 500
+
+            vault = wallet_manager.vault
+
+            # Check vault is unlocked
+            if not vault.isDecrypted:
+                return jsonify({'error': 'Vault is locked'}), 401
+
+            # Get payments from request
+            data = request.json
+            if not data:
+                return jsonify({'error': 'No data provided'}), 400
+
+            payments = data.get('payments', {})
+
+            if not payments:
+                return jsonify({'error': 'No payments provided'}), 400
+
+            # Check limit (blockchain max is 1000)
+            if len(payments) > 1000:
+                return jsonify({
+                    'error': f'Too many lenders ({len(payments)}). Maximum is 1000.'
+                }), 400
+
+            # Calculate total
+            total = sum(payments.values())
+
+            # Check balance
+            vault.get()
+            if vault.balance.amount < total:
+                return jsonify({
+                    'error': f'Insufficient balance: have {vault.balance.amount}, need {total}'
+                }), 400
+
+            # Prepare and send
+            vault.getReadyToSend()
+            txhash = vault.satoriDistribution(
+                amountByAddress=payments,
+                memo='Lender rewards',
+                broadcast=True
+            )
+
+            # Validate txhash
+            if txhash and isinstance(txhash, str) and len(txhash) == 64:
+                return jsonify({
+                    'success': True,
+                    'txhash': txhash,
+                    'lenders_paid': len(payments),
+                    'total_sent': total
+                })
+            else:
+                return jsonify({'error': f'Invalid transaction hash: {txhash}'}), 500
+
+        except Exception as e:
+            app.logger.error(f"Error in lender payment: {str(e)}")
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/wallet/qr/<address>')
     @login_required
     def api_wallet_qr(address: str):

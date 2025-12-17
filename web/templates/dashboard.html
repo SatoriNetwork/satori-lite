@@ -308,6 +308,16 @@
                             Download the latest audit files showing worker distributions and lender commissions.
                         </small>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">Lender Payments</label>
+                        <button class="btn btn-success btn-sm" onclick="payLenders()">
+                            <i class="material-icons align-middle" style="font-size: 16px;">payments</i>
+                            Pay Lenders From Audit
+                        </button>
+                        <small class="form-text text-muted">
+                            Automatically pay your lenders based on the latest audit file (up to 1000 lenders in one transaction).
+                        </small>
+                    </div>
                 </div>
             </div>
         </div>
@@ -773,6 +783,113 @@
         } catch (error) {
             console.error('Error downloading lenders audit:', error);
             showToast('Failed to download lenders audit', 'error');
+        }
+    }
+
+    // Pay lenders from audit
+    async function payLenders() {
+        try {
+            // 1. Fetch audit
+            showToast('Fetching audit...', 'info');
+            const centralApiUrl = getCentralApiUrl();
+            const response = await fetch(`${centralApiUrl}/api/v1/audit/lenders/latest`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    showToast('No audit available yet', 'warning');
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const audit = await response.json();
+
+            // 2. Find my pool and lenders
+            const myAddress = await apiCall('/wallet/address');
+            if (!myAddress || !myAddress.wallet_address) {
+                showToast('Unable to determine your wallet address', 'error');
+                return;
+            }
+
+            const myPool = audit.pools.find(p => p.pool_address === myAddress.wallet_address);
+
+            if (!myPool || !myPool.lenders || myPool.lenders.length === 0) {
+                showToast('No lenders to pay', 'info');
+                return;
+            }
+
+            // 3. Build payment dictionary
+            const payments = {};
+            myPool.lenders.forEach(lender => {
+                if (lender.commission_owed > 0) {
+                    payments[lender.lender_address] = lender.commission_owed;
+                }
+            });
+
+            const count = Object.keys(payments).length;
+            if (count === 0) {
+                showToast('No lenders with amounts owed', 'info');
+                return;
+            }
+
+            const total = Object.values(payments).reduce((sum, amt) => sum + amt, 0);
+
+            // 4. Check balance
+            const balance = await apiCall('/wallet/balance/direct');
+            if (!balance) {
+                showToast('Unable to check balance', 'error');
+                return;
+            }
+
+            if (balance.vault_balance < total) {
+                showToast(`Insufficient balance: need ${total.toFixed(8)}, have ${balance.vault_balance.toFixed(8)}`, 'error');
+                return;
+            }
+
+            // 5. Confirm with user
+            const confirmMsg =
+                `Pay ${count} lenders a total of ${total.toFixed(8)} SATORI?\n\n` +
+                `Your balance: ${balance.vault_balance.toFixed(8)} SATORI\n` +
+                `EVR for fees: ${balance.vault_evr.toFixed(8)} EVR\n\n` +
+                `⚠️ This action cannot be undone!`;
+
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            // 6. Send payment
+            showToast('Sending payment to lenders...', 'info');
+
+            const paymentResponse = await fetch('/api/lender/pay', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({payments})
+            });
+
+            const data = await paymentResponse.json();
+
+            if (data.success) {
+                // 7. Show success
+                const explorerUrl = `https://evr.cryptoscope.io/tx/?hash=${data.txhash}`;
+                showToast(`✓ Paid ${data.lenders_paid} lenders!`, 'success');
+
+                const resultMsg =
+                    `Successfully paid ${data.lenders_paid} lenders!\n\n` +
+                    `Total: ${data.total_sent.toFixed(8)} SATORI\n\n` +
+                    `Transaction: ${data.txhash}\n\n` +
+                    `View on blockchain explorer:\n${explorerUrl}`;
+
+                alert(resultMsg);
+
+                // Refresh balance
+                loadAllBalances();
+            } else {
+                showToast(`Payment failed: ${data.error}`, 'error');
+            }
+
+        } catch (error) {
+            console.error('Error paying lenders:', error);
+            showToast(`Failed to pay lenders: ${error.message}`, 'error');
         }
     }
 
