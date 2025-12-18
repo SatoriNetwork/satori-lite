@@ -14,15 +14,15 @@ Quick reference for Independent Predictors, Pool Operators, and Pool Stakers.
 1. **Run a node** - Install and run the Satori prediction software
 2. **Make predictions** - Your node automatically predicts future values for assigned data streams
 3. **Earn rewards** - Accurate predictions earn you SATORI tokens based on prediction quality
-4. **Maintain stake** - Keep at least 10 SATORI tokens to qualify for rewards
+4. **Maintain stake** - Keep at least 50 SATORI tokens to qualify for rewards
 
 **Key requirements:**
-- Minimum 10 SATORI balance to qualify
+- Minimum 50 SATORI balance to qualify
 - Better prediction accuracy = higher rewards
 - Predictions ranked by distance from actual value
 
 **Optional: Join a pool**
-- Get balance boosts from a pool to meet the 10 token minimum
+- Get balance boosts from a pool to meet the 50 token minimum
 - **IMPORTANT:** You must set your `reward_address` to match the pool's address
 - Without matching reward_address, you won't receive boosts
 - Pool helps you qualify in exchange for rewards
@@ -44,7 +44,7 @@ Quick reference for Independent Predictors, Pool Operators, and Pool Stakers.
 
 **How pool boosts work:**
 - Your pool balance (own tokens + pool staker contributions) is distributed to workers
-- Workers are boosted to 10 token minimum in order of prediction quality
+- Workers are boosted to 50 token minimum in order of prediction quality
 - **Workers must set their reward_address to match your pool to receive boosts**
 - After distributing, your pool receives all workers' rewards
 
@@ -253,7 +253,7 @@ A: Commission payment is off-chain and relies on pool operator honesty. Choose r
 **Q: How many pool stakers can receive payment in one transaction?**
 A: Up to 1000 pool stakers per transaction using the automated payment system.
 
-**Q: What happens if I don't have 10 SATORI?**
+**Q: What happens if I don't have 50 SATORI?**
 A: You won't qualify for rewards. Join a pool to get boosted, or acquire more tokens.
 
 ---
