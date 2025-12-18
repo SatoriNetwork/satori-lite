@@ -11,7 +11,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Create directory structure
-RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron
+RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web
 
 # Copy satori-lite code
 COPY lib-lite /Satori/Lib
@@ -29,11 +29,20 @@ RUN pip install --upgrade pip && \
 # Set Python path - include /Satori so 'from web.app' imports work
 ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
 
+# Create symbolic links for docker-compose.yaml compatibility
+# Remove existing directories first, then create symlinks
+RUN rm -rf /Satori/Neuron/data /Satori/Neuron/models && \
+    ln -s /Satori/Engine/db /Satori/Neuron/data && \
+    ln -s /Satori/models /Satori/Neuron/models
+
+# Make start.sh executable (entrypoint for docker-compose compatibility)
+RUN chmod +x /Satori/Neuron/satorineuron/web/start.sh
+
 # Working directory
 WORKDIR /Satori
 
 # Expose web UI port
-EXPOSE 5000
+EXPOSE 24601
 
-# Default command - starts neuron + web UI on port 5000
+# Default command - starts neuron + web UI on port 24601
 CMD ["python", "/Satori/Neuron/start.py"]

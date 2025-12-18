@@ -14,6 +14,7 @@ import requests
 import uuid
 from threading import Lock
 from cryptography.fernet import Fernet
+from satorilib.config import get_api_url
 from flask import (
     render_template,
     redirect,
@@ -170,26 +171,45 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
 
     Args:
         app: Flask app instance for config access
-        wallet_manager: The wallet manager instance with wallet and vault
+        wallet_manager: The wallet manager instance with wallet and vault (both must be decrypted)
         max_retries: Maximum number of retry attempts
 
     Returns:
         dict with peer info if successful, None if failed
     """
-    api_url = app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+    api_url = app.config.get('SATORI_API_URL', get_api_url())
 
-    # Get wallet pubkey (identity)
+    # Validate wallet exists
+    if not wallet_manager.wallet:
+        logger.error("Wallet not initialized - cannot register peer")
+        return None
+
+    # Validate vault exists and is decrypted
+    if not wallet_manager.vault:
+        logger.error("Vault not initialized - cannot register peer")
+        return None
+
+    if not hasattr(wallet_manager.vault, 'isDecrypted') or not wallet_manager.vault.isDecrypted:
+        logger.error("Vault is not decrypted - cannot register peer")
+        return None
+
+    # Get wallet pubkey (identity) - REQUIRED
     wallet_pubkey = None
-    if wallet_manager.wallet and hasattr(wallet_manager.wallet, 'pubkey'):
+    if hasattr(wallet_manager.wallet, 'pubkey'):
         wallet_pubkey = wallet_manager.wallet.pubkey
 
-    # Get vault pubkey
+    # Get vault pubkey - REQUIRED (not optional)
     vault_pubkey = None
-    if wallet_manager.vault and hasattr(wallet_manager.vault, 'pubkey'):
+    if hasattr(wallet_manager.vault, 'pubkey'):
         vault_pubkey = wallet_manager.vault.pubkey
 
+    # Validate both pubkeys are present
     if not wallet_pubkey:
-        logger.warning("No wallet pubkey available for peer registration")
+        logger.error("Wallet pubkey not available - cannot register peer")
+        return None
+
+    if not vault_pubkey:
+        logger.error("Vault pubkey not available - cannot register peer")
         return None
 
     for attempt in range(max_retries):
@@ -209,9 +229,14 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
                     return data
 
             # Step 2: Peer not found, register
-            headers = {'wallet-pubkey': wallet_pubkey}
-            if vault_pubkey:
-                headers['vault-pubkey'] = vault_pubkey
+            # POST /api/v1/peer/register
+            # Required headers:
+            #   - wallet-pubkey: The identity wallet's public key (REQUIRED)
+            #   - vault-pubkey: The vault wallet's public key (REQUIRED - must be decrypted)
+            headers = {
+                'wallet-pubkey': wallet_pubkey,
+                'vault-pubkey': vault_pubkey
+            }
 
             resp = requests.post(
                 f"{api_url}/api/v1/peer/register",
@@ -462,12 +487,13 @@ def register_routes(app):
     @login_required
     def dashboard():
         """Main dashboard page."""
-        return render_template('dashboard.html')
+        from satorineuron import VERSION
+        return render_template('dashboard.html', version=VERSION)
 
     @app.route('/health')
     def health():
         """Health check endpoint - checks API server connectivity."""
-        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+        api_url = current_app.config.get('SATORI_API_URL', get_api_url())
         try:
             resp = requests.get(f"{api_url}/health", timeout=5)
             if resp.status_code == 200:
@@ -489,7 +515,7 @@ def register_routes(app):
         if not wallet_manager or not wallet_manager.wallet:
             return None
 
-        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+        api_url = current_app.config.get('SATORI_API_URL', get_api_url())
 
         try:
             # Step 1: Get challenge
@@ -527,7 +553,7 @@ def register_routes(app):
 
     def proxy_api(endpoint, method='GET', data=None, authenticated=True):
         """Proxy requests to the Satori API server."""
-        api_url = current_app.config.get('SATORI_API_URL', 'http://satori-api:8000')
+        api_url = current_app.config.get('SATORI_API_URL', get_api_url())
         url = f"{api_url}/api/v1{endpoint}"
 
         # Get auth headers for authenticated requests
@@ -663,6 +689,58 @@ def register_routes(app):
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         return jsonify({'error': 'Identity wallet not initialized'}), 500
+
+    @app.route('/api/wallet/send-from-wallet', methods=['POST'])
+    @login_required
+    def api_wallet_send_from_wallet():
+        """Send SATORI tokens from wallet (identity wallet)."""
+        wallet_manager = get_or_create_session_vault()
+        if not wallet_manager or not wallet_manager.wallet:
+            return jsonify({'error': 'Wallet not initialized'}), 500
+
+        data = request.json or {}
+        address = data.get('address', '').strip()
+        amount = data.get('amount')
+        sweep = data.get('sweep', False)
+
+        # Validate address
+        if not address:
+            return jsonify({'error': 'Address is required'}), 400
+        if not address.startswith('E') or len(address) != 34:
+            return jsonify({'error': 'Invalid address format'}), 400
+
+        # Validate amount (unless sweep)
+        if not sweep:
+            try:
+                amount = float(amount)
+                if amount <= 0:
+                    return jsonify({'error': 'Amount must be greater than 0'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Invalid amount'}), 400
+
+        try:
+            wallet = wallet_manager.wallet
+            # Get ready to send
+            wallet.get()
+            wallet.getReadyToSend()
+
+            if sweep:
+                # Send all tokens - returns string (txid)
+                txid = wallet.sendAllTransaction(address)
+                if txid and len(txid) == 64:
+                    return jsonify({'success': True, 'txid': txid})
+                else:
+                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
+            else:
+                # Send specific amount - use satoriTransaction for wallet (like CLI does)
+                txid = wallet.satoriTransaction(amount=amount, address=address)
+
+                if txid and len(txid) == 64:
+                    return jsonify({'success': True, 'txid': txid})
+                else:
+                    return jsonify({'error': 'Transaction failed', 'details': str(txid)}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/wallet/send', methods=['POST'])
     @login_required

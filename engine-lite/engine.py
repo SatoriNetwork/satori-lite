@@ -155,7 +155,7 @@ class Engine:
         """Initialize engine when spawned from Neuron (no DataServer needed)"""
         info("Engine initializing from Neuron...", color='blue')
         self.initializeModelsFromNeuron()
-        info("Engine initialized successfully", color='green')
+        # info("Engine initialized successfully", color='green')
 
     def startService(self):
         self.getPubSubInfo()

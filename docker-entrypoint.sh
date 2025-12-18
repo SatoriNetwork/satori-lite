@@ -25,7 +25,7 @@ echo "Neuron started with PID $NEURON_PID"
 sleep 2
 
 # Start the web UI in the background
-echo "Starting Web UI on port ${WEB_PORT:-5000}..."
+echo "Starting Web UI on port ${WEB_PORT:-24601}..."
 cd /Satori/Web
 python app.py &
 WEB_PID=$!
@@ -34,7 +34,7 @@ echo "Web UI started with PID $WEB_PID"
 echo ""
 echo "================================================"
 echo "Satori Lite is running!"
-echo "Web UI available at: http://localhost:${WEB_PORT:-5000}"
+echo "Web UI available at: http://localhost:${WEB_PORT:-24601}"
 echo "================================================"
 echo ""
 

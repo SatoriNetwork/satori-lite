@@ -15,7 +15,7 @@ from satorineuron import config
 from satorineuron.init.tag import LatestTag, Version
 from satorineuron.init.wallet import WalletManager
 from satorineuron.structs.start import RunMode, StartupDagStruct
-from satorilib.utils.ip import getPublicIpv4UsingCurl
+# from satorilib.utils.ip import getPublicIpv4UsingCurl  # Removed - not needed
 from satoriengine.veda.engine import Engine
 
 
@@ -74,7 +74,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.version = Version(VERSION)
         self.env = env
         self.runMode = RunMode.choose(runMode or config.get().get('mode', None))
-        logging.debug(f'mode: {self.runMode.name}', print=True)
+        # logging.debug(f'mode: {self.runMode.name}', print=True)
+        # Read UI port from environment and save to config
+        self.uiPort = int(os.environ.get('SATORI_UI_PORT', '24601'))
+        config.add(data={'uiport': self.uiPort})
         self.userInteraction = time.time()
         self.walletManager: WalletManager
         self.isDebug: bool = isDebug
@@ -93,7 +96,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.configRewardAddress: str = None
         self.setRewardAddress()
         self.setupWalletManager()
-        self.ip = getPublicIpv4UsingCurl()
+        self.ip = None  # Not used by server, no need to detect
         self.checkinCheckThread = threading.Thread(
             target=self.checkinCheck,
             daemon=True)
@@ -197,6 +200,38 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return evrvaultaddress
         else:
             return ""
+
+    def getVaultInfoFromFile(self) -> dict:
+        """Read vault info (address and pubkey) from vault.yaml without decrypting.
+
+        The address and pubkey are stored unencrypted in vault.yaml, so we can read them
+        even when the vault is locked.
+
+        Returns:
+            dict: {'address': str, 'pubkey': str} or empty dict if file doesn't exist
+        """
+        try:
+            import yaml
+            vault_path = config.walletPath('vault.yaml')
+            if not os.path.exists(vault_path):
+                return {}
+
+            with open(vault_path, 'r') as f:
+                vault_data = yaml.safe_load(f)
+
+            result = {}
+            if vault_data:
+                # Address is under evr: section
+                if 'evr' in vault_data and 'address' in vault_data['evr']:
+                    result['address'] = vault_data['evr']['address']
+                # publicKey is at top level
+                if 'publicKey' in vault_data:
+                    result['pubkey'] = vault_data['publicKey']
+
+            return result
+        except Exception as e:
+            logging.warning(f"Could not read vault info from file: {e}")
+            return {}
 
     def setupWalletManager(self):
         # Never auto-decrypt the global vault - it should remain encrypted
@@ -357,6 +392,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     def startWorker(self):
         """start the satori engine."""
         logging.info("running in worker mode", color="blue")
+        if self.env == 'prod' and self.serverConnectedRecently():
+            last_checkin = config.get().get('server checkin')
+            elapsed_minutes = (time.time() - last_checkin) / 60
+            wait_minutes = max(0, 10 - elapsed_minutes)
+            if wait_minutes > 0:
+                logging.info(f"Server connected recently, waiting {wait_minutes:.1f} minutes")
+                time.sleep(wait_minutes * 60)
+        self.recordServerConnection()
         self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
@@ -377,7 +420,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         config.add(data={'server checkin': time.time()})
 
     def createServerConn(self):
-        logging.debug(self.urlServer, color="teal")
+        # logging.debug(self.urlServer, color="teal")
         self.server = SatoriServerClient(
             self.wallet, url=self.urlServer, sendingUrl=self.urlMundo
         )
@@ -393,14 +436,21 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         while True:
             attempt += 1
             try:
-                vault = self.getVault()
+                # Get vault info from vault.yaml (available even when encrypted)
+                vault_info = self.getVaultInfoFromFile()
+
+                # Build vaultInfo dict for checkin
+                vaultInfo = None
+                if vault_info.get('address') or vault_info.get('pubkey'):
+                    vaultInfo = {
+                        'vaultaddress': vault_info.get('address'),
+                        'vaultpubkey': vault_info.get('pubkey')
+                    }
+
                 self.details = CheckinDetails(
                     self.server.checkin(
                         ip=self.ip,
-                        vaultInfo={
-                            'vaultaddress': vault.address,
-                            'vaultpubkey': vault.pubkey,
-                        } if isinstance(vault, EvrmoreWallet) else None))
+                        vaultInfo=vaultInfo))
 
                 # For central-lite: no subscriptions/publications/keys needed
                 # Just store minimal response data
@@ -506,7 +556,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning("No stream assignments available, skipping Engine spawn")
             return
 
-        logging.info("Spawning AI Engine...", color="blue")
+        # logging.info("Spawning AI Engine...", color="blue")
         try:
             self.aiengine = Engine.createFromNeuron(
                 subscriptions=self.subscriptions,
@@ -610,7 +660,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return self.details.stakeRequired or constants.stakeRequired
 
 
-def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 5000):
+def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601):
     """Start the Flask web UI in a background thread."""
     try:
         from web.app import create_app
@@ -622,6 +672,10 @@ def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 5000):
         set_vault(startupDag.walletManager)
 
         def run_flask():
+            # Suppress Flask/werkzeug logging
+            import logging as stdlib_logging
+            werkzeug_logger = stdlib_logging.getLogger('werkzeug')
+            werkzeug_logger.setLevel(stdlib_logging.ERROR)
             # Use werkzeug server (not for production, but fine for local use)
             app.run(host=host, port=port, debug=False, use_reloader=False)
 
@@ -647,13 +701,13 @@ if __name__ == "__main__":
         time.sleep(2)  # Wait for StartupDag to be created
         try:
             startup = getStart()
-            startWebUI(startup)
+            startWebUI(startup, port=startup.uiPort)
         except Exception as e:
             logging.warning(f"Early web UI start failed: {e}")
 
     web_early_thread = threading.Thread(target=start_web_early, daemon=True)
     web_early_thread.start()
 
-    startup = StartupDag.create(env='prod', runMode='worker')
+    startup = StartupDag.create(env=os.environ.get('SATORI_ENV', 'prod'), runMode='worker')
 
     threading.Event().wait()

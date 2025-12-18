@@ -93,3 +93,23 @@ def electrumxServers():
 def path(of='data'):
     ''' used to get the data or model path '''
     return get().get(verbose(f'{of}Path'), root(f'./{of}'))
+
+
+# Central server URL - single source of truth
+DEFAULT_CENTRAL_URL = 'http://137.184.38.13:8000'
+
+
+def get_central_url() -> str:
+    """
+    Get the central server URL.
+    Checks SATORI_CENTRAL_URL env var first, falls back to default.
+    """
+    return os.environ.get('SATORI_CENTRAL_URL', DEFAULT_CENTRAL_URL)
+
+
+def get_api_url() -> str:
+    """
+    Get the API URL (alias for central URL).
+    Checks SATORI_API_URL first, then SATORI_CENTRAL_URL, falls back to default.
+    """
+    return os.environ.get('SATORI_API_URL', get_central_url())

@@ -46,11 +46,9 @@ class SatoriServerClient(object):
         *args, **kwargs
     ):
         self.wallet = wallet
-        # Updated to point to local development server
-        # Original: 'https://stage.satorinet.io'
-        # Use environment variable or default to localhost
-        import os
-        default_url = os.environ.get('SATORI_CENTRAL_URL', 'http://localhost:8000')
+        # Use central config for URL
+        from satorilib.config import get_central_url
+        default_url = get_central_url()
         self.url = url or default_url
         self.sendingUrl = sendingUrl or default_url
         self.topicTime: dict[str, float] = {}
@@ -239,8 +237,26 @@ class SatoriServerClient(object):
             if health_response.status_code == 200:
                 logging.info('connected to central-lite', color='green')
 
-                # For central-lite: Peer registration happens automatically during authentication
-                # via the authenticate() dependency. No separate checkin endpoint needed.
+                # For central-lite: Register peer with vault info
+                # Call /api/v1/peer/register with vault-pubkey header
+                if vaultInfo and vaultInfo.get('vaultpubkey'):
+                    try:
+                        headers = {
+                            'wallet-pubkey': self.wallet.pubkey,
+                            'vault-pubkey': vaultInfo.get('vaultpubkey')
+                        }
+                        register_response = requests.post(
+                            self.url + '/api/v1/peer/register',
+                            headers=headers,
+                            timeout=10
+                        )
+                        if register_response.status_code == 200:
+                            # logging.info('peer registered with vault info', color='green')
+                            pass
+                        else:
+                            logging.warning(f'peer registration failed: {register_response.text}')
+                    except Exception as e:
+                        logging.warning(f'peer registration error: {e}')
 
                 # Return minimal checkin data for central-lite
                 self.lastCheckin = time.time()
@@ -433,7 +449,7 @@ class SatoriServerClient(object):
             """Clean and sanitize stream data"""
             return sanitizeJson(streams)
 
-        print("getSearchStreamsPaginated")
+        # print("getSearchStreamsPaginated")
         try:
             page = max(1, page)
             per_page = min(max(1, per_page), 200)

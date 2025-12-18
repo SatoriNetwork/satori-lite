@@ -3,9 +3,9 @@ def getPublicIpv4():
 
 def getPublicIpv4UsingCurl():
     import os
-    x = os.popen("curl -4 https://checkip.amazonaws.com").read().strip()
+    x = os.popen("curl -4 https://checkip.amazonaws.com 2>/dev/null").read().strip()
     if x == "":
-        x = os.popen("curl -4 ifconfig.me").read().strip()
+        x = os.popen("curl -4 ifconfig.me 2>/dev/null").read().strip()
     return x
 
 def getPublicIpv4UsingRequests():

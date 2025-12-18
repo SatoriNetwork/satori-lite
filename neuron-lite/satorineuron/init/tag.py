@@ -14,6 +14,9 @@ class Version:
     def validate(string: str) -> str:
         if not isinstance(string, str):
             return '0.0.0'
+        # Strip 'v' prefix if present
+        if string.startswith('v') or string.startswith('V'):
+            string = string[1:]
         if string.count('.') < 2:
             return '0.0.0'
         if len(string) < 5:

@@ -366,6 +366,9 @@ class Wallet(WalletBase):
             return
         try:
             self.maybeConnect()
+            # Ensure divisibility is set from blockchain stats before sending
+            if self.divisibility == 0:
+                self.getStats()
             if balance:
                 self.getBalances()
             self.getUnspents()

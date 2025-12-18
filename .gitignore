@@ -106,9 +106,9 @@ me-guide/
 
 #security
 neuron-lite/wallet/*
-neuron-lite/config/config.yaml
-neuron-lite/config/docker-compose.example.yaml
-neuron-lite/config/relay.yaml
+neuron-lite/config/
+neuron-lite/models/
+engine-lite/db/
 config/
 wallet/
 models/

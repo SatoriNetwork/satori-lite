@@ -125,7 +125,8 @@ start_satori_lite() {
     docker run -d \
         --name satori-lite \
         --network app_default \
-        -p 5000:5000 \
+        -p 24601:24601 \
+        -e SATORI_UI_PORT=24601 \
         -v "$SCRIPT_DIR/data:/data" \
         -e SATORI_API_URL=http://satori-api:8000 \
         -e WALLET_PATH=/data/wallet.yaml \
@@ -136,7 +137,7 @@ start_satori_lite() {
     # Wait for web UI to be healthy
     print_status "Waiting for satori-lite to be healthy..."
     for i in {1..20}; do
-        if curl -s http://localhost:5000/health >/dev/null 2>&1; then
+        if curl -s http://localhost:24601/health >/dev/null 2>&1; then
             print_status "satori-lite is healthy!"
             break
         fi
@@ -177,7 +178,7 @@ print_final_status() {
     echo -e "${GREEN}  DEPLOYMENT COMPLETE!${NC}"
     echo -e "${GREEN}================================================${NC}"
     echo ""
-    echo -e "  ${BLUE}Web UI:${NC}     http://localhost:5000"
+    echo -e "  ${BLUE}Web UI:${NC}     http://localhost:24601"
     echo -e "  ${BLUE}API Server:${NC} http://localhost:8000"
     echo ""
     echo -e "  ${YELLOW}IMPORTANT:${NC}"

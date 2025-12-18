@@ -18,7 +18,7 @@ services:
       VAULT_PATH: /data/vault.yaml
       # Flask config
       SECRET_KEY: local-dev-secret-key-change-in-production
-      WEB_PORT: 5000
+      WEB_PORT: 24601
     volumes:
       # Persist wallet data
       - ./data:/data
@@ -26,7 +26,7 @@ services:
       # - ./web:/Satori/web
       # - ./neuron-lite:/Satori/Neuron
     ports:
-      - "5000:5000"
+      - "24601:24601"
     depends_on:
       api:
         condition: service_started

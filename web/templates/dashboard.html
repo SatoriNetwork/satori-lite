@@ -5,7 +5,10 @@
 {% block content %}
 <!-- Navigation -->
 <nav class="navbar navbar-expand-lg px-4">
-    <span class="navbar-brand">Satori</span>
+    <span class="navbar-brand">
+        Satori
+        <small class="text-muted ms-2" style="font-size: 0.65rem; font-weight: 400; opacity: 0.6;">{{ version }}</small>
+    </span>
     <div class="ms-auto d-flex align-items-center">
         <span class="me-3">
             <span class="status-indicator status-online" id="statusIndicator"></span>
@@ -79,6 +82,23 @@
                                 <i class="material-icons align-middle me-1">send</i>
                                 Send SATORI
                             </h6>
+                            <div class="mb-3">
+                                <label class="form-label">Send From</label>
+                                <div class="d-flex gap-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
+                                        <label class="form-check-label" for="sendFromVault">
+                                            Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
+                                        <label class="form-check-label" for="sendFromWallet">
+                                            Identity Wallet <small class="text-muted" id="walletBalanceLabel">(--)</small>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="mb-3">
                                 <label class="form-label">Destination Address</label>
                                 <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
@@ -524,10 +544,20 @@
             if (result && !result.error) {
                 document.getElementById('tokenBalance').textContent = result.total !== undefined ? result.total.toFixed(8) : '--';
                 document.getElementById('evrBalance').textContent = result.total_evr !== undefined ? result.total_evr.toFixed(8) : '--';
+
+                // Update balance labels in send section
+                if (result.vault_balance !== undefined) {
+                    document.getElementById('vaultBalanceLabel').textContent = '(' + result.vault_balance.toFixed(8) + ')';
+                }
+                if (result.wallet_balance !== undefined) {
+                    document.getElementById('walletBalanceLabel').textContent = '(' + result.wallet_balance.toFixed(8) + ')';
+                }
             } else {
                 // If there's an error, show dashes
                 document.getElementById('tokenBalance').textContent = '--';
                 document.getElementById('evrBalance').textContent = '--';
+                document.getElementById('vaultBalanceLabel').textContent = '(--)';
+                document.getElementById('walletBalanceLabel').textContent = '(--)';
                 if (result && result.error) {
                     console.error('ElectrumX balance fetch error:', result.error);
                 }
@@ -536,6 +566,8 @@
             console.error('Failed to fetch balance from ElectrumX:', error);
             document.getElementById('tokenBalance').textContent = '--';
             document.getElementById('evrBalance').textContent = '--';
+            document.getElementById('vaultBalanceLabel').textContent = '(--)';
+            document.getElementById('walletBalanceLabel').textContent = '(--)';
         }
     }
 
@@ -1129,6 +1161,10 @@
         const sendBtn = document.getElementById('sendBtn');
         const resultDiv = document.getElementById('sendResult');
 
+        // Get selected source (wallet or vault)
+        const sendSource = document.querySelector('input[name="sendSource"]:checked').value;
+        const sourceName = sendSource === 'wallet' ? 'Identity Wallet' : 'Vault';
+
         // Validate
         if (!address) {
             showToast('Please enter a destination address', true);
@@ -1143,10 +1179,10 @@
             return;
         }
 
-        // Confirm
+        // Confirm with source information
         const confirmMsg = sweep
-            ? 'Send ALL tokens to ' + address + '?'
-            : 'Send ' + amount + ' SATORI to ' + address + '?';
+            ? 'Send ALL tokens from ' + sourceName + ' to ' + address + '?'
+            : 'Send ' + amount + ' SATORI from ' + sourceName + ' to ' + address + '?';
         if (!confirm(confirmMsg)) {
             return;
         }
@@ -1162,18 +1198,22 @@
                 data.amount = parseFloat(amount);
             }
 
-            const result = await apiCall('/wallet/send', 'POST', data);
+            // Use the appropriate endpoint based on source selection
+            const endpoint = sendSource === 'wallet' ? '/wallet/send-from-wallet' : '/wallet/send';
+            const result = await apiCall(endpoint, 'POST', data);
 
             if (result && result.success) {
                 resultDiv.className = 'mt-3 alert alert-success';
-                resultDiv.innerHTML = '<strong>Success!</strong><br>Transaction ID: <code style="word-break: break-all;">' + result.txid + '</code>';
+                resultDiv.innerHTML = '<strong>Success!</strong><br>Sent from ' + sourceName + '<br>Transaction ID: <code style="word-break: break-all;">' + result.txid + '</code>';
                 resultDiv.style.display = 'block';
-                showToast('Transaction sent successfully!');
+                showToast('Transaction sent successfully from ' + sourceName + '!');
                 // Clear form
                 document.getElementById('sendDestAddress').value = '';
                 document.getElementById('sendAmount').value = '';
                 document.getElementById('sendSweep').checked = false;
                 toggleSweepAmount();
+                // Refresh balances to show updated amounts
+                refreshBalance();
             } else {
                 const errorMsg = result ? (result.error || 'Transaction failed') : 'Transaction failed';
                 resultDiv.className = 'mt-3 alert alert-danger';
@@ -1217,8 +1257,8 @@
         loadAvailablePools();
         loadPoolCommission();
 
-        // Periodic health check
-        setInterval(checkHealth, 30000);
+        // Periodic health check - Disabled to reduce unnecessary load
+        // setInterval(checkHealth, 30000);
     });
 </script>
 {% endblock %}

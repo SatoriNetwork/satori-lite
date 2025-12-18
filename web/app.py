@@ -32,7 +32,8 @@ def create_app(testing=False):
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
     # Server API URL (for proxying requests)
-    app.config['SATORI_API_URL'] = os.environ.get('SATORI_API_URL', 'http://satori-api:8000')
+    from satorilib.config import get_api_url
+    app.config['SATORI_API_URL'] = get_api_url()
 
     # Register routes
     from web.routes import register_routes

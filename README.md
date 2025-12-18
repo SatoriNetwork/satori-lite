@@ -1,5 +1,7 @@
 # Satori Lite
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A simplified, lightweight version of the Satori neuron system with a CLI interface (similar to Claude Code).
 
 ## Structure
