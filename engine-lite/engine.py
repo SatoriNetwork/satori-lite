@@ -430,6 +430,7 @@ class StreamModel:
         streamModel.identity = None
         # SQLite storage manager for local persistence
         streamModel.storage = storage or EngineStorageManager.getInstance()
+        streamModel.trainingDelay = streamModel._loadTrainingDelay()  # Load from config
         streamModel.initializeFromServer()
         return streamModel
 
@@ -463,6 +464,7 @@ class StreamModel:
         self.usePubSub: bool = False
         self.internal: bool = False
         self.useServer: bool = False  # Default: use DataClient
+        self.trainingDelay: int = self._loadTrainingDelay()  # Load from config
 
     def initialize(self):
         self.data: pd.DataFrame = self.loadData()
@@ -483,6 +485,20 @@ class StreamModel:
         self.stable: ModelAdapter = copy.deepcopy(self.pilot)
         self.paused: bool = False
         debug(f'AI Engine: stream id {self.streamUuid} using {self.adapter.__name__} (Central Server mode)', color='teal')
+
+    def _loadTrainingDelay(self) -> int:
+        """Load training delay from config file.
+
+        Returns:
+            int: Delay in seconds (default 600 = 10 minutes)
+        """
+        try:
+            from satoriengine.veda import config
+            delay = config.get().get('training_delay', 600)
+            return int(delay)
+        except Exception as e:
+            warning(f"Failed to load training delay from config: {e}")
+            return 600  # Default to 10 minutes
 
     def loadDataFromServer(self) -> pd.DataFrame:
         """Load historical data - currently loads from local SQLite only."""
@@ -1030,6 +1046,11 @@ class StreamModel:
                     debug(self.pilot.dataset)
                 except Exception as e:
                     pass
+
+            # Sleep between training iterations based on user setting
+            if self.trainingDelay > 0:
+                debug(f"Sleeping {self.trainingDelay}s before next training iteration for stream {self.streamUuid}")
+                time.sleep(self.trainingDelay)
 
 
     def run_forever(self):

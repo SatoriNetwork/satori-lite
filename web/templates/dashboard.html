@@ -363,6 +363,48 @@
         </div>
 
     </div>
+
+    <!-- AI Engine Training Control Section -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"
+                     style="cursor: pointer;"
+                     data-bs-toggle="collapse"
+                     data-bs-target="#aiEngineCollapse"
+                     aria-expanded="false"
+                     aria-controls="aiEngineCollapse">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">psychology</i>
+                        AI Engine Training Frequency
+                    </h5>
+                </div>
+                <div class="collapse" id="aiEngineCollapse">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Training Frequency</label>
+                        <div class="d-flex align-items-center gap-3">
+                            <span class="text-muted small">Slow</span>
+                            <input type="range" class="form-range flex-grow-1"
+                                   id="trainingDelaySlider"
+                                   min="0" max="100" step="1" value="50"
+                                   oninput="updateTrainingDelayLabel(this.value)"
+                                   onchange="setTrainingDelay(this.value)">
+                            <span class="text-muted small">Fast</span>
+                        </div>
+                        <div class="text-center mt-2">
+                            <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
+                        </div>
+                        <small class="form-text text-muted">
+                            Controls how frequently the AI engine trains new models.
+                            Lower frequency = less CPU usage. Higher frequency = faster model improvements.
+                        </small>
+                    </div>
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Disclaimer Footer -->
@@ -1305,6 +1347,81 @@
         }
     }
 
+    // AI Engine Training Frequency Control
+    function sliderToSeconds(sliderValue) {
+        // Convert slider percentage to seconds (non-linear logarithmic scale)
+        // 0% = 24 hours, 25% = 1 hour, 50% = 10 min, 75% = 1 min, 100% = 0 sec
+        const percentage = sliderValue / 100.0;
+
+        if (percentage <= 0.0) return 86400;  // 24 hours
+        if (percentage >= 1.0) return 0;      // continuous
+
+        // Improved logarithmic scale using exponential decay
+        // Maps 0%->86400s (24h), 50%->675s (~11min), 100%->0s (continuous)
+        const delay = Math.round(86400 * Math.pow(1 - percentage, 7));
+        return delay;
+    }
+
+    function secondsToSlider(seconds) {
+        // Convert seconds to slider percentage (inverse of sliderToSeconds)
+        if (seconds >= 86400) return 0;
+        if (seconds <= 0) return 100;
+
+        // Inverse of logarithmic scale
+        const percentage = 1 - Math.pow(seconds / 86400, 1/7);
+        return Math.round(percentage * 100);
+    }
+
+    function formatDelay(seconds) {
+        // Format seconds into human-readable string
+        if (seconds === 0) return "Continuous";
+        if (seconds < 60) return seconds + " seconds";
+        if (seconds < 3600) return Math.round(seconds / 60) + " minutes";
+        if (seconds < 86400) return Math.round(seconds / 3600) + " hours";
+        return Math.round(seconds / 86400) + " days";
+    }
+
+    function updateTrainingDelayLabel(sliderValue) {
+        // Update label as slider moves
+        const seconds = sliderToSeconds(sliderValue);
+        document.getElementById('trainingDelayLabel').textContent = formatDelay(seconds);
+    }
+
+    async function setTrainingDelay(sliderValue) {
+        // Save to backend when slider changes
+        const seconds = sliderToSeconds(sliderValue);
+
+        try {
+            const result = await apiCall('/engine/training-delay', 'POST', {
+                delay_seconds: seconds
+            });
+
+            if (result && !result.error) {
+                showToast(`Training frequency updated: ${formatDelay(seconds)}`);
+            } else {
+                showToast('Failed to update training frequency', true);
+            }
+        } catch (error) {
+            console.error('Error setting training delay:', error);
+            showToast('Failed to update training frequency', true);
+        }
+    }
+
+    async function loadTrainingDelay() {
+        // Load current setting on page load
+        try {
+            const result = await apiCall('/engine/training-delay');
+
+            if (result && result.delay_seconds !== undefined) {
+                const sliderValue = secondsToSlider(result.delay_seconds);
+                document.getElementById('trainingDelaySlider').value = sliderValue;
+                updateTrainingDelayLabel(sliderValue);
+            }
+        } catch (error) {
+            console.error('Error loading training delay:', error);
+        }
+    }
+
     // Initialize dashboard
     document.addEventListener('DOMContentLoaded', function() {
         // Update theme icon based on stored theme
@@ -1339,6 +1456,7 @@
         loadLenders();
         loadAvailablePools();
         loadPoolCommission();
+        loadTrainingDelay();  // Load AI engine training frequency setting
 
         // Periodic health check - Disabled to reduce unnecessary load
         // setInterval(checkHealth, 30000);

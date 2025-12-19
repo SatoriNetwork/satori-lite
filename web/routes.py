@@ -979,3 +979,77 @@ def register_routes(app):
             logger.error(f"Failed to get direct balance: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return jsonify({'error': str(e)}), 500
+
+    # AI Engine Training Delay Control
+    @app.route('/api/engine/training-delay', methods=['GET'])
+    @login_required
+    def get_training_delay():
+        """Get current AI engine training delay setting.
+
+        Returns:
+            JSON with delay_seconds (int)
+        """
+        try:
+            from satorineuron import config
+
+            # Default to 10 minutes if not set
+            delay = config.get().get('training_delay', 600)
+
+            return jsonify({
+                'delay_seconds': delay
+            })
+        except Exception as e:
+            logger.error(f"Error getting training delay: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/engine/training-delay', methods=['POST'])
+    @login_required
+    def set_training_delay():
+        """Set AI engine training delay.
+
+        Request Body:
+            {
+                "delay_seconds": int  // 0 to 86400
+            }
+
+        Returns:
+            JSON with updated delay_seconds
+        """
+        try:
+            from satorineuron import config
+            from start import getStart
+
+            data = request.get_json()
+            delay_seconds = data.get('delay_seconds')
+
+            # Validate
+            if delay_seconds is None:
+                return jsonify({'error': 'delay_seconds required'}), 400
+
+            delay_seconds = int(delay_seconds)
+
+            if delay_seconds < 0 or delay_seconds > 86400:
+                return jsonify({'error': 'delay_seconds must be between 0 and 86400'}), 400
+
+            # Save to config
+            config.add(data={'training_delay': delay_seconds})
+
+            # Update running engine instances
+            try:
+                startup = getStart()
+                if hasattr(startup, 'aiengine') and startup.aiengine is not None:
+                    for streamUuid, streamModel in startup.aiengine.streamModels.items():
+                        streamModel.trainingDelay = delay_seconds
+                        logger.info(f"Updated training delay for stream {streamUuid}: {delay_seconds}s")
+            except Exception as e:
+                # Log but don't fail if engine isn't running
+                logger.warning(f"Could not update running engine instances: {e}")
+
+            return jsonify({
+                'delay_seconds': delay_seconds,
+                'message': 'Training delay updated successfully'
+            })
+
+        except Exception as e:
+            logger.error(f"Error setting training delay: {e}")
+            return jsonify({'error': str(e)}), 500
