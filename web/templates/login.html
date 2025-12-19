@@ -32,6 +32,15 @@
         color: var(--text-secondary);
         letter-spacing: -0.01em;
     }
+    .logo-container img {
+        width: 180px;
+        height: auto;
+        margin: 0 auto;
+        display: block;
+    }
+    [data-theme="dark"] .logo-container img {
+        filter: invert(1);
+    }
     .logo-text {
         font-size: 2.5rem;
         font-weight: 700;
@@ -94,7 +103,7 @@
     <div class="password-container">
         <div class="logo-container">
             <header>Welcome to</header>
-            <div class="logo-text">Satori</div>
+            <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori Logo">
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
