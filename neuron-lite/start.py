@@ -8,7 +8,6 @@ from satorilib.concepts import constants
 from satorilib.wallet import EvrmoreWallet
 from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.server import SatoriServerClient
-from satorilib.server.api import CheckinDetails
 from satorineuron import VERSION
 from satorineuron import logging
 from satorineuron import config
@@ -85,7 +84,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.urlMundo: str = urlMundo
         self.paused: bool = False
         self.pauseThread: Union[threading.Thread, None] = None
-        self.details: CheckinDetails = CheckinDetails(raw={})
         self.balances: dict = {}
         # Central-lite only needs basic fields - no subscriptions/publications/keys
         self.aiengine: Union[Engine, None] = None
@@ -96,11 +94,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.configRewardAddress: str = None
         self.setRewardAddress()
         self.setupWalletManager()
-        self.ip = None  # Not used by server, no need to detect
-        self.checkinCheckThread = threading.Thread(
-            target=self.checkinCheck,
-            daemon=True)
-        self.checkinCheckThread.start()
+        # Disabled: checkinCheck thread makes unnecessary health check requests every 6 hours
+        # self.checkinCheckThread = threading.Thread(
+        #     target=self.checkinCheck,
+        #     daemon=True)
+        # self.checkinCheckThread.start()
         alreadySetup: bool = os.path.exists(config.walletPath("wallet.yaml"))
         if not alreadySetup:
             threading.Thread(target=self.delayedEngine).start()
@@ -124,8 +122,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     @property
     def rewardAddress(self) -> str:
-        if isinstance(self.details, CheckinDetails):
-            return self.details.get('rewardaddress')
         return self.configRewardAddress
 
     @property
@@ -190,14 +186,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         eth_address = self.vault.ethAddress
         if eth_address:
             return eth_address
-        else:
-            return ""
-
-    @property
-    def evrvaultaddressforward(self) -> str:
-        evrvaultaddress = self.details.wallet.get('vaultaddress', '')
-        if evrvaultaddress:
-            return evrvaultaddress
         else:
             return ""
 
@@ -426,11 +414,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         )
 
     def authWithCentral(self):
-        """Authenticate with central-lite server.
-
-        Central-lite uses challenge-response auth and auto-creates peers.
-        No subscriptions/publications - just authentication and balance tracking.
-        """
+        """Register peer with central-lite server."""
         x = 30
         attempt = 0
         while True:
@@ -439,7 +423,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 # Get vault info from vault.yaml (available even when encrypted)
                 vault_info = self.getVaultInfoFromFile()
 
-                # Build vaultInfo dict for checkin
+                # Build vaultInfo dict for registration
                 vaultInfo = None
                 if vault_info.get('address') or vault_info.get('pubkey'):
                     vaultInfo = {
@@ -447,18 +431,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         'vaultpubkey': vault_info.get('pubkey')
                     }
 
-                self.details = CheckinDetails(
-                    self.server.checkin(
-                        ip=self.ip,
-                        vaultInfo=vaultInfo))
-
-                # For central-lite: no subscriptions/publications/keys needed
-                # Just store minimal response data
-                if self.details.get('rewardaddress') != self.configRewardAddress:
-                    if self.configRewardAddress is None:
-                        self.setRewardAddress(address=self.details.get('rewardaddress'))
-                    else:
-                        self.setRewardAddress(globally=True)
+                # Register peer with central server
+                self.server.checkin(vaultInfo=vaultInfo)
 
                 logging.info("authenticated with central-lite", color="green")
                 break
@@ -479,8 +453,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if EvrmoreWallet.addressIsValid(address):
             self.configRewardAddress = address
             config.add(data={'reward address': address})
-            if isinstance(self.details, CheckinDetails):
-                self.details.setRewardAddress(address)
             if not globally:
                 return True
         else:
@@ -657,7 +629,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     @property
     def stakeRequired(self) -> float:
-        return self.details.stakeRequired or constants.stakeRequired
+        return constants.stakeRequired
 
 
 def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601):

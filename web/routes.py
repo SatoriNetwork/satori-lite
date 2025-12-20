@@ -35,11 +35,6 @@ _startup_vault = None
 _session_vaults = {}
 _vault_lock = Lock()
 
-# Challenge cache - stores auth challenges to avoid requesting new ones for every API call
-_challenge_cache = {}  # {session_id: {'challenge': str, 'timestamp': float, 'signature': str}}
-_challenge_cache_lock = Lock()
-CHALLENGE_EXPIRY_SECONDS = 300  # 5 minutes
-
 
 def check_vault_file_exists():
     """Check if vault.yaml file exists.
@@ -478,13 +473,10 @@ def register_routes(app):
     @app.route('/logout')
     def logout():
         """Handle logout/vault lock."""
-        # Cleanup session-specific vault and challenge cache
+        # Cleanup session-specific vault
         session_id = session.get('session_id')
         if session_id:
             cleanup_session_vault(session_id)
-            # Clear challenge cache for this session
-            with _challenge_cache_lock:
-                _challenge_cache.pop(session_id, None)
 
         # Set flag before clearing to prevent auto-login
         session.clear()
@@ -514,20 +506,13 @@ def register_routes(app):
     def get_auth_headers():
         """Get authentication headers for API requests.
 
-        This implements the challenge-response flow with caching:
-        1. Check if we have a cached challenge (< 5 min old)
-        2. If not, get a new challenge token from the API
-        3. Sign it with the identity wallet
-        4. Cache it for reuse
-        5. Return headers with pubkey, message, and signature
+        This implements the challenge-response flow:
+        1. Get a new challenge token from the API
+        2. Sign it with the identity wallet
+        3. Return headers with pubkey, message, and signature
         """
         wallet_manager = get_or_create_session_vault()
         if not wallet_manager or not wallet_manager.wallet:
-            return None
-
-        # Get session ID for cache lookup
-        session_id = session.get('session_id')
-        if not session_id:
             return None
 
         wallet = wallet_manager.wallet
@@ -535,61 +520,36 @@ def register_routes(app):
             logger.warning("Wallet missing pubkey or sign method")
             return None
 
-        current_time = time.time()
         api_url = current_app.config.get('SATORI_API_URL', get_api_url())
 
-        # Use lock for entire check-and-fetch to prevent race conditions
-        # when multiple parallel requests check cache at the same time
-        with _challenge_cache_lock:
-            # Check cache first
-            cached = _challenge_cache.get(session_id)
-            if cached:
-                # Check if cache is still valid
-                if current_time - cached['timestamp'] < CHALLENGE_EXPIRY_SECONDS:
-                    # Use cached challenge
-                    return {
-                        'wallet-pubkey': wallet.pubkey,
-                        'message': cached['challenge'],
-                        'signature': cached['signature']
-                    }
-
-            # Cache miss or expired - get new challenge while holding lock
-            # This prevents parallel requests from all fetching challenges simultaneously
-            try:
-                # Step 1: Get challenge
-                resp = requests.get(f"{api_url}/api/v1/auth/challenge", timeout=10)
-                if resp.status_code != 200:
-                    logger.warning(f"Failed to get challenge: {resp.text}")
-                    return None
-
-                challenge = resp.json().get('challenge')
-                if not challenge:
-                    return None
-
-                # Step 2: Sign the challenge
-                signature = wallet.sign(message=challenge)
-
-                # Signature from wallet.sign() is already base64-encoded as bytes
-                # Just decode to string - do NOT base64 encode again
-                if isinstance(signature, bytes):
-                    signature = signature.decode('utf-8')
-
-                # Step 3: Cache the challenge and signature
-                _challenge_cache[session_id] = {
-                    'challenge': challenge,
-                    'signature': signature,
-                    'timestamp': current_time
-                }
-
-                # Step 4: Return auth headers
-                return {
-                    'wallet-pubkey': wallet.pubkey,
-                    'message': challenge,
-                    'signature': signature
-                }
-            except Exception as e:
-                logger.warning(f"Auth header generation failed: {e}")
+        try:
+            # Step 1: Get challenge
+            resp = requests.get(f"{api_url}/api/v1/auth/challenge", timeout=10)
+            if resp.status_code != 200:
+                logger.warning(f"Failed to get challenge: {resp.text}")
                 return None
+
+            challenge = resp.json().get('challenge')
+            if not challenge:
+                return None
+
+            # Step 2: Sign the challenge
+            signature = wallet.sign(message=challenge)
+
+            # Signature from wallet.sign() is already base64-encoded as bytes
+            # Just decode to string - do NOT base64 encode again
+            if isinstance(signature, bytes):
+                signature = signature.decode('utf-8')
+
+            # Step 3: Return auth headers
+            return {
+                'wallet-pubkey': wallet.pubkey,
+                'message': challenge,
+                'signature': signature
+            }
+        except Exception as e:
+            logger.warning(f"Auth header generation failed: {e}")
+            return None
 
     def proxy_api(endpoint, method='GET', data=None, authenticated=True):
         """Proxy requests to the Satori API server."""

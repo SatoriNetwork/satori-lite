@@ -504,6 +504,7 @@
     }
 
     async function apiCall(endpoint, method = 'GET', data = null) {
+        let isNetworkError = false;
         try {
             const options = {
                 method: method,
@@ -516,6 +517,14 @@
             }
             const response = await fetch(API_URL + endpoint, options);
 
+            // If we got a response, server is reachable - update status to connected
+            const indicator = document.getElementById('statusIndicator');
+            const text = document.getElementById('statusText');
+            if (indicator && text) {
+                indicator.className = 'status-indicator status-online';
+                text.textContent = 'Connected';
+            }
+
             // Check if response is JSON
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
@@ -525,7 +534,7 @@
 
             const result = await response.json();
 
-            // Check for HTTP errors
+            // Check for HTTP errors (but server is still connected)
             if (!response.ok) {
                 // Handle error properly - could be string or object
                 let errorMsg = `HTTP ${response.status}`;
@@ -540,6 +549,19 @@
             return result;
         } catch (error) {
             console.error('API Error:', error);
+
+            // Only show "Disconnected" for network errors (not HTTP errors like 404, 401)
+            // Network errors: TypeError (failed to fetch), timeout, connection refused
+            if (error instanceof TypeError || error.message.includes('fetch') || error.message.includes('network')) {
+                isNetworkError = true;
+                const indicator = document.getElementById('statusIndicator');
+                const text = document.getElementById('statusText');
+                if (indicator && text) {
+                    indicator.className = 'status-indicator status-offline';
+                    text.textContent = 'Disconnected';
+                }
+            }
+
             // Ensure error message is always a string
             const errorMsg = error.message || String(error);
             showToast('API Error: ' + errorMsg, true);
@@ -1454,7 +1476,8 @@
             poolManagementCollapse.classList.remove('show');
         }
 
-        checkHealth();
+        // Health check disabled to reduce API load
+        // checkHealth();
         loadWalletAddresses();
         loadAllBalances();  // Load both stake and live balances from ElectrumX
         loadRewardAddress();

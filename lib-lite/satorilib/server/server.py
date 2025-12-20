@@ -53,39 +53,19 @@ class SatoriServerClient(object):
         self.sendingUrl = sendingUrl or default_url
         self.topicTime: dict[str, float] = {}
         self.lastCheckin: int = 0
-        # Challenge cache - avoid requesting new challenge for every API call
-        self._challenge_cache: str = None
-        self._challenge_timestamp: float = 0
-        self._challenge_expiry_seconds: int = 300  # 5 minutes
 
     def setTopicTime(self, topic: str):
         self.topicTime[topic] = time.time()
 
     def _getChallenge(self):
-        """Get challenge token from central-lite with caching (5 min) to reduce requests."""
-        current_time = time.time()
-
-        # Check if we have a valid cached challenge
-        if self._challenge_cache and (current_time - self._challenge_timestamp) < self._challenge_expiry_seconds:
-            return self._challenge_cache
-
-        # Cache miss or expired - get new challenge
+        """Get challenge token from central-lite or fallback to timestamp."""
         try:
             response = requests.get(self.url + '/api/v1/auth/challenge')
             if response.status_code == 200:
-                challenge = response.json().get('challenge', str(time.time()))
-                # Cache the new challenge
-                self._challenge_cache = challenge
-                self._challenge_timestamp = current_time
-                return challenge
+                return response.json().get('challenge', str(time.time()))
         except Exception:
             pass
-
-        # Fallback to timestamp
-        fallback = str(time.time())
-        self._challenge_cache = fallback
-        self._challenge_timestamp = current_time
-        return fallback
+        return str(time.time())
 
     def _makeAuthenticatedCall(
         self,
@@ -247,58 +227,53 @@ class SatoriServerClient(object):
             endpoint='/restore/stream',
             payload=payload or json.dumps(stream or {}))
 
-    def checkin(self, referrer: str = None, ip: str = None, vaultInfo: dict = None) -> dict:
+    def checkin(self, vaultInfo: dict = None) -> dict:
         """Check in with central server. For central-lite, uses auth challenge system."""
         challenge = self._getChallenge()
 
-        # Try central-lite health check to verify connection
+        # Register peer with central-lite (no health check needed - registration will fail if server is down)
         try:
-            health_response = requests.get(self.url + '/health')
-            if health_response.status_code == 200:
-                logging.info('connected to central-lite', color='green')
+            # logging.info('connected to central-lite', color='green')
 
-                # For central-lite: Register peer with vault info
-                # Call /api/v1/peer/register with vault-pubkey header
-                if vaultInfo and vaultInfo.get('vaultpubkey'):
-                    try:
-                        headers = {
-                            'wallet-pubkey': self.wallet.pubkey,
-                            'vault-pubkey': vaultInfo.get('vaultpubkey')
-                        }
-                        register_response = requests.post(
-                            self.url + '/api/v1/peer/register',
-                            headers=headers,
-                            timeout=10
-                        )
-                        if register_response.status_code == 200:
-                            # logging.info('peer registered with vault info', color='green')
-                            pass
-                        else:
-                            logging.warning(f'peer registration failed: {register_response.text}')
-                    except Exception as e:
-                        logging.warning(f'peer registration error: {e}')
+            # For central-lite: Register peer with vault info
+            # Call /api/v1/peer/register with vault-pubkey header
+            if vaultInfo and vaultInfo.get('vaultpubkey'):
+                try:
+                    headers = {
+                        'wallet-pubkey': self.wallet.pubkey,
+                        'vault-pubkey': vaultInfo.get('vaultpubkey')
+                    }
+                    register_response = requests.post(
+                        self.url + '/api/v1/peer/register',
+                        headers=headers,
+                        timeout=10
+                    )
+                    if register_response.status_code == 200:
+                        # logging.info('peer registered with vault info', color='green')
+                        pass
+                    else:
+                        logging.warning(f'peer registration failed: {register_response.text}')
+                except Exception as e:
+                    logging.warning(f'peer registration error: {e}')
 
-                # Return minimal checkin data for central-lite
-                self.lastCheckin = time.time()
-                return {
-                    'wallet': {
-                        'accepting': False,
-                        'rewardaddress': None,
-                    },
-                    'key': challenge,
-                    'oracleKey': challenge,
-                    'idKey': challenge,
-                    'subscriptionKeys': [],
-                    'publicationKeys': [],
-                    'subscriptions': '[]',
-                    'publications': '[]',
-                    'pins': '[]',
-                    'stakeRequired': 0,
+            # Return minimal checkin data for central-lite
+            self.lastCheckin = time.time()
+            return {
+                'wallet': {
+                    'accepting': False,
                     'rewardaddress': None,
-                }
-            else:
-                logging.error(f'central-lite health check returned status {health_response.status_code}', color='red')
-                raise Exception(f'Central-lite health check failed with status {health_response.status_code}')
+                },
+                'key': challenge,
+                'oracleKey': challenge,
+                'idKey': challenge,
+                'subscriptionKeys': [],
+                'publicationKeys': [],
+                'subscriptions': '[]',
+                'publications': '[]',
+                'pins': '[]',
+                'stakeRequired': 0,
+                'rewardaddress': None,
+            }
         except Exception as e:
             logging.error(f'central-lite connection failed: {e}', color='red')
             raise Exception(f'Unable to connect to central-lite server: {e}')
