@@ -467,23 +467,19 @@ class NeuronCLI:
 
                         # If selection changed, redraw
                         if old_selected != selected:
-                            # Move cursor back to start of menu
-                            console_write(f'\x1b[{lines_printed}A')
+                            # Move cursor back to start of menu and clear all lines atomically
+                            console_write(f'\x1b[{lines_printed}A\r')
 
-                            # Redraw menu
-                            console_write('\x1b[2K')  # Clear title line
-                            console_write(title + '\r\n')
-                            console_write('\x1b[2K')
-                            console_write("-" * len(title) + '\r\n')
+                            # Redraw menu - each line starts with carriage return to ensure leftmost position
+                            console_write(f'\x1b[2K{title}\r\n')
+                            console_write(f'\x1b[2K' + "-" * len(title) + '\r\n')
                             for i, option in enumerate(options):
-                                console_write('\x1b[2K')  # Clear line
                                 if i == selected:
-                                    console_write(f"  > \x1b[7m{option['label']}\x1b[0m\r\n")
+                                    console_write(f'\x1b[2K  > \x1b[7m{option["label"]}\x1b[0m\r\n')
                                 else:
-                                    console_write(f"    {option['label']}\r\n")
+                                    console_write(f'\x1b[2K    {option["label"]}\r\n')
                             console_write('\x1b[2K\r\n')  # Clear blank line
-                            console_write('\x1b[2K')
-                            console_write("(Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel)\r\n")
+                            console_write('\x1b[2K(Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel)\r\n')
 
                     elif seq1 == '\x1b':  # Double escape (Esc key) - cancel
                         # Clear menu
