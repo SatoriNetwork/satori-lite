@@ -899,8 +899,10 @@ class StreamModel:
 
             if isSuccess:
                 info(f"Prediction published to Central Server: {predictionValue} at {observationTime}", color='green')
-            else:
+            elif isSuccess is False:
+                # False means actual failure (not rate limiting which returns None)
                 warning(f"Failed to publish prediction to Central Server")
+            # None means rate limited - already logged in server.publish()
         except Exception as e:
             error(f"Error publishing prediction to Central Server: {e}")
 

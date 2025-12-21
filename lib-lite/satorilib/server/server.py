@@ -1129,7 +1129,18 @@ class SatoriServerClient(object):
         #    return
         # if isPrediction and self.topicTime.get(topic, 0) > time.time() - 60*60:
         #    return
-        if self.topicTime.get(topic, 0) > time.time() - (Stream.minimumCadence*.95):
+        lastPublishTime = self.topicTime.get(topic, 0)
+        timeSinceLastPublish = time.time() - lastPublishTime
+        minInterval = Stream.minimumCadence * 0.95
+
+        if timeSinceLastPublish < minInterval:
+            timeUntilNext = int(minInterval - timeSinceLastPublish)
+            minutesUntilNext = timeUntilNext // 60
+            secondsUntilNext = timeUntilNext % 60
+            logging.debug(
+                f'Rate limited: skipping {"prediction" if isPrediction else "observation"} publish '
+                f'(next publish in {minutesUntilNext}m {secondsUntilNext}s)',
+                color='cyan')
             return
         self.setTopicTime(topic)
         try:
