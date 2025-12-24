@@ -67,9 +67,21 @@ class SatoriServerClient(object):
         try:
             response = requests.get(self.url + '/api/v1/auth/challenge')
             if response.status_code == 200:
-                return response.json().get('challenge', str(time.time()))
-        except Exception:
-            pass
+                challenge = response.json().get('challenge')
+                if challenge:
+                    return challenge
+                else:
+                    logging.warning(
+                        'Challenge endpoint returned empty challenge, using timestamp fallback',
+                        color='yellow')
+            else:
+                logging.warning(
+                    f'Challenge endpoint returned status {response.status_code}, using timestamp fallback',
+                    color='yellow')
+        except Exception as e:
+            logging.warning(
+                f'Failed to fetch challenge from server: {str(e)}. Using timestamp fallback.',
+                color='yellow')
         return str(time.time())
 
     def _login_with_jwt(self):
@@ -1163,12 +1175,17 @@ class SatoriServerClient(object):
             if response.status_code == 200:
                 return True
             if response.status_code > 399:
+                logging.warning(
+                    f'Prediction rejected with status {response.status_code}: {response.text}',
+                    color='yellow')
                 return None
             if response.text.lower() in ['fail', 'null', 'none', 'error']:
+                logging.warning(f'Prediction failed: {response.text}', color='yellow')
                 return False
-        except Exception as _:
-            # logging.warning(
-            #    'unable to determine if prediction was accepted; try again Later.', e, color='yellow')
+        except Exception as e:
+            logging.warning(
+                f'Unable to publish prediction: {str(e)}. Will retry later.',
+                color='yellow')
             return None
         return True
 
