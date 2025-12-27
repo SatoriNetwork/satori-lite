@@ -469,12 +469,20 @@
                 throw new Error(`HTTP ${response.status}`);
             }
 
-            const data = await response.json();
+            const csvText = await response.text();
             const now = new Date();
             const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
-            const filename = `workers_audit_${timestamp}.json`;
+            const filename = `workers_audit_${timestamp}.csv`;
 
-            downloadJSON(data, filename);
+            // Download CSV file
+            const blob = new Blob([csvText], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            window.URL.revokeObjectURL(url);
+
             showToast('Workers audit downloaded');
         } catch (error) {
             console.error('Error downloading workers audit:', error);
@@ -495,12 +503,20 @@
                 throw new Error(`HTTP ${response.status}`);
             }
 
-            const data = await response.json();
+            const csvText = await response.text();
             const now = new Date();
             const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
-            const filename = `stakers_audit_${timestamp}.json`;
+            const filename = `stakers_audit_${timestamp}.csv`;
 
-            downloadJSON(data, filename);
+            // Download CSV file
+            const blob = new Blob([csvText], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            window.URL.revokeObjectURL(url);
+
             showToast('Pool stakers audit downloaded');
         } catch (error) {
             console.error('Error downloading pool stakers audit:', error);
@@ -510,6 +526,7 @@
 
     async function payLenders() {
         try {
+            // 1. Fetch audit (CSV format)
             showToast('Fetching audit...', 'info');
             const centralApiUrl = getCentralApiUrl();
             const response = await fetch(`${centralApiUrl}/api/v1/audit/stakers/latest`);
@@ -522,25 +539,51 @@
                 throw new Error(`HTTP ${response.status}`);
             }
 
-            const audit = await response.json();
+            const csvText = await response.text();
 
+            // 2. Parse CSV
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) {
+                showToast('No stakers data in audit', 'info');
+                return;
+            }
+
+            const headers = lines[0].split(',');
+            const rows = lines.slice(1).map(line => {
+                const values = line.split(',');
+                return {
+                    observation_ts: values[0],
+                    lender_wallet: values[1],
+                    lender_vault: values[2],
+                    pool_wallet: values[3],
+                    pool_vault: values[4],
+                    pool_balance: parseFloat(values[5]),
+                    lender_contribution: parseFloat(values[6]),
+                    share: parseFloat(values[7]),
+                    reward: parseFloat(values[8])
+                };
+            });
+
+            // 3. Find my pool and stakers
             const myAddress = await apiCall('/wallet/address');
             if (!myAddress || !myAddress.wallet_address) {
                 showToast('Unable to determine your wallet address', 'error');
                 return;
             }
 
-            const myPool = audit.pools.find(p => p.pool_address === myAddress.wallet_address);
+            // Filter rows for my pool
+            const myStakers = rows.filter(row => row.pool_wallet === myAddress.wallet_address);
 
-            if (!myPool || !myPool.lenders || myPool.lenders.length === 0) {
+            if (myStakers.length === 0) {
                 showToast('No pool stakers to pay', 'info');
                 return;
             }
 
+            // 4. Build payment dictionary
             const payments = {};
-            myPool.lenders.forEach(lender => {
-                if (lender.commission_owed > 0) {
-                    payments[lender.lender_address] = lender.commission_owed;
+            myStakers.forEach(staker => {
+                if (staker.reward > 0) {
+                    payments[staker.lender_wallet] = staker.reward;
                 }
             });
 
