@@ -551,6 +551,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.pollObservationsForever()
 
             logging.info("AI Engine spawned successfully", color="green")
+
+            # Now that engine is ready, update web routes with startup instance
+            try:
+                from web.routes import set_startup
+                set_startup(self)
+                logging.info("Web routes updated with startup instance", color="green")
+            except Exception as e:
+                logging.warning(f"Could not update web routes with startup: {e}")
         except Exception as e:
             logging.error(f"Failed to spawn AI Engine: {e}")
 
@@ -636,12 +644,13 @@ def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601)
     """Start the Flask web UI in a background thread."""
     try:
         from web.app import create_app
-        from web.routes import set_vault
+        from web.routes import set_vault, set_startup
 
         app = create_app()
 
         # Connect vault to web routes
         set_vault(startupDag.walletManager)
+        # Note: set_startup() will be called after AI engine is spawned
 
         def run_flask():
             # Suppress Flask/werkzeug logging
