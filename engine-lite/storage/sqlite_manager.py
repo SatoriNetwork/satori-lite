@@ -74,11 +74,65 @@ class EngineSqliteDatabase:
             error(f"Engine DB: Error checking table existence: {e}")
             return False
 
+    def migrateTimestampFormat(self, table_uuid: str) -> int:
+        """
+        Migrate datetime string timestamps to Unix timestamps.
+        Handles backward compatibility for existing user data.
+
+        Returns: Number of rows migrated
+        """
+        try:
+            if not self.tableExists(table_uuid):
+                return 0
+
+            # Get all rows
+            self.cursor.execute(f'SELECT ts, value, hash, provider FROM "{table_uuid}"')
+            rows = self.cursor.fetchall()
+
+            migrated = 0
+            for ts_val, value, hash_val, provider in rows:
+                # Check if ts is a datetime string (contains '-' or ':')
+                if isinstance(ts_val, str) and ('-' in ts_val or ':' in ts_val):
+                    try:
+                        # Parse datetime string to datetime object
+                        if '.' in ts_val:
+                            dt = pd.to_datetime(ts_val, format='%Y-%m-%d %H:%M:%S.%f')
+                        else:
+                            dt = pd.to_datetime(ts_val, format='%Y-%m-%d %H:%M:%S')
+
+                        # Convert to Unix timestamp
+                        unix_ts = dt.timestamp()
+
+                        # Delete old row
+                        self.cursor.execute(f'DELETE FROM "{table_uuid}" WHERE ts = ?', (ts_val,))
+
+                        # Insert with Unix timestamp
+                        self.cursor.execute(
+                            f'INSERT INTO "{table_uuid}" (ts, value, hash, provider) VALUES (?, ?, ?, ?)',
+                            (unix_ts, value, hash_val, provider))
+
+                        migrated += 1
+                    except Exception as e:
+                        warning(f"Engine DB: Could not migrate timestamp {ts_val}: {e}")
+
+            if migrated > 0:
+                self.conn.commit()
+                info(f"Engine DB: Migrated {migrated} datetime strings to Unix timestamps in {table_uuid}", color='green')
+
+            return migrated
+        except Exception as e:
+            error(f"Engine DB: Error during timestamp migration for {table_uuid}: {e}")
+            self.conn.rollback()
+            return 0
+
     def getTableData(self, table_uuid: str) -> pd.DataFrame:
         """Get all data from a table as DataFrame."""
         try:
             if not self.tableExists(table_uuid):
                 return pd.DataFrame(columns=['ts', 'value', 'hash', 'provider'])
+
+            # Auto-migrate datetime strings to Unix timestamps on read
+            self.migrateTimestampFormat(table_uuid)
 
             df = pd.read_sql_query(
                 f"""

@@ -3,6 +3,7 @@ import os
 import time
 import json
 import threading
+import hashlib
 from satorilib.concepts.structs import StreamId, Stream
 from satorilib.concepts import constants
 from satorilib.wallet import EvrmoreWallet
@@ -279,21 +280,30 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     def pollObservationsForever(self):
         """
-        Poll the central server for new observations every 11 hours.
-        When new observations arrive, pass them to the engine for predictions.
+        Poll the central server for new observations.
+        Initial delay: random (0-11 hours) to distribute load
+        Subsequent polls: every 11 hours
         """
         import pandas as pd
+        import random
 
         def pollForever():
+            # First poll: random delay between 0 and 11 hours
+            initial_delay = random.randint(0, 60 * 60 * 11)
+            logging.info(f"First observation poll in {initial_delay / 3600:.1f} hours", color='blue')
+            time.sleep(initial_delay)
+
+            # Subsequent polls: every 11 hours
             while True:
-                time.sleep(60 * 60 * 11)  # 11 hours
                 try:
                     if not hasattr(self, 'server') or self.server is None:
                         logging.warning("Server not initialized, skipping observation poll", color='yellow')
+                        time.sleep(60 * 60 * 11)
                         continue
 
                     if not hasattr(self, 'aiengine') or self.aiengine is None:
                         logging.warning("AI Engine not initialized, skipping observation poll", color='yellow')
+                        time.sleep(60 * 60 * 11)
                         continue
 
                     # Get latest observation from central-lite
@@ -301,16 +311,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                     if observation is None:
                         logging.info("No new observations available", color='blue')
+                        time.sleep(60 * 60 * 11)
                         continue
 
                     # Convert observation to DataFrame for engine
                     # Expected format: columns = [ts, value, hash/id]
                     value = observation.get('value') or observation.get('bitcoin_price')
-                    hash_val = observation.get('hash') or observation.get('id') or observation.get('observation_id')
+                    timestamp = observation.get('observed_at') or observation.get('ts')
+
+                    # Generate proper cryptographic hash (matches prediction format)
+                    # Use sha256 hash like predictions do (engine.py:873-875)
+                    hash_val = hashlib.sha256(
+                        f"{value}{timestamp}".encode()
+                    ).hexdigest()[:16]
+
                     df = pd.DataFrame([{
-                        'ts': observation.get('observed_at') or observation.get('ts'),
+                        'ts': timestamp,
                         'value': float(value) if value is not None else None,
-                        'hash': str(hash_val) if hash_val is not None else None,
+                        'hash': hash_val,
                     }])
 
                     # Pass to each stream in the engine
@@ -323,6 +341,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                 except Exception as e:
                     logging.error(f"Error polling observations: {e}", color='red')
+
+                # Wait 11 hours before next poll
+                time.sleep(60 * 60 * 11)
 
         self.pollObservationsThread = threading.Thread(
             target=pollForever,

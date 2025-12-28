@@ -86,7 +86,23 @@ def ttmDataPreprocess(data: pd.DataFrame) -> TTMProcessedData:
             if v != 0)
 
     raw_dataset = data
-    raw_dataset["date_time"] = pd.to_datetime(raw_dataset["date_time"], utc=True)
+    # Handle both Unix timestamps (as strings or numbers) and date strings
+    try:
+        # Try to convert to numeric - if successful, these might be Unix timestamps
+        numeric_times = pd.to_numeric(raw_dataset["date_time"], errors='coerce')
+        # Valid Unix timestamps should be > 946684800 (year 2000) and < 4102444800 (year 2100)
+        # This prevents misinterpreting small numbers (like year "2025") as timestamps
+        if (numeric_times.notna().all() and
+            numeric_times.min() > 946684800 and
+            numeric_times.max() < 4102444800):
+            # All values are numeric and in valid Unix timestamp range
+            raw_dataset["date_time"] = pd.to_datetime(numeric_times, unit='s', utc=True)
+        else:
+            # Contains non-numeric values or out of range - treat as date strings
+            raw_dataset["date_time"] = pd.to_datetime(raw_dataset["date_time"], utc=True)
+    except Exception:
+        # Fallback to default parsing if numeric conversion fails
+        raw_dataset["date_time"] = pd.to_datetime(raw_dataset["date_time"], utc=True)
     raw_dataset = raw_dataset.set_index("date_time")
     raw_diff_dat = raw_dataset.index.to_series().diff()
     value_counts = raw_diff_dat.value_counts().sort_index()

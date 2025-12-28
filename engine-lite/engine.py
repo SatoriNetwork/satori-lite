@@ -11,7 +11,7 @@ import pandas as pd
 from satorilib.concepts import Observation, Stream
 from satorilib.logging import INFO, setup, debug, info, warning, error
 from satorilib.utils.system import getProcessorCount
-from satorilib.utils.time import datetimeToTimestamp, now
+from satorilib.utils.time import datetimeToTimestamp, datetimeToUnixTimestamp, now
 from satorilib.datamanager import DataClient, DataServerApi, DataClientApi, PeerInfo, Message, Subscription
 from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.server import SatoriServerClient
@@ -917,8 +917,9 @@ class StreamModel:
             if model is not None:
                 forecast = model.predict(data=self.data)
                 if isinstance(forecast, pd.DataFrame):
+                    # Use Unix timestamp for consistency with observation storage
                     predictionDf = pd.DataFrame({ 'value': [StreamForecast.firstPredictionOf(forecast)]
-                                    }, index=[datetimeToTimestamp(now())])
+                                    }, index=[datetimeToUnixTimestamp(now())])
                     debug(predictionDf, print=True)
                     if updatedModel is not None:
                         self.passPredictionData(predictionDf)

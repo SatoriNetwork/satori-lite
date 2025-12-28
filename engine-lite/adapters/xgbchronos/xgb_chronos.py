@@ -264,7 +264,23 @@ class XgbChronosAdapter(ModelAdapter):
         def updateData(data: pd.DataFrame) -> pd.DataFrame:
 
             def conformData(data: pd.DataFrame) -> pd.DataFrame:
-                data['date_time'] = pd.to_datetime(data['date_time'])
+                # Handle both Unix timestamps (as strings or numbers) and date strings
+                try:
+                    # Try to convert to numeric - if successful, these might be Unix timestamps
+                    numeric_times = pd.to_numeric(data['date_time'], errors='coerce')
+                    # Valid Unix timestamps should be > 946684800 (year 2000) and < 4102444800 (year 2100)
+                    # This prevents misinterpreting small numbers (like year "2025") as timestamps
+                    if (numeric_times.notna().all() and
+                        numeric_times.min() > 946684800 and
+                        numeric_times.max() < 4102444800):
+                        # All values are numeric and in valid Unix timestamp range
+                        data['date_time'] = pd.to_datetime(numeric_times, unit='s', utc=True)
+                    else:
+                        # Contains non-numeric values or out of range - treat as date strings
+                        data['date_time'] = pd.to_datetime(data['date_time'])
+                except Exception:
+                    # Fallback to default parsing if numeric conversion fails
+                    data['date_time'] = pd.to_datetime(data['date_time'])
                 data['date_time'] = data['date_time'].dt.strftime('%Y-%m-%d %H:%M:%S')
                 data['date_time'] = pd.to_datetime(
                     data['date_time'],

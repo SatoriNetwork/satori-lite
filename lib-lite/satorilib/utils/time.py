@@ -3,7 +3,13 @@ import datetime as dt
 
 
 def datetimeToTimestamp(time: dt.datetime) -> str:
+    """Convert datetime to string format (legacy - for backward compatibility)."""
     return time.strftime('%Y-%m-%d %H:%M:%S.%f')
+
+
+def datetimeToUnixTimestamp(time: dt.datetime) -> float:
+    """Convert datetime to Unix timestamp (seconds since epoch)."""
+    return time.timestamp()
 
 
 def timestampToDatetime(time: str) -> dt.datetime:
