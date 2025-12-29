@@ -100,7 +100,7 @@
                         <i class="material-icons align-middle me-2">account_balance_wallet</i>
                         Wallet
                     </h5>
-                    <a href="#" class="small text-muted" onclick="toggleIdentityWallet(); return false;">
+                    <a href="#" class="btn btn-outline-secondary btn-sm" onclick="toggleIdentityWallet(); return false;">
                         <i class="material-icons align-middle" style="font-size: 16px;">badge</i>
                         Identity
                     </a>
@@ -1291,7 +1291,14 @@
             navigator.clipboard.writeText(input.value).then(() => {
                 showToast('Identity private key copied to clipboard');
             }).catch(() => {
-                showToast('Failed to copy', true);
+                // Fallback for older browsers or non-HTTPS
+                input.select();
+                try {
+                    document.execCommand('copy');
+                    showToast('Identity private key copied to clipboard');
+                } catch (err) {
+                    showToast('Failed to copy', true);
+                }
             });
         } else {
             showToast('Please reveal the private key first', true);
@@ -1305,11 +1312,17 @@
             navigator.clipboard.writeText(value).then(() => {
                 showToast('Address copied to clipboard');
             }).catch(() => {
-                // Fallback for older browsers
-                input.select();
-                document.execCommand('copy');
-                showToast('Address copied to clipboard');
+                // Fallback for older browsers or non-HTTPS
+                try {
+                    input.select();
+                    document.execCommand('copy');
+                    showToast('Address copied to clipboard');
+                } catch (err) {
+                    showToast('Failed to copy address', true);
+                }
             });
+        } else {
+            showToast('No address to copy', true);
         }
     }
 
@@ -1356,7 +1369,20 @@
             navigator.clipboard.writeText(privateKey).then(() => {
                 showToast('Private key copied to clipboard');
             }).catch(() => {
-                showToast('Failed to copy private key', true);
+                // Fallback for older browsers or non-HTTPS
+                const textArea = document.createElement('textarea');
+                textArea.value = privateKey;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    showToast('Private key copied to clipboard');
+                } catch (err) {
+                    showToast('Failed to copy private key', true);
+                }
+                document.body.removeChild(textArea);
             });
         }
     }
