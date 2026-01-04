@@ -312,6 +312,34 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                                     except Exception as e:
                                         logging.error(f"Error storing observation for {stream_name}: {e}", color='red')
 
+                                # Create stream model if it doesn't exist
+                                if stream_uuid not in self.aiengine.streamModels:
+                                    try:
+                                        # Create StreamId for this observation stream
+                                        streamId = StreamId(
+                                            source='central-lite',
+                                            author='satori',
+                                            stream=stream_name,
+                                            target=''
+                                        )
+
+                                        # Import StreamModel dynamically
+                                        from satoriengine.veda.model import StreamModel
+
+                                        # Create new stream model for this crypto
+                                        self.aiengine.streamModels[stream_uuid] = StreamModel(
+                                            streamId=streamId,
+                                            predictionStreamId=None,  # Observation-only streams don't predict
+                                            predictionProduced=None
+                                        )
+
+                                        # Choose and initialize appropriate adapter
+                                        self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
+
+                                        logging.info(f"✓ Created model for new stream: {stream_name} (UUID: {stream_uuid[:8]}...)", color='magenta')
+                                    except Exception as e:
+                                        logging.error(f"Failed to create model for {stream_name}: {e}", color='red')
+
                                 # Pass to engine if stream model exists
                                 if stream_uuid in self.aiengine.streamModels:
                                     try:
