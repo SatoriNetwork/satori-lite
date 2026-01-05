@@ -745,8 +745,8 @@ def register_routes(app):
     @app.route('/api/lender/status')
     @login_required
     def api_lender_status():
-        """Proxy lender status request."""
-        return proxy_api('/lender/status')
+        """Proxy lender status request (public endpoint, no auth required)."""
+        return proxy_api('/lender/status', authenticated=False)
 
     @app.route('/api/lender/lend', methods=['POST', 'DELETE'])
     @login_required
