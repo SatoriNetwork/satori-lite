@@ -1341,9 +1341,21 @@
     function copyIdentityPrivateKey() {
         const input = document.getElementById('identityPrivateKey');
         if (input.value && input.value !== 'Click to reveal...' && input.value !== 'Unable to load') {
-            navigator.clipboard.writeText(input.value).then(() => {
-                showToast('Identity private key copied to clipboard');
-            }).catch(() => {
+            // Check if Clipboard API is available (requires HTTPS or localhost)
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(input.value).then(() => {
+                    showToast('Identity private key copied to clipboard');
+                }).catch(() => {
+                    // Fallback for older browsers or non-HTTPS
+                    input.select();
+                    try {
+                        document.execCommand('copy');
+                        showToast('Identity private key copied to clipboard');
+                    } catch (err) {
+                        showToast('Failed to copy', true);
+                    }
+                });
+            } else {
                 // Fallback for older browsers or non-HTTPS
                 input.select();
                 try {
@@ -1352,7 +1364,7 @@
                 } catch (err) {
                     showToast('Failed to copy', true);
                 }
-            });
+            }
         } else {
             showToast('Please reveal the private key first', true);
         }
@@ -1362,9 +1374,21 @@
         const input = document.getElementById(elementId);
         const value = input.value;
         if (value && value !== 'Loading...' && value !== 'Not available') {
-            navigator.clipboard.writeText(value).then(() => {
-                showToast('Address copied to clipboard');
-            }).catch(() => {
+            // Check if Clipboard API is available (requires HTTPS or localhost)
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(value).then(() => {
+                    showToast('Address copied to clipboard');
+                }).catch(() => {
+                    // Fallback for older browsers or non-HTTPS
+                    try {
+                        input.select();
+                        document.execCommand('copy');
+                        showToast('Address copied to clipboard');
+                    } catch (err) {
+                        showToast('Failed to copy address', true);
+                    }
+                });
+            } else {
                 // Fallback for older browsers or non-HTTPS
                 try {
                     input.select();
@@ -1373,7 +1397,7 @@
                 } catch (err) {
                     showToast('Failed to copy address', true);
                 }
-            });
+            }
         } else {
             showToast('No address to copy', true);
         }
@@ -1419,9 +1443,27 @@
     function copyPrivateKey() {
         const privateKey = document.getElementById('walletPrivateKey').textContent;
         if (privateKey && privateKey !== 'Loading...' && privateKey !== 'Unable to load private key') {
-            navigator.clipboard.writeText(privateKey).then(() => {
-                showToast('Private key copied to clipboard');
-            }).catch(() => {
+            // Check if Clipboard API is available (requires HTTPS or localhost)
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(privateKey).then(() => {
+                    showToast('Private key copied to clipboard');
+                }).catch(() => {
+                    // Fallback for older browsers or non-HTTPS
+                    const textArea = document.createElement('textarea');
+                    textArea.value = privateKey;
+                    textArea.style.position = 'fixed';
+                    textArea.style.opacity = '0';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    try {
+                        document.execCommand('copy');
+                        showToast('Private key copied to clipboard');
+                    } catch (err) {
+                        showToast('Failed to copy private key', true);
+                    }
+                    document.body.removeChild(textArea);
+                });
+            } else {
                 // Fallback for older browsers or non-HTTPS
                 const textArea = document.createElement('textarea');
                 textArea.value = privateKey;
@@ -1436,7 +1478,7 @@
                     showToast('Failed to copy private key', true);
                 }
                 document.body.removeChild(textArea);
-            });
+            }
         }
     }
 
