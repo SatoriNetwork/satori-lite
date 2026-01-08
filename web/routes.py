@@ -696,7 +696,8 @@ def register_routes(app):
 
         try:
             if method == 'GET':
-                resp = requests.get(url, headers=headers, timeout=10)
+                # Forward query parameters from the incoming request
+                resp = requests.get(url, params=request.args, headers=headers, timeout=10)
             elif method == 'POST':
                 resp = requests.post(url, json=data, headers=headers, timeout=10)
             elif method == 'DELETE':
