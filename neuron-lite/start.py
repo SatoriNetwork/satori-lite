@@ -335,39 +335,57 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                             # Store using server-provided stream UUID
                             if stream_uuid:
-                                # Storage is handled by onDataReceived() below
-                                # Removed duplicate storage call to allow prediction triggering
                                 observations_processed += 1
 
                                 # Create stream model if it doesn't exist
                                 if stream_uuid not in self.aiengine.streamModels:
                                     try:
-                                        # Create StreamId for this observation stream
-                                        streamId = StreamId(
+                                        # Import required classes
+                                        from satoriengine.veda.engine import StreamModel
+
+                                        # Create StreamId objects for subscription and publication
+                                        sub_id = StreamId(
                                             source='central-lite',
                                             author='satori',
                                             stream=stream_name,
                                             target=''
                                         )
 
-                                        # Import StreamModel dynamically
-                                        from satoriengine.veda.engine import StreamModel
+                                        # Prediction stream uses "_pred" suffix
+                                        pub_id = StreamId(
+                                            source='central-lite',
+                                            author='satori',
+                                            stream=f"{stream_name}_pred",
+                                            target=''
+                                        )
 
-                                        # Create new stream model for this crypto
-                                        self.aiengine.streamModels[stream_uuid] = StreamModel(
-                                            streamId=streamId,
-                                            predictionStreamId=None,  # Observation-only streams don't predict
-                                            predictionProduced=None
+                                        # Create Stream objects
+                                        subscriptionStream = Stream(streamId=sub_id)
+                                        publicationStream = Stream(streamId=pub_id, predicting=sub_id)
+
+                                        # Create StreamModel using factory method
+                                        self.aiengine.streamModels[stream_uuid] = StreamModel.createFromServer(
+                                            streamUuid=stream_uuid,
+                                            predictionStreamUuid=pub_id.uuid,
+                                            server=self.server,
+                                            wallet=self.wallet,
+                                            subscriptionStream=subscriptionStream,
+                                            publicationStream=publicationStream,
+                                            pauseAll=self.aiengine.pause,
+                                            resumeAll=self.aiengine.resume,
+                                            storage=self.aiengine.storage
                                         )
 
                                         # Choose and initialize appropriate adapter
                                         self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
 
-                                        logging.info(f"✓ Created model for new stream: {stream_name} (UUID: {stream_uuid[:8]}...)", color='magenta')
+                                        logging.info(f"✓ Created model for stream: {stream_name} (UUID: {stream_uuid[:8]}...)", color='magenta')
                                     except Exception as e:
                                         logging.error(f"Failed to create model for {stream_name}: {e}", color='red')
+                                        import traceback
+                                        logging.error(traceback.format_exc())
 
-                                # Pass to engine if stream model exists
+                                # Pass data to the model
                                 if stream_uuid in self.aiengine.streamModels:
                                     try:
                                         self.aiengine.streamModels[stream_uuid].onDataReceived(df)
