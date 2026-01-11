@@ -22,5 +22,5 @@ logging.setup(
     stdoutAndFile=False
 )
 
-VERSION = 'v1.4.3'
+VERSION = 'v1.4.4'
 MOTTO = 'Let your workings remain a mystery, just show people the results.'
