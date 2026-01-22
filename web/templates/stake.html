@@ -85,11 +85,11 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Pool Staker Earnings (%)</label>
+                        <label class="form-label">Pool Commission Fee (%)</label>
                         <span class="d-inline-block w-100" id="poolCommissionWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
                             <div class="input-group">
                                 <input type="number" class="form-control" id="poolCommission"
-                                       placeholder="0 = closed, 1-100 = % to stakers"
+                                       placeholder="0 = closed, 1-100 = pool fee %"
                                        min="0" max="100" step="1"
                                        onchange="setPoolCommission()"
                                        onkeypress="if(event.key === 'Enter') { setPoolCommission(); event.preventDefault(); }">
@@ -97,7 +97,7 @@
                             </div>
                         </span>
                         <small class="form-text text-muted">
-                            Percentage pool stakers keep. Empty or 0 = pool closed. 1-100 = pool open, stakers keep that %.
+                            Percentage pool keeps as commission fee. Empty or 0 = pool closed. 1-100 = pool open, pool takes that %.
                         </small>
                     </div>
                     <div class="mb-3">
@@ -311,8 +311,8 @@
         const result = await apiCall('/pool/open', 'GET');
         if (result && result.pools && result.pools.length > 0) {
             listEl.innerHTML = '';
-            // Sort pools by increasing fee percentage (inverted commission)
-            result.pools.sort((a, b) => (100 - a.commission) - (100 - b.commission));
+            // Sort pools by increasing commission fee percentage
+            result.pools.sort((a, b) => a.commission - b.commission);
             result.pools.forEach(pool => {
                 const item = document.createElement('a');
                 item.href = '#';
@@ -321,8 +321,7 @@
                     e.preventDefault();
                     document.getElementById('poolAddress').value = pool.address;
                 };
-                const invertedCommission = 100 - pool.commission;
-                const commissionColor = getCommissionColor(invertedCommission);
+                const commissionColor = getCommissionColor(pool.commission);
                 item.innerHTML = `
                     <div class="d-flex w-100 justify-content-between align-items-center">
                         <div>
@@ -331,7 +330,7 @@
                         </div>
                         <div class="text-end">
                             ${pool.alias ? `<span class="badge bg-primary">${pool.alias}</span><br>` : ''}
-                            <small class="fw-bold" style="color: ${commissionColor}">${invertedCommission}% Fee</small>
+                            <small class="fw-bold" style="color: ${commissionColor}">${pool.commission}% Fee</small>
                         </div>
                     </div>
                 `;
@@ -344,24 +343,18 @@
 
     async function setPoolCommission() {
         const commissionInput = document.getElementById('poolCommission');
-        let displayedCommission = commissionInput.value ? parseInt(commissionInput.value) : null;
+        let commission = commissionInput.value ? parseInt(commissionInput.value) : null;
 
-        if (displayedCommission !== null && (displayedCommission < 0 || displayedCommission > 100)) {
+        if (commission !== null && (commission < 0 || commission > 100)) {
             showToast('Commission must be between 0 and 100', true);
             return;
         }
 
-        // Convert inverted value back to actual commission (100 - displayed)
-        // Displayed 95% means pool stakers keep 95%, so commission is 5%
-        let commission = displayedCommission !== null ? (100 - displayedCommission) : null;
-
-        if (commission === 100) {
-            commission = null;  // 100% commission (0% to stakers) = closed pool
-        }
-
+        // Send commission directly to server (no conversion)
+        // commission = % pool keeps as fee
         const result = await apiCall('/pool/toggle-open', 'POST', { commission: commission });
         if (result) {
-            const msg = commission === null ? 'Pool closed' : `Pool open with ${displayedCommission}% Fee`;
+            const msg = commission === null || commission === 0 ? 'Pool closed' : `Pool open with ${commission}% commission fee`;
             showToast(msg);
             await loadPoolCommission();
             await loadAvailablePools();
@@ -373,7 +366,8 @@
         const result = await apiCall('/pool/commission', 'GET');
         if (result) {
             const commissionInput = document.getElementById('poolCommission');
-            commissionInput.value = result.commission !== null ? (100 - result.commission) : '';
+            // Display commission directly (no conversion)
+            commissionInput.value = result.commission !== null ? result.commission : '';
             isOpenPool = result.commission !== null && result.commission > 0;
             updateMutualExclusionUI();
         }
