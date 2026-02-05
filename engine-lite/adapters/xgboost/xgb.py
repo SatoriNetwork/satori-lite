@@ -4,6 +4,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import datetime
+import psutil
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
@@ -240,9 +241,16 @@ class XgbAdapter(ModelAdapter):
         """
         paramBounds: dict = XgbAdapter.paramBounds()
         rng = rng or np.random.default_rng(37)
+
+        # Use all CPU cores (safe with single-worker training queue)
+        cpu_count = psutil.cpu_count(logical=True)
+        n_jobs = cpu_count if cpu_count else -1
+
         params = {
             'random_state': rng.integers(0, 10000),
             'eval_metric': 'mae',
+            'n_jobs': n_jobs,  # Use all cores (no contention with queue manager)
+            'tree_method': 'hist',  # Faster CPU training algorithm
             'learning_rate': rng.uniform(
                 paramBounds['learning_rate'][0],
                 paramBounds['learning_rate'][1]),
@@ -304,6 +312,13 @@ class XgbAdapter(ModelAdapter):
         # because we're exploring the hyperparameter state space relative to it
         mutatedParams['random_state'] = prevParams['random_state']
         mutatedParams['eval_metric'] = 'mae'
+
+        # Preserve CPU optimization parameters (added by training queue manager)
+        if 'n_jobs' in prevParams:
+            mutatedParams['n_jobs'] = prevParams['n_jobs']
+        if 'tree_method' in prevParams:
+            mutatedParams['tree_method'] = prevParams['tree_method']
+
         return mutatedParams
 
 

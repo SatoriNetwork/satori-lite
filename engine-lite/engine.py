@@ -613,6 +613,16 @@ class StreamModel:
             self.data = pd.concat([self.data, engineDf], ignore_index=True)
             self.data = self.data.drop_duplicates(subset=['date_time'], keep='last')
 
+            # Check if adapter should be upgraded (e.g., StarterAdapter -> XgbAdapter)
+            previousAdapter = self.adapter.__name__
+            self.chooseAdapter(inplace=True)
+
+            # If upgraded from StarterAdapter to a real adapter, join the training queue
+            if previousAdapter == 'StarterAdapter' and self.adapter.__name__ != 'StarterAdapter':
+                if self.streamUuid != DEFAULT_STREAM_UUID:
+                    info(f"Stream {self.streamUuid[:8]} upgraded from StarterAdapter to {self.adapter.__name__}, joining training queue", color='green')
+                self.run_forever()  # Join the training queue now
+
             # Trigger prediction when new observation arrives
             if insertedRows > 0:
                 info(f"New observation received, triggering prediction for stream {self.streamUuid}", color='blue')
@@ -1171,8 +1181,48 @@ class StreamModel:
             self.pilot.load(self.modelPath())
         return adapter
 
+    def _single_training_iteration(self):
+        """Execute one training iteration (called by queue worker)."""
+        if self.paused or len(self.data) == 0:
+            return
+
+        self.chooseAdapter(inplace=True)
+
+        # Skip training for StarterAdapter (it doesn't actually train)
+        if self.adapter.__name__ == 'StarterAdapter':
+            return
+
+        try:
+            trainingResult = self.pilot.fit(data=self.data, stable=self.stable)
+            if trainingResult.status == 1:
+                if self.pilot.compare(self.stable):
+                    # Model improved - save with retry logic
+                    saveSuccess = False
+                    for attempt in range(3):
+                        if self.pilot.save(self.modelPath()):
+                            saveSuccess = True
+                            break
+                        if attempt < 2:
+                            warning(f"Model save attempt {attempt + 1}/3 failed, retrying...")
+                            time.sleep(5)
+
+                    if saveSuccess:
+                        self.stable = copy.deepcopy(self.pilot)
+                        if self.streamUuid != DEFAULT_STREAM_UUID:
+                            info(f"Model improved and saved: {self.streamUuid[:8]}", color='green')
+                    else:
+                        if self.streamUuid != DEFAULT_STREAM_UUID:
+                            error(f"Failed to save improved model after 3 attempts for {self.streamUuid[:8]}")
+            else:
+                if self.streamUuid != DEFAULT_STREAM_UUID:
+                    warning(f'Training failed for {self.streamUuid[:8]} (status={trainingResult.status})')
+                self.failedAdapters.append(self.pilot)
+        except Exception as e:
+            error(f"Training error for {self.streamUuid[:8]}: {e}")
+
     def run(self):
         """
+        Legacy training loop - kept for compatibility.
         Main loop for generating models and comparing them to the best known
         model so far in order to replace it if the new model is better, always
         using the best known model to make predictions on demand.
@@ -1248,23 +1298,24 @@ class StreamModel:
 
 
     def run_forever(self):
-        '''Creates separate threads for running the model training loop'''
-
-        if hasattr(self, 'thread') and self.thread and self.thread.is_alive():
-            if self.streamUuid != DEFAULT_STREAM_UUID:
-                warning(f"Thread for model {self.streamUuid} already running. Not creating another.")
+        '''Register stream with training queue for efficient resource management'''
+        # Skip queuing for StarterAdapter - it doesn't actually train
+        # (just uses naive predictions, no model training needed)
+        if self.adapter.__name__ == 'StarterAdapter':
             return
 
-        def training_loop_thread():
-            try:
-                self.run()
-            except Exception as e:
-                error(f"Error in training loop thread: {e}")
-                import traceback
-                traceback.print_exc()
+        # Import here to avoid circular dependency
+        from satoriengine.veda.training.queue_manager import get_training_manager
 
-        self.thread = threading.Thread(target=training_loop_thread, daemon=True)
-        self.thread.start()
+        # Get global training queue manager
+        manager = get_training_manager()
+
+        # Queue this stream for training
+        manager.queue_training(self)
+
+        # Log registration (only for non-default streams)
+        if self.streamUuid != DEFAULT_STREAM_UUID:
+            debug(f"Registered stream {self.streamUuid[:8]} with training queue", color='cyan')
 
 
 def main():

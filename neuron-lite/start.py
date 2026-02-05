@@ -268,6 +268,34 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.error(f"Error collecting and submitting predictions: {e}", color='red')
 
+    def logTrainingQueueStatus(self):
+        """Log training queue statistics for monitoring."""
+        try:
+            if self.aiengine is None:
+                return
+
+            # Import the queue manager getter
+            from satoriengine.veda.training.queue_manager import get_training_manager
+
+            manager = get_training_manager()
+            status = manager.get_queue_status()
+
+            if status['worker_alive']:
+                if status['current']:
+                    logging.info(
+                        f"Training Queue: {status['queued']} waiting, "
+                        f"currently training: {status['current']}",
+                        color='cyan')
+                else:
+                    logging.info(
+                        f"Training Queue: {status['queued']} waiting, worker idle",
+                        color='cyan')
+            else:
+                logging.warning("Training queue worker is not running!", color='yellow')
+
+        except Exception as e:
+            logging.error(f"Error logging training queue status: {e}", color='red')
+
     def pollObservationsForever(self):
         """
         Poll the central server for new observations.
@@ -279,7 +307,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         def pollForever():
             # First poll: random delay between 1 and 11 hours
-            initial_delay = random.randint(60 * 60, 60 * 60 * 11)
+            # initial_delay = random.randint(60 * 60, 60 * 60 * 11)
+            initial_delay = 60
             logging.info(f"First observation poll in {initial_delay / 3600:.1f} hours", color='blue')
             time.sleep(initial_delay)
 
@@ -382,11 +411,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                                         # Start training thread for this stream
                                         try:
                                             self.aiengine.streamModels[stream_uuid].run_forever()
-                                            logging.info(f"→ Training thread started for: {stream_name}", color='cyan')
                                         except Exception as e:
                                             logging.error(f"Failed to start training thread for {stream_name}: {e}", color='red')
-
-                                        logging.info(f"✓ Created model for stream: {stream_name} (UUID: {stream_uuid[:8]}...)", color='magenta')
                                     except Exception as e:
                                         logging.error(f"Failed to create model for {stream_name}: {e}", color='red')
                                         import traceback
@@ -409,6 +435,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                     # After processing all observations, collect predictions and submit in batch
                     self.collectAndSubmitPredictions()
+
+                    # Log training queue status
+                    self.logTrainingQueueStatus()
 
                 except Exception as e:
                     logging.error(f"Error polling observations: {e}", color='red')
