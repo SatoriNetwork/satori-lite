@@ -35,6 +35,9 @@ from .encryption import (
     EncryptionError,
 )
 
+# Import integrations submodule (production-ready reliability layer)
+from . import integrations
+
 __all__ = [
     # Main Client
     "SatoriNostr",
