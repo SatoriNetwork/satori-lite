@@ -14,7 +14,9 @@ Satori Nostr enables decentralized data publishing and subscription with built-i
 - **Micropayments** - Pay-per-observation model with satoshis
 - **Discovery** - Find streams by tags and topics
 - **Accountability** - Public subscription activity
-- **Stream Health** - Built-in staleness detection
+- **Stream Health** - Query relay timestamps to detect live streams (no metadata republishing)
+- **Multiple Keypairs** - Separate Nostr signing key from wallet key
+- **Extensible** - Optional metadata field for domain-specific extensions
 
 ---
 
@@ -127,6 +129,138 @@ async def main():
 
 asyncio.run(main())
 ```
+
+---
+
+## Key Design Concepts
+
+Satori Nostr has three critical design features that enable decentralized, extensible datastreams:
+
+### 1. Multiple Keypairs (Nostr + Wallet)
+
+Each peer uses **two separate keypairs**:
+
+**Nostr Keypair** (for signing):
+- Signs all Nostr events
+- Identifies streams: `(nostr_pubkey, stream_name)`
+- Used for NIP-04 encryption
+- Never changes (stable identity)
+
+**Wallet Keypair** (for payments):
+- Receives Lightning/Bitcoin payments
+- Stored in **optional `metadata` field**
+- Can rotate independently
+- Can reuse existing wallet
+
+```python
+DatastreamMetadata(
+    nostr_pubkey="abc123...",  # Signing key (required)
+    # ... other fields ...
+    metadata={
+        "wallet_pubkey": "xyz789...",  # Payment key (optional)
+        "payment_methods": ["lightning"]
+    }
+)
+```
+
+**Why separate?**
+- Security isolation (compromise one ≠ compromise both)
+- Flexibility (use existing wallet)
+- Different rotation schedules
+
+### 2. Stream Health via Relay Timestamps
+
+**Problem:** How do we know which streams are still publishing?
+
+**Solution:** Query relay for last observation timestamp (without republishing metadata).
+
+Every Nostr event has **public metadata** even when content is encrypted:
+
+```json
+{
+  "created_at": 1234567890,  // ← PUBLIC timestamp
+  "kind": 30101,
+  "tags": [
+    ["stream", "bitcoin-price"]  // ← PUBLIC
+  ],
+  "content": "encrypted..."  // ← Only subscribers can decrypt
+}
+```
+
+**How it works:**
+
+```python
+# Anyone can query for last observation time
+last_time = await client.get_last_observation_time("bitcoin-price")
+
+# Check if stream is active based on expected cadence
+if metadata.is_likely_active(last_time):
+    print("Stream is publishing")  # Within 2x expected cadence
+```
+
+**Benefits:**
+- ✅ No wasted bandwidth (don't republish metadata just to update timestamp)
+- ✅ No extra storage (relay already tracks event timestamps)
+- ✅ Privacy-preserving (timestamp public, content encrypted)
+- ✅ Works for non-subscribers (can check health before subscribing)
+
+### 3. Meta-Metadata (Extensibility)
+
+Streams have an **optional `metadata` field** for domain-specific extensions:
+
+```python
+DatastreamMetadata(
+    # Core protocol fields (stable)
+    stream_name="bitcoin-price",
+    nostr_pubkey="abc123...",
+    price_per_obs=10,
+    # ...
+
+    # Optional metadata (flexible, versioned)
+    metadata={
+        "version": "1.0",  # Schema version
+
+        # Data source tracking
+        "source": {
+            "type": "rest_api",
+            "url": "https://api.coinbase.com/...",
+            "provider": "Coinbase"
+        },
+
+        # Data lineage
+        "lineage": {
+            "source_stream": "btc-raw",
+            "transformations": ["outlier_removal", "smoothing"]
+        },
+
+        # ML model info
+        "model": {
+            "type": "LSTM",
+            "accuracy": 0.85
+        },
+
+        # Payment info
+        "wallet_pubkey": "xyz789...",
+
+        # Quality metrics
+        "quality_score": 0.95
+    }
+)
+```
+
+**Design principles:**
+- **Separation of concerns** - Core protocol stays simple, metadata handles complexity
+- **Backward compatible** - Field is optional (defaults to None)
+- **Independently versioned** - Evolve metadata schema without protocol changes
+- **JSON-serializable** - Can contain dict, list, str, int, float, bool, None
+
+**Common use cases:**
+- Track data sources (API endpoints, IoT sensors)
+- Document data lineage and transformations
+- Store ML model details
+- Include payment/wallet information
+- Preserve legacy system identifiers
+- Quality metrics and SLAs
 
 ---
 

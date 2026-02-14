@@ -4,6 +4,37 @@ Architecture and design decisions for the Satori Nostr datastream protocol.
 
 ---
 
+## Three Critical Design Decisions
+
+### 1. Multiple Keypairs Per Peer
+
+**Nostr Keypair** (signing) + **Wallet Keypair** (payments) = Security & Flexibility
+
+- Nostr pubkey identifies streams and signs events (never changes)
+- Wallet pubkey receives payments (stored in optional `metadata` field)
+- Compromise of one doesn't affect the other
+- Can use existing wallet without changing stream identity
+
+### 2. Stream Health from Relay Timestamps
+
+**Don't republish metadata** to update timestamps. **Query relay** for last observation.
+
+- Every Nostr event has public `created_at` timestamp (even when content encrypted)
+- Anyone can query relay: "when was last observation for this stream?"
+- Compare against expected `cadence_seconds` to detect stale streams
+- No wasted bandwidth, privacy-preserving, works for non-subscribers
+
+### 3. Meta-Metadata for Extensibility
+
+**Optional `metadata` field** = independently versioned extension point
+
+- Core protocol stays simple (stream_name, nostr_pubkey, price, cadence, etc.)
+- Metadata field handles domain-specific data (source tracking, lineage, ML models, wallet info)
+- Versioned independently from core protocol
+- Backward compatible (field is optional)
+
+---
+
 ## Core Architecture
 
 ### Event-Driven Pub/Sub

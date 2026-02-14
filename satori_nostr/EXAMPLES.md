@@ -4,6 +4,113 @@ Comprehensive usage examples for common datastream patterns.
 
 ---
 
+## Three Key Concepts in Action
+
+This example demonstrates the three critical design features:
+
+```python
+import asyncio
+import time
+from satori_nostr import (
+    SatoriNostr,
+    SatoriNostrConfig,
+    DatastreamMetadata,
+    DatastreamObservation,
+    CADENCE_HOURLY,
+)
+
+async def main():
+    config = SatoriNostrConfig(
+        keys="nsec1...",  # Nostr signing key
+        relay_urls=["wss://relay.damus.io"]
+    )
+
+    client = SatoriNostr(config)
+    await client.start()
+
+    # 1. MULTIPLE KEYPAIRS
+    # Nostr pubkey (from client) signs events
+    # Wallet pubkey (separate) receives payments
+    metadata = DatastreamMetadata(
+        stream_name="bitcoin-price",
+        nostr_pubkey=client.pubkey(),  # ← Nostr signing key
+        name="Bitcoin Price",
+        description="BTC/USD from Coinbase",
+        encrypted=True,
+        price_per_obs=10,
+        created_at=int(time.time()),
+        cadence_seconds=CADENCE_HOURLY,  # ← Used for health checking
+        tags=["bitcoin", "price"],
+
+        # 3. META-METADATA (extensible, versioned)
+        metadata={
+            "version": "1.0",
+
+            # Wallet pubkey separate from Nostr pubkey
+            "wallet_pubkey": "xyz789...",  # ← Payment key
+            "payment_methods": ["lightning"],
+
+            # Data source tracking
+            "source": {
+                "type": "rest_api",
+                "url": "https://api.coinbase.com/v2/prices/BTC-USD/spot",
+                "provider": "Coinbase"
+            },
+
+            # Quality info
+            "quality_score": 0.95,
+            "uptime_30d": 0.999
+        }
+    )
+
+    await client.announce_datastream(metadata)
+    print(f"Stream announced: {metadata.stream_name}")
+
+    # Publish observations periodically
+    for seq in range(1, 100):
+        observation = DatastreamObservation(
+            stream_name="bitcoin-price",
+            timestamp=int(time.time()),
+            value={"price": 45000.0 + seq * 10},
+            seq_num=seq
+        )
+
+        # Publish to paid subscribers
+        await client.publish_observation(observation, metadata)
+
+        await asyncio.sleep(3600)  # Hourly
+
+    await client.stop()
+
+# Subscriber checking stream health
+async def check_health():
+    client = SatoriNostr(config)
+    await client.start()
+
+    # 2. STREAM HEALTH from relay timestamps
+    # (No need for provider to republish metadata)
+    last_time = await client.get_last_observation_time("bitcoin-price")
+
+    if last_time:
+        # Check if stream is active based on cadence
+        stream = await client.get_datastream("bitcoin-price")
+        if stream.is_likely_active(last_time):
+            print(f"Stream is ACTIVE (last obs {time.time() - last_time:.0f}s ago)")
+        else:
+            print(f"Stream may be STALE (expected cadence: {stream.cadence_seconds}s)")
+
+    await client.stop()
+
+asyncio.run(main())
+```
+
+**Key takeaways:**
+1. **Two keypairs** - `nostr_pubkey` (signing) + `wallet_pubkey` in metadata (payments)
+2. **Health checking** - Query relay for last observation timestamp (no metadata republishing)
+3. **Extensibility** - `metadata` field for source, quality, wallet info, etc.
+
+---
+
 ## Basic Provider
 
 Announce a stream and publish observations:
