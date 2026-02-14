@@ -1,30 +1,33 @@
-# Satori Nostr Library
+# Satori Nostr
 
-Datastream pub/sub with micropayments over Nostr relays.
+Decentralized datastream pub/sub with micropayments over Nostr.
+
+---
 
 ## Overview
 
-Satori Nostr enables neurons to publish and subscribe to datastreams with built-in micropayment support. Providers publish observations to paying subscribers via encrypted Nostr DMs, while maintaining public visibility of subscriptions for accountability.
+Satori Nostr enables decentralized data publishing and subscription with built-in micropayments. Providers publish observations to paying subscribers via encrypted Nostr DMs, while maintaining public visibility of subscriptions for accountability.
 
-## Features
+**Key Features:**
+- **Decentralized** - No central server, uses Nostr relay network
+- **Encrypted** - NIP-04 encryption for paid observations
+- **Micropayments** - Pay-per-observation model with satoshis
+- **Discovery** - Find streams by tags and topics
+- **Accountability** - Public subscription activity
+- **Stream Health** - Built-in staleness detection
 
-- **Datastream Publishing** - Announce and publish data observations
-- **Discovery** - Find datastreams by tags and topics
-- **Encrypted Delivery** - NIP-04 encrypted unicast to each subscriber
-- **Micropayments** - Pay-per-observation model
-- **Public Accountability** - Subscription activity is publicly visible
-- **Sparse Data Support** - Handle infrequent observations naturally
+---
 
-## Installation
+## Quick Start
+
+### Installation
 
 ```bash
 cd /code/Satori/neuron
 pip install nostr-sdk
 ```
 
-## Quick Start
-
-### Provider Example
+### Simple Provider
 
 ```python
 import asyncio
@@ -34,9 +37,10 @@ from satori_nostr import (
     SatoriNostrConfig,
     DatastreamMetadata,
     DatastreamObservation,
+    CADENCE_HOURLY,
 )
 
-async def provider_example():
+async def main():
     # Configure client
     config = SatoriNostrConfig(
         keys="nsec1...",  # Your Nostr private key
@@ -46,235 +50,393 @@ async def provider_example():
     client = SatoriNostr(config)
     await client.start()
 
-    # Announce a datastream
+    # Announce datastream
     metadata = DatastreamMetadata(
-        stream_name="btc-price-usd",
+        stream_name="bitcoin-price",
         nostr_pubkey=client.pubkey(),
         name="Bitcoin Price (USD)",
         description="Real-time BTC/USD from Coinbase",
         encrypted=True,
         price_per_obs=10,  # 10 sats per observation
         created_at=int(time.time()),
+        cadence_seconds=CADENCE_HOURLY,
         tags=["bitcoin", "price", "usd"]
     )
 
     await client.announce_datastream(metadata)
-    print("Datastream announced!")
 
-    # Publish observations to paid subscribers
+    # Publish observations
     for seq in range(1, 100):
         observation = DatastreamObservation(
-            stream_name="btc-price-usd",
+            stream_name="bitcoin-price",
             timestamp=int(time.time()),
-            value={"price": 45000 + seq * 100, "volume": 123.45},
+            value={"price": 45000.0, "volume": 123.45},
             seq_num=seq
         )
 
         event_ids = await client.publish_observation(observation, metadata)
-        print(f"Observation {seq} sent to {len(event_ids)} subscribers")
+        print(f"Published to {len(event_ids)} subscribers")
 
-        await asyncio.sleep(60)  # Once per minute
+        await asyncio.sleep(3600)  # Hourly
 
     await client.stop()
 
-asyncio.run(provider_example())
+asyncio.run(main())
 ```
 
-### Subscriber Example
+### Simple Subscriber
 
 ```python
 import asyncio
 from satori_nostr import SatoriNostr, SatoriNostrConfig
 
-async def subscriber_example():
-    # Configure client
+async def main():
     config = SatoriNostrConfig(
-        keys="nsec1...",  # Your Nostr private key
+        keys="nsec1...",
         relay_urls=["wss://relay.damus.io"]
     )
 
     client = SatoriNostr(config)
     await client.start()
 
-    # Discover datastreams
+    # Discover streams
     streams = await client.discover_datastreams(tags=["bitcoin"])
-    print(f"Found {len(streams)} Bitcoin datastreams")
 
-    # Subscribe to a stream
+    # Subscribe to first stream
     if streams:
         stream = streams[0]
         await client.subscribe_datastream(
             stream.stream_name,
-            stream.nostr_pubkey,
-            payment_channel="lightning:channel123"
+            stream.nostr_pubkey
         )
-        print(f"Subscribed to {stream.name}")
 
         # Receive observations
-        obs_count = 0
         async for inbound in client.observations():
             obs = inbound.observation
-            print(f"Observation {obs.seq_num}: {obs.value}")
+            print(f"Received: {obs.value}")
 
-            # Send payment for this observation
+            # Send payment for next observation
             await client.send_payment(
                 provider_pubkey=stream.nostr_pubkey,
                 stream_name=stream.stream_name,
-                seq_num=obs.seq_num + 1,  # Pay for NEXT observation
+                seq_num=obs.seq_num + 1,
                 amount_sats=stream.price_per_obs
             )
 
-            obs_count += 1
-            if obs_count >= 10:
-                break
-
     await client.stop()
 
-asyncio.run(subscriber_example())
+asyncio.run(main())
 ```
 
-## Architecture
+---
 
-### Event Kinds
+## Core Concepts
 
-| Kind | Name | Encryption | Purpose |
-|------|------|-----------|----------|
-| 30100 | Datastream Announce | Public | Stream metadata discovery |
-| 30101 | Datastream Data | Encrypted DM | Observation delivery |
-| 30102 | Subscription Announce | Public | Subscription visibility |
-| 30103 | Payment | Encrypted DM | Micropayment notifications |
+### Stream Identity
 
-### Payment Flow
-
-```
-1. Subscriber discovers stream (query kind 30100)
-2. Subscriber announces subscription (publish kind 30102, public)
-3. Provider sees subscription, adds to subscriber list
-4. Provider sends first observation FREE (signals acceptance)
-5. For each subsequent observation:
-   a. Subscriber sends payment (kind 30103, encrypted DM)
-   b. Provider receives payment, updates subscriber state
-   c. Provider publishes observation (kind 30101, encrypted DM to each paid subscriber)
-   d. Subscriber receives observation
-```
-
-### Data Models
-
-**DatastreamMetadata** (kind 30100 content)
-```python
-{
-    "stream_name": "btc-price-usd",
-    "nostr_pubkey": "abc123...",
-    "name": "Bitcoin Price (USD)",
-    "description": "Real-time BTC/USD",
-    "encrypted": true,
-    "price_per_obs": 10,
-    "created_at": 1234567890,
-    "tags": ["bitcoin", "price"]
-}
-```
-
-**DatastreamObservation** (kind 30101 encrypted content)
-```python
-{
-    "stream_name": "btc-price-usd",
-    "timestamp": 1234567890,
-    "value": {"price": 45000, "volume": 123.45},
-    "seq_num": 42
-}
-```
-
-**PaymentNotification** (kind 30103 encrypted content)
-```python
-{
-    "from_pubkey": "subscriber...",
-    "to_pubkey": "provider...",
-    "stream_name": "btc-price-usd",
-    "seq_num": 43,
-    "amount_sats": 10,
-    "timestamp": 1234567890,
-    "tx_id": "lightning:tx789"
-}
-```
-
-## API Reference
-
-### SatoriNostr
-
-Main client class for datastream pub/sub.
-
-#### Configuration
+Every stream is uniquely identified by:
+- **nostr_pubkey** - Provider's Nostr public key (for signing events)
+- **stream_name** - Human-readable name (e.g., "bitcoin-price")
 
 ```python
-config = SatoriNostrConfig(
-    keys="nsec1..." or "hex_private_key",
-    relay_urls=["wss://relay.damus.io"],
-    active_relay_timeout_ms=8000,  # Optional
-    dedupe_db_path=None  # Optional: SQLite path
+# Each provider can have multiple streams
+stream1 = DatastreamMetadata(
+    stream_name="bitcoin-price",
+    nostr_pubkey="abc123...",
+    # ...
+)
+
+stream2 = DatastreamMetadata(
+    stream_name="ethereum-price",
+    nostr_pubkey="abc123...",  # Same provider, different stream
+    # ...
 )
 ```
 
-#### Provider Methods
+Streams also have a **deterministic UUID** for database/API compatibility:
+```python
+uuid = stream.uuid  # Computed from (nostr_pubkey, stream_name)
+```
 
-- `announce_datastream(metadata) -> str` - Publish stream metadata
-- `publish_observation(obs, metadata) -> list[str]` - Send obs to paid subscribers
-- `get_subscribers(stream_name) -> list[str]` - List subscriber pubkeys
-- `record_subscription(stream_name, sub_pubkey, channel)` - Record new subscriber
-- `record_payment(stream_name, sub_pubkey, seq_num)` - Record payment
-- `payments() -> AsyncIterator[InboundPayment]` - Receive payment notifications
+### Event Types
 
-#### Subscriber Methods
+| Kind | Name | Visibility | Purpose |
+|------|------|-----------|----------|
+| 30100 | Stream Announcement | Public | Metadata and discovery |
+| 30101 | Observation | Encrypted | Data delivery |
+| 30102 | Subscription | Public | Subscription announcements |
+| 30103 | Payment | Encrypted | Payment notifications |
 
-- `discover_datastreams(tags, limit) -> list[DatastreamMetadata]` - Find streams
-- `subscribe_datastream(stream_name, provider_pk, channel) -> str` - Subscribe
-- `send_payment(provider_pk, stream_name, seq, amount, tx_id) -> str` - Send payment
-- `observations() -> AsyncIterator[InboundObservation]` - Receive observations
+### Payment Flow
 
-#### Lifecycle
+1. Subscriber discovers stream (query kind 30100)
+2. Subscriber announces subscription (kind 30102, public)
+3. Provider sees subscription, adds to list
+4. Provider sends first observation FREE
+5. For each subsequent observation:
+   - Subscriber sends payment (kind 30103)
+   - Provider receives payment, updates access
+   - Provider sends observation (kind 30101)
+   - Repeat
 
-- `start()` - Connect to relays and start processing
-- `stop()` - Disconnect and cleanup
-- `pubkey() -> str` - Get client's public key
-- `is_running() -> bool` - Check if active
+### Stream Health
 
-## Design Principles
+Check if a stream is actively publishing:
 
-1. **Encrypted Unicast** - Each observation sent as encrypted DM to each subscriber
-2. **Public Accountability** - Subscriptions and metadata are publicly visible
-3. **Micropayments** - Pay-per-observation model with Lightning support
-4. **Sparse Data** - Designed for infrequent observations (hours/days between data)
-5. **Simple P2P** - Direct provider → subscriber relationship over Nostr relays
+```python
+# Get last observation time (public timestamp on relay)
+last_time = await client.get_last_observation_time("bitcoin-price")
 
-## Cost Model
+# Check if stream is active based on cadence
+if metadata.is_likely_active(last_time):
+    print("Stream is active")
+else:
+    print("Stream may be stale")
+```
 
-For sparse streams:
-- 100 subscribers × 24 observations/day = 2,400 events/day (~2.4 MB)
-- Very affordable for hourly/daily datastreams
+---
 
-For high-frequency streams, consider batching payments (e.g., pay for 100 observations at once).
+## Data Models
+
+### DatastreamMetadata
+
+Public stream announcement:
+
+```python
+metadata = DatastreamMetadata(
+    stream_name="bitcoin-price",      # Human-readable name
+    nostr_pubkey="abc123...",         # Provider's Nostr pubkey
+    name="Bitcoin Price (USD)",       # Display name
+    description="BTC/USD from Coinbase",
+    encrypted=True,                   # Encrypt observations?
+    price_per_obs=10,                 # Sats per observation
+    created_at=1234567890,            # Unix timestamp
+    cadence_seconds=3600,             # Expected update frequency
+    tags=["bitcoin", "price", "usd"], # Discovery tags
+
+    # Optional metadata for extensions
+    metadata={
+        "source": {"type": "api", "url": "..."},
+        "wallet_pubkey": "xyz789..."  # For Lightning payments
+    }
+)
+```
+
+### DatastreamObservation
+
+Single data point:
+
+```python
+observation = DatastreamObservation(
+    stream_name="bitcoin-price",
+    timestamp=1234567890,
+    value={"price": 45000.0, "volume": 123.45},  # Any JSON type
+    seq_num=42
+)
+```
+
+### Configuration
+
+```python
+config = SatoriNostrConfig(
+    keys="nsec1...",  # Nostr private key (nsec or hex)
+    relay_urls=[      # Nostr relays to connect to
+        "wss://relay.damus.io",
+        "wss://nostr.wine",
+        "wss://relay.primal.net"
+    ],
+    active_relay_timeout_ms=8000,  # Optional: relay failover timeout
+    dedupe_db_path=None            # Optional: SQLite path for deduplication
+)
+```
+
+---
+
+## API Reference
+
+### Provider APIs
+
+```python
+# Announce a datastream
+await client.announce_datastream(metadata)
+
+# Publish observation to paid subscribers
+await client.publish_observation(observation, metadata)
+
+# Monitor incoming payments
+async for payment in client.payments():
+    print(f"Received {payment.payment.amount_sats} sats")
+
+# Check subscribers
+subscribers = client.get_subscribers(stream_name)
+```
+
+### Subscriber APIs
+
+```python
+# Discover datastreams by tags
+streams = await client.discover_datastreams(tags=["bitcoin"])
+
+# Discover only active streams
+active = await client.discover_active_datastreams(tags=["bitcoin"])
+
+# Subscribe to a stream
+await client.subscribe_datastream(stream_name, provider_pubkey)
+
+# Send payment
+await client.send_payment(
+    provider_pubkey=provider_pubkey,
+    stream_name=stream_name,
+    seq_num=42,
+    amount_sats=10
+)
+
+# Receive observations
+async for inbound in client.observations():
+    print(inbound.observation.value)
+
+# Unsubscribe
+await client.unsubscribe_datastream(stream_name, provider_pubkey)
+```
+
+### Utility APIs
+
+```python
+# Get specific stream
+stream = await client.get_datastream(stream_name)
+
+# Check last observation time
+last_time = await client.get_last_observation_time(stream_name)
+
+# Get client statistics
+stats = client.get_statistics()
+
+# List announced streams (if provider)
+streams = client.list_announced_streams()
+
+# Get subscriber info (if provider)
+info = client.get_subscriber_info(stream_name, subscriber_pubkey)
+all_subs = client.get_all_subscribers_info(stream_name)
+```
+
+---
+
+## Cadence Constants
+
+Standard cadence values (in seconds):
+
+```python
+from satori_nostr import (
+    CADENCE_REALTIME,   # 1 second
+    CADENCE_MINUTE,     # 60 seconds
+    CADENCE_5MIN,       # 300 seconds
+    CADENCE_HOURLY,     # 3600 seconds (recommended)
+    CADENCE_DAILY,      # 86400 seconds
+    CADENCE_WEEKLY,     # 604800 seconds
+    CADENCE_IRREGULAR,  # None (event-driven)
+)
+```
+
+---
+
+## Examples
+
+See comprehensive examples in:
+- **`examples/simple_provider.py`** - Basic provider
+- **`examples/simple_subscriber.py`** - Basic subscriber
+- **`examples/datastream_marketplace.py`** - Full marketplace simulation
+- **`EXAMPLES.md`** - Additional usage patterns
+
+---
+
+## Documentation
+
+- **`DESIGN.md`** - Architecture and design decisions
+- **`EXAMPLES.md`** - Comprehensive usage examples
+- **`MIGRATION.md`** - Migration from legacy systems
+
+---
+
+## Testing
+
+Run unit tests:
+```bash
+pytest tests/test_satori_nostr_models.py -v
+```
+
+Run integration tests:
+```bash
+pytest tests/test_satori_nostr_integration.py -v
+```
+
+All tests:
+```bash
+pytest tests/test_satori_nostr*.py -v
+```
+
+---
+
+## Architecture
+
+### Decentralized Infrastructure
+
+- Uses **Nostr relay network** (no central server)
+- Providers publish directly to subscribers
+- Multiple relays for redundancy
+- Censorship-resistant
+
+### Encryption
+
+- **NIP-04** encrypted DMs for observations and payments
+- Public announcements for discovery and accountability
+- Separate Nostr keypair from wallet keypair
+
+### Scalability
+
+- Providers: ~100s of subscribers per stream
+- Subscribers: ~100s of stream subscriptions per client
+- Async/await for efficient concurrent operations
+
+---
 
 ## Security
 
-- **NIP-04 Encryption** - Observations and payments use standard Nostr encryption
-- **No Relay Trust** - Relays are dumb pipes; they cannot read encrypted content
-- **Access Control** - Providers control who receives observations based on payment state
+### Keypair Separation
 
-## Future Enhancements
+Each peer has **two keypairs**:
 
-- [ ] NIP-17/59 (Gift-wrapped events) for better privacy
-- [ ] Shared key optimization for high-frequency streams
-- [ ] Historical data requests with batch payment
-- [ ] Reputation scoring for providers
-- [ ] Multi-currency payment support
+1. **Nostr Keypair** - For signing events and encryption
+   - Used for stream identity
+   - Used for encrypting observations
+
+2. **Wallet Keypair** - For Lightning/Bitcoin payments
+   - Stored in stream `metadata` field
+   - Separate from Nostr identity
+
+### Encryption
+
+- Observations encrypted with NIP-04
+- Only subscriber and provider can decrypt
+- Relay cannot read observation content
+- Event timestamps are public (for stream health)
+
+### Access Control
+
+- Providers track paid subscribers
+- Only send observations to paid subscribers (or all for free streams)
+- First observation always free (welcome/verification)
+
+---
 
 ## License
 
-MIT License - See LICENSE file for details
+Part of the Satori Network project.
 
-## Version
+---
 
-Current version: **0.1.0** (MVP)
+## Support
 
-Nostr Implementation:
-- NIP-04: Encrypted Direct Messages ✅
-- Custom kinds: 30100-30103 ✅
+For issues or questions:
+- GitHub: [SatoriNetwork/satori-lite](https://github.com/SatoriNetwork/satori-lite)
+- Examples: See `examples/` directory
+- Documentation: See `DESIGN.md` and `EXAMPLES.md`
