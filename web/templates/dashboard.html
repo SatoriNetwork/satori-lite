@@ -335,6 +335,48 @@
 
     </div>
 
+    <!-- Relay Settings Section -->
+    <div class="row g-4 mt-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">cell_tower</i>
+                        Relay Settings
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Nostr Public Key</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="nostrPubkey"
+                                   value="{{ nostr_pubkey or 'Not generated' }}" readonly
+                                   style="font-family: monospace; font-size: 0.85rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('nostrPubkey')" title="Copy">
+                                <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">
+                            Set this as NOSTR_PUBKEY in your relay's .env file
+                        </small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Relay URL</label>
+                        <input type="text" class="form-control" id="relayUrl"
+                               placeholder="wss://your-relay.example.com">
+                        <small class="form-text text-muted">
+                            WebSocket URL of your Nostr relay (must have NIP-11 configured with your pubkey)
+                        </small>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-primary" onclick="registerRelay()">Register Relay</button>
+                        <span id="relayStatus" class="ms-3" style="display: none;"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- AI Engine Training Control Section -->
     <div class="row g-4 mt-2">
         <div class="col-12">
@@ -1245,6 +1287,49 @@
             }
         } else {
             showToast('No address to copy', true);
+        }
+    }
+
+    // Relay Registration
+    async function registerRelay() {
+        const relayUrl = document.getElementById('relayUrl').value.trim();
+        const statusEl = document.getElementById('relayStatus');
+
+        if (!relayUrl) {
+            statusEl.style.display = 'inline';
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'Please enter a relay URL';
+            return;
+        }
+
+        if (!relayUrl.startsWith('wss://') && !relayUrl.startsWith('ws://')) {
+            statusEl.style.display = 'inline';
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'URL must start with wss:// or ws://';
+            return;
+        }
+
+        statusEl.style.display = 'inline';
+        statusEl.className = 'ms-3 text-info';
+        statusEl.textContent = 'Verifying relay...';
+
+        try {
+            const resp = await fetch('/api/relay', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({relay_url: relayUrl})
+            });
+            const data = await resp.json();
+            if (resp.ok && (data.success || data.relay_url)) {
+                statusEl.className = 'ms-3 text-success';
+                statusEl.textContent = 'Relay verified and registered';
+            } else {
+                statusEl.className = 'ms-3 text-danger';
+                statusEl.textContent = data.error || data.detail || 'Verification failed';
+            }
+        } catch (err) {
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'Connection error: ' + err.message;
         }
     }
 

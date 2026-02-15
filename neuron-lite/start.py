@@ -1,9 +1,10 @@
-from typing import Union
+from typing import Union, Optional
 import os
 import time
 import json
 import threading
 import hashlib
+import yaml
 from satorilib.concepts.structs import StreamId, Stream
 from satorilib.concepts import constants
 from satorilib.wallet import EvrmoreWallet
@@ -65,6 +66,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.publications: list[Stream] = []  # Keep for engine
         self.subscriptions: list[Stream] = []  # Keep for engine
         self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
+        self.nostrPubkey: Optional[str] = self._initNostrKeys()
         self.latestObservationTime: float = 0
         self.configRewardAddress: str = None
         self.setupWalletManager()
@@ -89,6 +91,37 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 target=self.restartEverythingPeriodic,
                 daemon=True)
             self.restartThread.start()
+
+    def _initNostrKeys(self) -> Optional[str]:
+        """Load or generate Nostr keypair, store in nostr.yaml.
+
+        Returns the 64-char lowercase hex public key, or None on failure.
+        """
+        nostrPath = config.walletPath('nostr.yaml')
+        try:
+            if os.path.exists(nostrPath):
+                with open(nostrPath, 'r') as f:
+                    data = yaml.safe_load(f)
+                if data and data.get('pubkey_hex'):
+                    pubkey = data['pubkey_hex'].lower()
+                    logging.info(f'loaded Nostr pubkey: {pubkey[:16]}...', color='green')
+                    return pubkey
+            # Generate new keypair
+            from nostr_sdk import Keys
+            keys = Keys.generate()
+            pubkey = keys.public_key().to_hex().lower()
+            secret = keys.secret_key().to_hex().lower()
+            os.makedirs(os.path.dirname(nostrPath), exist_ok=True)
+            with open(nostrPath, 'w') as f:
+                yaml.dump({
+                    'pubkey_hex': pubkey,
+                    'secret_hex': secret,
+                }, f, default_flow_style=False)
+            logging.info(f'generated Nostr keypair, pubkey: {pubkey[:16]}...', color='green')
+            return pubkey
+        except Exception as e:
+            logging.error(f'failed to init Nostr keys: {e}')
+            return None
 
     @staticmethod
     def getUiPort() -> int:
@@ -556,7 +589,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     }
 
                 # Register peer with central server
-                self.server.checkin(vaultInfo=vaultInfo)
+                self.server.checkin(
+                    vaultInfo=vaultInfo,
+                    nostrPubkey=self.nostrPubkey)
 
                 logging.info("authenticated with central-lite", color="green")
                 break

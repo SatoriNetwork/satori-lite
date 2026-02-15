@@ -371,29 +371,28 @@ class SatoriServerClient(object):
             endpoint='/restore/stream',
             payload=payload or json.dumps(stream or {}))
 
-    def checkin(self, vaultInfo: dict = None) -> dict:
+    def checkin(self, vaultInfo: dict = None, nostrPubkey: str = None) -> dict:
         """Check in with central server. For central-lite, uses auth challenge system."""
         challenge = self._getChallenge()
 
         # Register peer with central-lite (no health check needed - registration will fail if server is down)
         try:
-            # logging.info('connected to central-lite', color='green')
-
-            # For central-lite: Register peer with vault info
-            # Call /api/v1/peer/register with vault-pubkey header
+            # For central-lite: Register peer with vault info and nostr pubkey
+            # Call /api/v1/peer/register with wallet-pubkey, vault-pubkey, nostr-pubkey headers
             if vaultInfo and vaultInfo.get('vaultpubkey'):
                 try:
                     headers = {
                         'wallet-pubkey': self.wallet.pubkey,
-                        'vault-pubkey': vaultInfo.get('vaultpubkey')
+                        'vault-pubkey': vaultInfo.get('vaultpubkey'),
                     }
+                    if nostrPubkey:
+                        headers['nostr-pubkey'] = nostrPubkey
                     register_response = requests.post(
                         self.url + '/api/v1/peer/register',
                         headers=headers,
                         timeout=10
                     )
                     if register_response.status_code == 200:
-                        # logging.info('peer registered with vault info', color='green')
                         pass
                     else:
                         logging.warning(f'peer registration failed: {register_response.text}')
@@ -434,6 +433,13 @@ class SatoriServerClient(object):
         except Exception as e:
             logging.warning(f'central-lite health check failed in checkinCheck: {e}')
             return True  # failed - trigger restart
+
+    def registerRelay(self, relayUrl: str) -> dict:
+        """Register a relay URL with central server for NIP-11 verification."""
+        return self._makeAuthenticatedCall(
+            function=requests.post,
+            endpoint='/api/v1/peer/relay',
+            payload=json.dumps({'relay_url': relayUrl}))
 
     def requestSimplePartial(self, network: str):
         ''' sends a satori partial transaction to the server '''

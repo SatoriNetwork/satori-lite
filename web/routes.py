@@ -518,7 +518,16 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not derive eth_wallet_address: {e}")
 
-        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address)
+        # Get nostr pubkey from startup instance
+        nostr_pubkey = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+        except Exception as e:
+            logger.warning(f"Could not get nostr pubkey: {e}")
+
+        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address, nostr_pubkey=nostr_pubkey)
 
     @app.route('/stake')
     @login_required
@@ -1575,4 +1584,32 @@ def register_routes(app):
             logger.error(f"Wallet import error: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/relay', methods=['POST'])
+    @login_required
+    def api_relay_register():
+        """Register relay URL with central server for NIP-11 verification."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'server') or not startup.server:
+            return jsonify({'error': 'Server connection not initialized'}), 503
+
+        data = request.get_json()
+        if not data or 'relay_url' not in data:
+            return jsonify({'error': 'Missing relay_url'}), 400
+
+        relay_url = data['relay_url'].strip()
+        if not relay_url.startswith(('wss://', 'ws://')):
+            return jsonify({'error': 'Relay URL must start with wss:// or ws://'}), 400
+
+        try:
+            result = startup.server.registerRelay(relay_url)
+            if isinstance(result, requests.Response):
+                if result.status_code == 200:
+                    return jsonify(result.json())
+                else:
+                    return jsonify({'error': result.text}), result.status_code
+            return jsonify({'success': True, 'relay_url': relay_url})
+        except Exception as e:
+            logger.error(f"Relay registration error: {e}")
             return jsonify({'error': str(e)}), 500
