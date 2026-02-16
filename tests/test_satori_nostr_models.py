@@ -2,7 +2,7 @@
 import json
 import pytest
 import time
-from satori_nostr.models import (
+from satorilib.satori_nostr.models import (
     DatastreamMetadata,
     DatastreamObservation,
     SubscriptionAnnouncement,

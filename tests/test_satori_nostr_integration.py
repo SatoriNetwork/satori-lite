@@ -7,7 +7,7 @@ import pytest
 import time
 from nostr_sdk import Keys
 
-from satori_nostr import (
+from satorilib.satori_nostr import (
     SatoriNostr,
     SatoriNostrConfig,
     DatastreamMetadata,

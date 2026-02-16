@@ -15,7 +15,7 @@ from nostr_sdk import Keys
 # Add parent directory to path for imports
 sys.path.insert(0, '/code/Satori/neuron')
 
-from satori_nostr import (
+from satorilib.satori_nostr import (
     SatoriNostr,
     SatoriNostrConfig,
     DatastreamMetadata,

@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, '/code/Satori/neuron')
 
-from satori_nostr.integrations import ReliableSubscriber
+from satorilib.satori_nostr.integrations import ReliableSubscriber
 
 
 async def on_stream_stale(stream_name: str):
