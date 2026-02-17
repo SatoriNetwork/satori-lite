@@ -527,6 +527,13 @@ def register_routes(app):
         from satorineuron import VERSION
         return render_template('stake.html', version=VERSION)
 
+    @app.route('/local-predictions')
+    @login_required
+    def local_predictions():
+        """Local predictions page."""
+        from satorineuron import VERSION
+        return render_template('local_predictions.html', version=VERSION)
+
     @app.route('/health')
     def health():
         """Health check endpoint - checks API server connectivity."""
@@ -1217,12 +1224,135 @@ def register_routes(app):
             logger.error(f"Error setting training delay: {e}")
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/engine/streams', methods=['GET'])
+    @login_required
+    def get_engine_streams():
+        """List streams for local predictions (active + stored prediction tables)."""
+        try:
+            startup = get_startup()
+            if startup is None or not hasattr(startup, 'aiengine') or startup.aiengine is None:
+                return jsonify({'error': 'AI engine not initialized'}), 503
+
+            stream_models = getattr(startup.aiengine, 'streamModels', {}) or {}
+            storage = getattr(startup.aiengine, 'storage', None)
+            streams = []
+            known_prediction_ids = set()
+            pred_to_obs_meta = {}
+
+            def prediction_uuid_for_name(stream_name: str) -> str:
+                if not stream_name:
+                    return None
+                seed = f"central-lite:satori:{stream_name}_pred:"
+                return str(uuid.uuid5(uuid.NAMESPACE_DNS, seed))
+
+            if storage is not None:
+                try:
+                    for row in storage.db.getAllStreams():
+                        name = row.get('name')
+                        obs_uuid = row.get('uuid')
+                        pred_uuid = prediction_uuid_for_name(name)
+                        if pred_uuid:
+                            pred_to_obs_meta[pred_uuid] = {
+                                'observation_stream_uuid': obs_uuid,
+                                'stream_name': name,
+                                'source': row.get('secondary'),
+                                'author': row.get('author'),
+                                'target': row.get('target'),
+                            }
+                except Exception:
+                    pred_to_obs_meta = {}
+
+            for obs_uuid, model in stream_models.items():
+                pred_uuid = getattr(model, 'predictionStreamUuid', None)
+                if pred_uuid:
+                    known_prediction_ids.add(pred_uuid)
+
+                sub_stream = getattr(model, 'subscriptionStream', None)
+                stream_id = getattr(sub_stream, 'streamId', None) if sub_stream else None
+                stream_name = getattr(stream_id, 'stream', None) if stream_id else None
+                source = getattr(stream_id, 'source', None) if stream_id else None
+                author = getattr(stream_id, 'author', None) if stream_id else None
+                target = getattr(stream_id, 'target', None) if stream_id else None
+                if not stream_name:
+                    stream_name = f"stream-{obs_uuid[:8]}"
+
+                streams.append({
+                    'stream_uuid': pred_uuid or obs_uuid,
+                    'prediction_stream_uuid': pred_uuid or obs_uuid,
+                    'observation_stream_uuid': obs_uuid,
+                    'stream_name': stream_name,
+                    'source': source,
+                    'author': author,
+                    'target': target,
+                    'stream_type': 'active_model',
+                })
+
+            predictions_24h_total = 0
+            if storage is not None:
+                import pandas as pd
+                now_utc = pd.Timestamp.utcnow()
+                # Add stored prediction tables from local DB.
+                for table_name in storage.listAllStreams():
+                    if table_name in ('streams', 'sqlite_sequence'):
+                        continue
+                    if table_name in known_prediction_ids:
+                        continue
+                    if storage.getStreamRowCount(table_name) <= 0:
+                        continue
+
+                    table_df = storage.getPredictions(table_name)
+                    if table_df.empty or 'provider' not in table_df.columns:
+                        continue
+                    providers = {str(p).lower() for p in table_df['provider'].dropna().tolist()}
+                    if 'engine' not in providers:
+                        continue
+
+                    meta = pred_to_obs_meta.get(table_name, {})
+                    name = meta.get('stream_name') or f"prediction-{table_name[:8]}"
+
+                    streams.append({
+                        'stream_uuid': table_name,
+                        'prediction_stream_uuid': table_name,
+                        'observation_stream_uuid': meta.get('observation_stream_uuid'),
+                        'stream_name': name,
+                        'source': (meta.get('source') or 'local-db'),
+                        'author': meta.get('author'),
+                        'target': meta.get('target'),
+                        'stream_type': 'stored_prediction',
+                    })
+
+                # Compute 24h prediction count.
+                for item in streams:
+                    pred_uuid = item.get('prediction_stream_uuid') or item.get('stream_uuid')
+                    if not pred_uuid:
+                        continue
+                    pdf = storage.getPredictions(pred_uuid)
+                    if pdf.empty:
+                        continue
+                    for ts in pdf.index:
+                        try:
+                            ts_dt = pd.to_datetime(ts, utc=True)
+                        except Exception:
+                            continue
+                        if ts_dt >= now_utc - pd.Timedelta(hours=24):
+                            predictions_24h_total += 1
+
+            return jsonify({
+                'streams': sorted(streams, key=lambda x: (x.get('stream_name') or '').lower()),
+                'count': len(streams),
+                'active_model_count': len(stream_models),
+                'predictions_24h_total': predictions_24h_total,
+            })
+        except Exception as e:
+            logger.error(f"Error getting engine streams: {e}")
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/engine/performance', methods=['GET'])
     @login_required
     def get_engine_performance():
         """Get engine performance metrics (predictions vs observations).
 
-        Returns last 100 observations and predictions with accuracy calculations.
+        Returns recent observations and predictions with accuracy calculations.
 
         Returns:
             JSON with:
@@ -1238,43 +1368,93 @@ def register_routes(app):
                 logger.warning("AI engine not initialized")
                 return jsonify({'error': 'AI engine not initialized'}), 503
 
-            # Get first stream (for now, could extend to support multiple streams)
-            if not startup.aiengine.streamModels:
+            stream_models = getattr(startup.aiengine, 'streamModels', {}) or {}
+            storage = getattr(startup.aiengine, 'storage', None)
+            if not stream_models and storage is None:
                 return jsonify({'error': 'No streams configured'}), 404
 
-            streamUuid = list(startup.aiengine.streamModels.keys())[0]
-            streamModel = startup.aiengine.streamModels[streamUuid]
+            try:
+                limit = int(request.args.get('limit', 100))
+            except (TypeError, ValueError):
+                limit = 100
+            limit = max(10, min(limit, 500))
 
-            if not hasattr(streamModel, 'storage') or streamModel.storage is None:
+            requested_stream = request.args.get('stream_uuid')
+            selected_model = None
+            obs_uuid = None
+            pred_uuid = None
+
+            def prediction_uuid_for_name(stream_name: str) -> str:
+                if not stream_name:
+                    return None
+                seed = f"central-lite:satori:{stream_name}_pred:"
+                return str(uuid.uuid5(uuid.NAMESPACE_DNS, seed))
+
+            pred_to_obs = {}
+            if storage is not None:
+                try:
+                    for row in storage.db.getAllStreams():
+                        n = row.get('name')
+                        p = prediction_uuid_for_name(n)
+                        if p:
+                            pred_to_obs[p] = row.get('uuid')
+                except Exception:
+                    pred_to_obs = {}
+
+            if requested_stream:
+                for model_obs_uuid, model in stream_models.items():
+                    model_pred_uuid = getattr(model, 'predictionStreamUuid', None)
+                    if requested_stream == model_obs_uuid or requested_stream == model_pred_uuid:
+                        selected_model = model
+                        obs_uuid = model_obs_uuid
+                        pred_uuid = model_pred_uuid
+                        break
+                if selected_model is None:
+                    pred_uuid = requested_stream
+                    if storage is None or pred_uuid not in storage.listAllStreams():
+                        return jsonify({'error': f'Stream not found: {requested_stream}'}), 404
+            else:
+                if not stream_models:
+                    return jsonify({'error': 'No active streams configured'}), 404
+                obs_uuid = list(stream_models.keys())[0]
+                selected_model = stream_models[obs_uuid]
+                pred_uuid = getattr(selected_model, 'predictionStreamUuid', None)
+
+            if selected_model is not None:
+                if not hasattr(selected_model, 'storage') or selected_model.storage is None:
+                    return jsonify({'error': 'Storage not initialized'}), 503
+                storage = selected_model.storage
+
+            if storage is None:
                 return jsonify({'error': 'Storage not initialized'}), 503
 
-            # Get last 100 observations
-            obs_df = streamModel.storage.getStreamData(streamModel.streamUuid)
-            if obs_df.empty:
-                return jsonify({
-                    'observations': [],
-                    'predictions': [],
-                    'accuracy': [],
-                    'stats': {}
-                })
+            # If we only have a prediction stream from local DB, try to map to active model observation.
+            if obs_uuid is None and pred_uuid is not None:
+                for model_obs_uuid, model in stream_models.items():
+                    if getattr(model, 'predictionStreamUuid', None) == pred_uuid:
+                        obs_uuid = model_obs_uuid
+                        break
+            if obs_uuid is None and pred_uuid in pred_to_obs:
+                obs_uuid = pred_to_obs.get(pred_uuid)
 
-            obs_df = obs_df.tail(100).reset_index()
+            obs_df_raw = storage.getStreamData(obs_uuid) if obs_uuid else None
+            obs_df = obs_df_raw.tail(limit).reset_index() if obs_df_raw is not None and not obs_df_raw.empty else None
             observations = [
                 {'ts': str(row['ts']), 'value': float(row['value'])}
                 for _, row in obs_df.iterrows()
-            ]
+            ] if obs_df is not None else []
 
-            # Get last 100 predictions
-            pred_df = streamModel.storage.getPredictions(streamModel.predictionStreamUuid)
-            if pred_df.empty:
+            pred_df = storage.getPredictions(pred_uuid) if pred_uuid else None
+            if pred_df is None or pred_df.empty:
                 return jsonify({
+                    'stream_uuid': pred_uuid or obs_uuid,
                     'observations': observations,
                     'predictions': [],
                     'accuracy': [],
                     'stats': {}
                 })
 
-            pred_df = pred_df.tail(100).reset_index()
+            pred_df = pred_df.tail(limit).reset_index()
             predictions = [
                 {'ts': str(row['ts']), 'value': float(row['value'])}
                 for _, row in pred_df.iterrows()
@@ -1283,6 +1463,14 @@ def register_routes(app):
             # Calculate accuracy: match each prediction to the next observation
             import pandas as pd
             accuracy_data = []
+            if obs_df is None or obs_df.empty:
+                return jsonify({
+                    'stream_uuid': pred_uuid or obs_uuid,
+                    'observations': observations,
+                    'predictions': predictions,
+                    'accuracy': [],
+                    'stats': {}
+                })
 
             for idx, pred_row in pred_df.iterrows():
                 pred_ts = pred_row['ts']
@@ -1352,6 +1540,7 @@ def register_routes(app):
                 }
 
             return jsonify({
+                'stream_uuid': pred_uuid or obs_uuid,
                 'observations': observations,
                 'predictions': predictions,
                 'accuracy': accuracy_data,

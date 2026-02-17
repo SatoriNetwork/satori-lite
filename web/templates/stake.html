@@ -10,9 +10,17 @@
         <small class="text-muted ms-2" style="font-size: 0.65rem; font-weight: 400; opacity: 0.6;">{{ version }}</small>
     </span>
     <div class="ms-auto d-flex align-items-center">
-        <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm me-2">
-            <i class="material-icons align-middle" style="font-size: 16px;">arrow_back</i>
+        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">dashboard</i>
             Dashboard
+        </a>
+        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">timeline</i>
+            Local Predictions
+        </a>
+        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
+            Stake Management
         </a>
         <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">

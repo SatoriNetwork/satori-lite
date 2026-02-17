@@ -24,6 +24,8 @@ COPY tests /Satori/tests
 COPY requirements.txt /Satori/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /Satori/requirements.txt && \
+    # Ensure ETH address derivation dependency is available at runtime.
+    pip install --no-cache-dir coincurve && \
     pip install pytest
 
 # Set Python path - include /Satori so 'from web.app' imports work

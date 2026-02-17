@@ -30,7 +30,15 @@
             <span class="status-indicator status-online" id="statusIndicator"></span>
             <span id="statusText">Connected</span>
         </span>
-        <a href="{{ url_for('stake_management') }}" class="btn btn-outline-light btn-sm me-2">
+        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">dashboard</i>
+            Dashboard
+        </a>
+        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">timeline</i>
+            Local Predictions
+        </a>
+        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm me-2">
             <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
             Stake Management
         </a>

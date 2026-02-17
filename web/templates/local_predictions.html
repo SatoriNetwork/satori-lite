@@ -1,0 +1,469 @@
+{% extends "base.html" %}
+
+{% block title %}Satori - Local Predictions{% endblock %}
+
+{% block extra_css %}
+<style>
+    .metric-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+    .metric-label {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+    }
+    .chart-wrap {
+        height: 320px;
+    }
+    .table-responsive {
+        max-height: 460px;
+        overflow-y: auto;
+    }
+    .table-responsive thead th {
+        position: sticky;
+        top: 0;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        z-index: 1;
+    }
+    .table {
+        color: var(--text-primary);
+    }
+    .table tbody td {
+        color: var(--text-primary) !important;
+        background: var(--bg-card);
+    }
+    .table tbody tr:nth-child(even) td {
+        background: var(--bg-input);
+    }
+    .table-sm td, .table-sm th {
+        vertical-align: middle;
+    }
+    .mono {
+        font-family: Consolas, "Courier New", monospace;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<nav class="navbar navbar-expand-lg px-4">
+    <span class="navbar-brand">
+        Satori - Local Predictions
+        <small class="text-muted ms-2" style="font-size: 0.65rem; font-weight: 400; opacity: 0.6;">{{ version }}</small>
+    </span>
+    <div class="ms-auto d-flex align-items-center">
+        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">dashboard</i>
+            Dashboard
+        </a>
+        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">timeline</i>
+            Local Predictions
+        </a>
+        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm me-2">
+            <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
+            Stake Management
+        </a>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
+            <i class="material-icons" id="themeIcon">light_mode</i>
+        </button>
+    </div>
+</nav>
+
+<div class="container-fluid py-4">
+    <div class="row g-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-12 col-lg-6">
+                            <label for="streamSelect" class="form-label">Local stream</label>
+                            <select id="streamSelect" class="form-select"></select>
+                        </div>
+                        <div class="col-12 col-lg-6 d-flex justify-content-lg-end">
+                            <button class="btn btn-primary" id="refreshBtn">
+                                <i class="material-icons align-middle me-1" style="font-size: 16px;">refresh</i>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-3 small text-muted" id="streamMeta">-</div>
+                    <div class="mt-2 small text-muted">
+                        Active streams: <strong id="activeStreamsCount">0</strong>
+                        <span class="mx-2">|</span>
+                        Predictions last 24h: <strong id="predictions24hTotal">0</strong>
+                    </div>
+                    <div class="mt-3 alert alert-secondary mb-0" id="statusBox">Loading local predictions...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="metric-value" id="obsCount">0</div>
+                <div class="metric-label">Observations</div>
+            </div></div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="metric-value" id="predCount">0</div>
+                <div class="metric-label">Predictions</div>
+            </div></div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="metric-value" id="avgAbsError">-</div>
+                <div class="metric-label">Avg absolute error</div>
+            </div></div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="metric-value" id="accuracyPct">-</div>
+                <div class="metric-label">Accuracy</div>
+            </div></div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Observations vs predictions</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-wrap">
+                        <canvas id="predictionsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-6">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Prediction error (absolute)</h6>
+                </div>
+                <div class="card-body">
+                    <div class="chart-wrap">
+                        <canvas id="errorChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Recent local predictions</h6>
+                </div>
+                <div class="card-body table-responsive" style="max-height: 360px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Prediction time</th>
+                                <th>Predicted</th>
+                                <th>Matched observation</th>
+                                <th>Abs error</th>
+                            </tr>
+                        </thead>
+                        <tbody id="predictionRows">
+                            <tr><td colspan="4" class="text-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let predictionsChart = null;
+let errorChart = null;
+let currentStream = '';
+let allStreams = [];
+
+function shortUuid(uuid) {
+    if (!uuid || uuid.length < 16) return uuid || '-';
+    return `${uuid.slice(0, 8)}...${uuid.slice(-6)}`;
+}
+
+function isUuidLike(value) {
+    if (!value || typeof value !== 'string') return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parseTimestamp(ts) {
+    if (typeof ts === 'number') {
+        const value = ts > 1e12 ? ts : ts * 1000;
+        return new Date(value);
+    }
+    if (typeof ts === 'string') {
+        const numeric = Number(ts);
+        if (!Number.isNaN(numeric)) {
+            const value = numeric > 1e12 ? numeric : numeric * 1000;
+            return new Date(value);
+        }
+    }
+    return new Date(ts);
+}
+
+function formatDateTime(ts) {
+    const date = parseTimestamp(ts);
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+        return String(ts);
+    }
+    return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+}
+
+function formatNumber(value, decimals = 4) {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+    return Number(value).toFixed(decimals);
+}
+
+function setStatus(message, type = 'secondary') {
+    const box = document.getElementById('statusBox');
+    box.className = `mt-3 alert alert-${type} mb-0`;
+    box.textContent = message;
+}
+
+async function fetchJson(url) {
+    const response = await fetch(url);
+    const payload = await response.json();
+    if (!response.ok) {
+        throw new Error(payload.error || `Request failed: ${response.status}`);
+    }
+    return payload;
+}
+
+function getStreamDisplayName(stream, index = 0) {
+    if (!stream) return `Stream ${index + 1}`;
+    if (stream.stream_display_name) return stream.stream_display_name;
+    const name = (stream.stream_name || '').trim();
+    if (name && !isUuidLike(name)) return name;
+    return `Stream ${index + 1}`;
+}
+
+function updateStreamMeta(stream) {
+    const meta = document.getElementById('streamMeta');
+    if (!stream) {
+        meta.textContent = '-';
+        return;
+    }
+    const display = getStreamDisplayName(stream);
+    meta.innerHTML = `
+        <span class="me-3"><strong>${display}</strong></span>
+        <span class="me-3">Stream UUID: <span class="mono">${shortUuid(stream.stream_uuid)}</span></span>
+        <span>Prediction UUID: <span class="mono">${shortUuid(stream.prediction_stream_uuid)}</span></span>
+    `;
+}
+
+async function loadStreams() {
+    const select = document.getElementById('streamSelect');
+    select.disabled = true;
+    setStatus('Loading streams...', 'secondary');
+
+    try {
+        const data = await fetchJson('/api/engine/streams');
+        const streams = data.streams || [];
+        allStreams = streams;
+        document.getElementById('activeStreamsCount').textContent = data.active_model_count || 0;
+        document.getElementById('predictions24hTotal').textContent = data.predictions_24h_total || 0;
+
+        select.innerHTML = '';
+        if (streams.length === 0) {
+            select.innerHTML = '<option value="">No local streams found</option>';
+            updateMetrics({}, [], [], []);
+            renderRows([], []);
+            updateStreamMeta(null);
+            setStatus('No local streams available yet.', 'warning');
+            return;
+        }
+
+        streams.forEach((stream, index) => {
+            const option = document.createElement('option');
+            option.value = stream.stream_uuid;
+            option.textContent = `${getStreamDisplayName(stream, index)} | ${shortUuid(stream.stream_uuid)}`;
+            select.appendChild(option);
+        });
+
+        if (currentStream && streams.some((s) => s.stream_uuid === currentStream)) {
+            select.value = currentStream;
+        } else {
+            currentStream = streams[0].stream_uuid;
+            select.value = currentStream;
+        }
+
+        updateStreamMeta(streams.find((s) => s.stream_uuid === select.value));
+        await loadPerformance();
+    } catch (error) {
+        setStatus(`Failed to load streams: ${error.message}`, 'danger');
+        select.innerHTML = '<option value="">Stream load failed</option>';
+    } finally {
+        select.disabled = false;
+    }
+}
+
+function updateMetrics(stats, observations, predictions, accuracy) {
+    document.getElementById('obsCount').textContent = observations.length;
+    document.getElementById('predCount').textContent = predictions.length;
+    document.getElementById('avgAbsError').textContent = stats.avg_abs_error !== undefined
+        ? formatNumber(stats.avg_abs_error, 4)
+        : '-';
+    document.getElementById('accuracyPct').textContent = stats.accuracy_pct !== undefined
+        ? `${formatNumber(stats.accuracy_pct, 2)}%`
+        : '-';
+}
+
+function renderPredictionsChart(observations, predictions) {
+    const ctx = document.getElementById('predictionsChart');
+    if (predictionsChart) {
+        predictionsChart.destroy();
+    }
+
+    predictionsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: [
+                {
+                    label: 'Observations',
+                    data: observations.map((o) => ({ x: parseTimestamp(o.ts), y: Number(o.value) })),
+                    borderColor: '#22c55e',
+                    backgroundColor: 'rgba(34, 197, 94, 0.2)',
+                    tension: 0.2,
+                    pointRadius: 2,
+                },
+                {
+                    label: 'Predictions',
+                    data: predictions.map((p) => ({ x: parseTimestamp(p.ts), y: Number(p.value) })),
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    tension: 0.2,
+                    pointRadius: 2,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { type: 'time', time: { tooltipFormat: 'yyyy-MM-dd HH:mm' } },
+                y: { ticks: { maxTicksLimit: 8 } }
+            }
+        }
+    });
+}
+
+function renderErrorChart(accuracy) {
+    const ctx = document.getElementById('errorChart');
+    if (errorChart) {
+        errorChart.destroy();
+    }
+
+    errorChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: accuracy.map((a) => parseTimestamp(a.ts)),
+            datasets: [{
+                label: 'Absolute error',
+                data: accuracy.map((a) => Number(a.abs_error)),
+                backgroundColor: 'rgba(244, 63, 94, 0.6)',
+                borderColor: '#f43f5e',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { type: 'time', time: { tooltipFormat: 'yyyy-MM-dd HH:mm' } },
+                y: { beginAtZero: true }
+            }
+        }
+    });
+}
+
+function renderRows(predictions, accuracy) {
+    const tbody = document.getElementById('predictionRows');
+    if (!predictions.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-muted">No local predictions found.</td></tr>';
+        return;
+    }
+
+    const accuracyByTs = new Map(accuracy.map((a) => [String(a.ts), a]));
+    const rows = predictions
+        .slice()
+        .reverse()
+        .slice(0, 80)
+        .map((prediction) => {
+            const item = accuracyByTs.get(String(prediction.ts));
+            const matched = item ? formatNumber(item.actual, 4) : '-';
+            const absError = item ? formatNumber(item.abs_error, 4) : '-';
+            return `
+                <tr>
+                    <td title="${prediction.ts}">${formatDateTime(prediction.ts)}</td>
+                    <td>${formatNumber(prediction.value, 4)}</td>
+                    <td>${matched}</td>
+                    <td>${absError}</td>
+                </tr>
+            `;
+        });
+
+    tbody.innerHTML = rows.join('');
+}
+
+async function loadPerformance() {
+    const select = document.getElementById('streamSelect');
+    const streamUuid = select.value;
+    if (!streamUuid) {
+        return;
+    }
+
+    currentStream = streamUuid;
+    setStatus('Loading predictions for selected stream...', 'secondary');
+
+    try {
+        const data = await fetchJson(`/api/engine/performance?stream_uuid=${encodeURIComponent(streamUuid)}&limit=500`);
+        const observations = data.observations || [];
+        const predictions = data.predictions || [];
+        const accuracy = data.accuracy || [];
+        const stats = data.stats || {};
+        const stream = allStreams.find((s) => s.stream_uuid === streamUuid);
+
+        updateMetrics(stats, observations, predictions, accuracy);
+        updateStreamMeta(stream);
+        renderPredictionsChart(observations, predictions);
+        renderErrorChart(accuracy);
+        renderRows(predictions, accuracy);
+
+        setStatus(
+            `Loaded ${predictions.length} predictions and ${observations.length} observations for ${getStreamDisplayName(stream)} (${shortUuid(streamUuid)}).`,
+            'success'
+        );
+    } catch (error) {
+        setStatus(`Failed to load performance data: ${error.message}`, 'danger');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+        await loadPerformance();
+    });
+    document.getElementById('streamSelect').addEventListener('change', async () => {
+        const stream = allStreams.find((s) => s.stream_uuid === document.getElementById('streamSelect').value);
+        updateStreamMeta(stream);
+        await loadPerformance();
+    });
+
+    await loadStreams();
+});
+</script>
+{% endblock %}
