@@ -1616,3 +1616,61 @@ def register_routes(app):
         except Exception as e:
             logger.error(f"Relay registration error: {e}")
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/network/streams', methods=['GET'])
+    @login_required
+    def api_network_streams():
+        """Discover datastreams on all relays (on-demand)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        # Trigger discovery in background
+        startup.triggerNetworkDiscover()
+        # Return whatever we have now (may be stale on first call)
+        connected = len(startup._networkClients) > 0
+        streams = []
+        for s in startup.networkStreams:
+            s_copy = dict(s)
+            s_copy['subscribed'] = startup.networkDB.is_subscribed(
+                s['stream_name'], s['nostr_pubkey'])
+            streams.append(s_copy)
+        return jsonify({
+            'connected': connected,
+            'streams': streams,
+        })
+
+    @app.route('/api/network/subscribe', methods=['POST'])
+    @login_required
+    def api_network_subscribe():
+        """Subscribe to a datastream."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
+            return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        relay_url = data.get('relay_url', '')
+        startup.networkDB.subscribe(data, relay_url)
+        return jsonify({'success': True})
+
+    @app.route('/api/network/unsubscribe', methods=['POST'])
+    @login_required
+    def api_network_unsubscribe():
+        """Unsubscribe from a datastream (soft delete)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
+            return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        startup.networkDB.unsubscribe(data['stream_name'], data['nostr_pubkey'])
+        return jsonify({'success': True})
+
+    @app.route('/api/network/subscriptions', methods=['GET'])
+    @login_required
+    def api_network_subscriptions():
+        """Return active subscriptions."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        return jsonify({'subscriptions': startup.networkDB.get_active()})

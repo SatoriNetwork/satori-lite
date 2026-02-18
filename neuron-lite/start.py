@@ -2,6 +2,7 @@ from typing import Union, Optional
 import os
 import time
 import json
+import asyncio
 import threading
 import hashlib
 import yaml
@@ -67,6 +68,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.subscriptions: list[Stream] = []  # Keep for engine
         self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
         self.nostrPubkey: Optional[str] = self._initNostrKeys()
+        self._networkClients: dict = {}  # relay_url -> SatoriNostr client
+        self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
+        self.networkStreams: list = []  # All discovered streams across relays
+        self.networkDB = self._initNetworkDB()
         self.latestObservationTime: float = 0
         self.configRewardAddress: str = None
         self.setupWalletManager()
@@ -122,6 +127,277 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.error(f'failed to init Nostr keys: {e}')
             return None
+
+    def _initNetworkDB(self):
+        """Initialize the local network subscriptions database."""
+        from satorineuron.network_db import NetworkDB
+        db_path = os.path.join(config.dataPath(), 'network.db')
+        return NetworkDB(db_path)
+
+    def startNetworkClient(self):
+        """Start the network reconciliation thread.
+
+        Reads Nostr secret key, then starts a background thread that
+        manages relay connections and stream subscriptions.
+        """
+        if not self.nostrPubkey:
+            logging.info('Network client not started: missing keys', color='yellow')
+            return
+        nostrPath = config.walletPath('nostr.yaml')
+        try:
+            with open(nostrPath, 'r') as f:
+                data = yaml.safe_load(f)
+            secret_hex = data.get('secret_hex', '')
+        except Exception as e:
+            logging.error(f'Cannot read Nostr secret key: {e}')
+            return
+        if not secret_hex:
+            logging.error('Nostr secret key is empty')
+            return
+        self._networkSecretHex = secret_hex
+        self.networkThread = threading.Thread(
+            target=self._runNetworkClient,
+            daemon=True)
+        self.networkThread.start()
+
+    def _runNetworkClient(self):
+        """Background thread entry: runs asyncio event loop with crash recovery."""
+        import random
+        while True:
+            try:
+                asyncio.run(self._networkReconcileLoop())
+            except Exception as e:
+                logging.error(f'Network client thread crashed: {e}')
+            delay = random.randint(60, 600)
+            logging.info(
+                f'Network: restarting in {delay}s', color='yellow')
+            time.sleep(delay)
+
+    async def _networkReconcileLoop(self):
+        """Reconciliation loop: ensures we are subscribed to all desired streams.
+
+        Every 5 minutes:
+        1. Get relay list from central
+        2. Get desired subscriptions from local DB
+        3. For each relay with desired subscriptions: connect, discover, subscribe
+        4. Disconnect from relays with no desired subscriptions
+        """
+        from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
+
+        while True:
+            try:
+                await self._networkReconcile(SatoriNostrConfig)
+            except Exception as e:
+                logging.error(f'Network reconcile error: {e}')
+            await asyncio.sleep(300)
+
+    async def _networkConnect(self, relay_url: str, ConfigClass):
+        """Connect to a relay if not already connected. Returns client or None."""
+        from satorilib.satori_nostr import SatoriNostr
+        if relay_url in self._networkClients:
+            return self._networkClients[relay_url]
+        try:
+            cfg = ConfigClass(
+                keys=self._networkSecretHex,
+                relay_urls=[relay_url])
+            client = SatoriNostr(cfg)
+            await client.start()
+            self._networkClients[relay_url] = client
+            self._networkSubscribed[relay_url] = set()
+            logging.info(f'Network: connected to {relay_url}', color='green')
+            return client
+        except Exception as e:
+            logging.warning(f'Network: failed to connect to {relay_url}: {e}')
+            return None
+
+    async def _networkDisconnect(self, relay_url: str):
+        """Disconnect from a relay."""
+        if relay_url in self._networkClients:
+            try:
+                await self._networkClients[relay_url].stop()
+            except Exception:
+                pass
+            del self._networkClients[relay_url]
+            self._networkSubscribed.pop(relay_url, None)
+            logging.info(f'Network: disconnected from {relay_url}', color='yellow')
+
+    async def _networkCheckFreshness(self, client, stream_name, metadata):
+        """Check if a stream is actively publishing. Returns (last_obs, is_active)."""
+        try:
+            last_obs = await client.get_last_observation_time(stream_name)
+            if last_obs:
+                return last_obs, metadata.is_likely_active(last_obs)
+            return None, False
+        except Exception:
+            return None, False
+
+    async def _networkDiscover(self, ConfigClass):
+        """On-demand discovery: connect to all relays, find all streams.
+
+        Called from the API when the user loads the streams page.
+        Not part of the reconciliation loop.
+        """
+        try:
+            relays = await asyncio.to_thread(self.server.getRelays)
+            relay_urls = [r['relay_url'] for r in relays]
+        except Exception as e:
+            logging.warning(f'Network discover: could not fetch relay list: {e}')
+            relay_urls = list(self._neededRelays())
+            if not relay_urls:
+                return
+            logging.info(
+                f'Network discover: falling back to {len(relay_urls)} '
+                f'known relays', color='yellow')
+
+        all_streams = []
+        for relay_url in relay_urls:
+            client = await self._networkConnect(relay_url, ConfigClass)
+            if not client:
+                continue
+            try:
+                streams = await client.discover_datastreams()
+                for s in streams:
+                    d = s.to_dict()
+                    d['relay_url'] = relay_url
+                    last_obs, is_active = await self._networkCheckFreshness(
+                        client, s.stream_name, s)
+                    d['last_observation_at'] = last_obs
+                    d['active'] = is_active
+                    all_streams.append(d)
+            except Exception as e:
+                logging.warning(
+                    f'Network discover: failed on {relay_url}: {e}')
+            # Disconnect if we only connected for discovery
+            if relay_url not in self._neededRelays():
+                await self._networkDisconnect(relay_url)
+
+        self.networkStreams = all_streams
+
+    def _neededRelays(self) -> set:
+        """Return set of relay URLs that have active subscriptions."""
+        subs = self.networkDB.get_active()
+        return {s['relay_url'] for s in subs}
+
+    def triggerNetworkDiscover(self):
+        """Trigger on-demand discovery from a sync context (e.g. Flask route)."""
+        from satorilib.satori_nostr import SatoriNostrConfig
+        if not hasattr(self, '_networkSecretHex'):
+            return
+        loop = asyncio.new_event_loop()
+        def run():
+            try:
+                loop.run_until_complete(
+                    self._networkDiscover(SatoriNostrConfig))
+            finally:
+                loop.close()
+        threading.Thread(target=run, daemon=True).start()
+
+    async def _networkReconcile(self, ConfigClass):
+        """Single reconciliation pass.
+
+        Every 5 minutes:
+        1. Get subscriptions from DB
+        2. Check which are inactive (no observation within 1.5 * cadence)
+        3. For inactive ones not recently marked stale: hunt relays
+        4. If not found anywhere: mark stale
+        """
+        # 1. Get subscriptions
+        desired = await asyncio.to_thread(self.networkDB.get_active)
+        if not desired:
+            return
+
+        # 2. Find inactive subscriptions
+        inactive = []
+        for sub in desired:
+            cadence = sub.get('cadence_seconds')
+            is_stale = await asyncio.to_thread(
+                self.networkDB.is_locally_stale,
+                sub['stream_name'], sub['provider_pubkey'], cadence)
+            if is_stale:
+                inactive.append(sub)
+
+        if not inactive:
+            return
+
+        # 3. Build hunt list: inactive subs not recently marked stale
+        hunting = {}  # stream_name -> sub dict
+        for sub in inactive:
+            stale_since = sub.get('stale_since')
+            if stale_since and not self.networkDB.should_recheck_stale(
+                    stale_since):
+                continue
+            hunting[sub['stream_name']] = sub
+
+        if not hunting:
+            return
+
+        # Get relay list from central, fall back to known relays from DB
+        try:
+            relays = await asyncio.to_thread(self.server.getRelays)
+            relay_urls = [r['relay_url'] for r in relays]
+        except Exception as e:
+            logging.warning(f'Could not fetch relay list from central: {e}')
+            relay_urls = list({sub['relay_url'] for sub in desired})
+            if not relay_urls:
+                return
+            logging.info(
+                f'Network: falling back to {len(relay_urls)} known relays',
+                color='yellow')
+
+        # 4. Hunt relay by relay — check all wanted streams per relay
+        for relay_url in relay_urls:
+            if not hunting:
+                break  # all found
+            client = await self._networkConnect(relay_url, ConfigClass)
+            if not client:
+                continue
+            try:
+                streams = await client.discover_datastreams()
+            except Exception:
+                await self._networkDisconnect(relay_url)
+                continue
+
+            # Index this relay's streams by name
+            relay_index = {s.stream_name: s for s in streams}
+
+            # Check which of our wanted streams are on this relay and active
+            found_any = False
+            for stream_name in list(hunting.keys()):
+                metadata = relay_index.get(stream_name)
+                if not metadata:
+                    continue
+                _, is_active = await self._networkCheckFreshness(
+                    client, stream_name, metadata)
+                if not is_active:
+                    continue
+                # Found active — update DB, subscribe
+                sub = hunting.pop(stream_name)
+                found_any = True
+                await asyncio.to_thread(
+                    self.networkDB.update_relay,
+                    stream_name, sub['provider_pubkey'], relay_url)
+                try:
+                    await client.subscribe_datastream(
+                        stream_name, sub['provider_pubkey'])
+                    logging.info(
+                        f'Network: found {stream_name} active on '
+                        f'{relay_url}', color='green')
+                except Exception as e:
+                    logging.warning(
+                        f'Network: subscribe failed {stream_name}: {e}')
+
+            # Disconnect if this relay had nothing we needed
+            if not found_any:
+                await self._networkDisconnect(relay_url)
+
+        # 5. Whatever's left in hunting wasn't found anywhere — mark stale
+        for stream_name, sub in hunting.items():
+            await asyncio.to_thread(
+                self.networkDB.mark_stale,
+                stream_name, sub['provider_pubkey'])
+            logging.info(
+                f'Network: {stream_name} stale everywhere, '
+                f'recheck in 24h', color='yellow')
 
     @staticmethod
     def getUiPort() -> int:
@@ -524,6 +800,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.createServerConn()
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
+        self.startNetworkClient()
         self.setupDefaultStream()
         self.spawnEngine()
         startWebUI(self, port=self.uiPort)  # Start web UI after sync
@@ -549,6 +826,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.createServerConn()
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
+        self.startNetworkClient()
         self.setupDefaultStream()
         self.spawnEngine()
         startWebUI(self, port=self.uiPort)  # Start web UI after sync
