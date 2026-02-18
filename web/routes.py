@@ -338,6 +338,11 @@ def register_routes(app):
     @app.route('/login', methods=['GET', 'POST'])
     def login():
         """Handle vault unlock/login."""
+        from satorineuron import VERSION
+
+        def render_login():
+            return render_template('login.html', version=VERSION)
+
         # Check if vault file exists, redirect to setup if not
         if not check_vault_file_exists():
             return redirect(url_for('vault_setup'))
@@ -346,7 +351,7 @@ def register_routes(app):
         if request.method == 'GET':
             # Skip auto-login if user just logged out explicitly
             if session.get('logged_out'):
-                return render_template('login.html')
+                return render_login()
 
             from satorineuron import config
             config_password = config.get().get('vault password')
@@ -386,7 +391,7 @@ def register_routes(app):
                         # Fall through to show login form
 
             # No config password or auto-login failed - show login form
-            return render_template('login.html')
+            return render_login()
 
         if request.method == 'POST':
             password = request.form.get('password', '')
@@ -436,11 +441,16 @@ def register_routes(app):
                     return redirect(url_for('dashboard'))
                 flash('Error: Vault not initialized', 'error')
 
-        return render_template('login.html')
+        return render_login()
 
     @app.route('/vault-setup', methods=['GET', 'POST'])
     def vault_setup():
         """Handle initial vault password creation."""
+        from satorineuron import VERSION
+
+        def render_vault_setup():
+            return render_template('vault_setup.html', version=VERSION)
+
         # If vault file already exists, redirect to login with message
         if check_vault_file_exists():
             flash('Vault already exists. Please log in with your existing password.', 'info')
@@ -454,12 +464,12 @@ def register_routes(app):
             # Validate password length
             if len(password) < 4:
                 flash('Password must be at least 4 characters long', 'error')
-                return render_template('vault_setup.html')
+                return render_vault_setup()
 
             # Validate passwords match
             if password != password_confirm:
                 flash('Passwords do not match. Please try again.', 'error')
-                return render_template('vault_setup.html')
+                return render_vault_setup()
 
             # Create vault with password (DO NOT save password to config for security)
             try:
@@ -476,16 +486,16 @@ def register_routes(app):
                         return redirect(url_for('login'))
                     else:
                         flash('Error creating vault. Please try again.', 'error')
-                        return render_template('vault_setup.html')
+                        return render_vault_setup()
                 else:
                     flash('Error initializing wallet manager', 'error')
-                    return render_template('vault_setup.html')
+                    return render_vault_setup()
             except Exception as e:
                 logger.error(f"Failed to create vault: {e}")
                 flash(f'Error creating vault: {str(e)}', 'error')
-                return render_template('vault_setup.html')
+                return render_vault_setup()
 
-        return render_template('vault_setup.html')
+        return render_vault_setup()
 
     @app.route('/logout')
     def logout():

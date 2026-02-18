@@ -22,6 +22,32 @@
             <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
             Stake Management
         </a>
+        <div class="dropdown me-2">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                <i class="material-icons align-middle" style="font-size: 16px;">tune</i>
+                Training
+            </button>
+            <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <label class="form-label mb-0">AI Engine Training Frequency</label>
+                    <span title="Controls how frequently the AI engine trains new models. Lower frequency = less CPU usage. Higher frequency = faster model improvements.">
+                        <i class="material-icons text-muted" style="font-size: 16px; cursor: help;">info</i>
+                    </span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-muted small">Slow</span>
+                    <input type="range" class="form-range flex-grow-1 mb-0"
+                           id="trainingDelaySlider"
+                           min="0" max="100" step="1" value="50"
+                           oninput="updateTrainingDelayLabel(this.value)"
+                           onchange="setTrainingDelay(this.value)">
+                    <span class="text-muted small">Fast</span>
+                </div>
+                <div class="text-center mt-2">
+                    <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
+                </div>
+            </div>
+        </div>
         <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
             <i class="material-icons" id="themeIcon">light_mode</i>
@@ -220,6 +246,50 @@
             console.error('API call error:', error);
             showToast('Network error: ' + error.message, true);
             return null;
+        }
+    }
+
+    function sliderToSeconds(sliderValue) {
+        const percentage = sliderValue / 100.0;
+        if (percentage <= 0.0) return 86400;
+        if (percentage >= 1.0) return 0;
+        return Math.round(86400 * Math.pow(1 - percentage, 7));
+    }
+
+    function secondsToSlider(seconds) {
+        if (seconds >= 86400) return 0;
+        if (seconds <= 0) return 100;
+        const percentage = 1 - Math.pow(seconds / 86400, 1 / 7);
+        return Math.round(percentage * 100);
+    }
+
+    function formatDelay(seconds) {
+        if (seconds === 0) return "Continuous";
+        if (seconds < 60) return `${seconds} seconds`;
+        if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
+        if (seconds < 86400) return `${Math.round(seconds / 3600)} hours`;
+        return `${Math.round(seconds / 86400)} days`;
+    }
+
+    function updateTrainingDelayLabel(sliderValue) {
+        const seconds = sliderToSeconds(sliderValue);
+        document.getElementById('trainingDelayLabel').textContent = formatDelay(seconds);
+    }
+
+    async function setTrainingDelay(sliderValue) {
+        const seconds = sliderToSeconds(sliderValue);
+        const result = await apiCall('/engine/training-delay', 'POST', { delay_seconds: seconds });
+        if (result && !result.error) {
+            showToast(`Training frequency updated: ${formatDelay(seconds)}`);
+        }
+    }
+
+    async function loadTrainingDelay() {
+        const result = await apiCall('/engine/training-delay');
+        if (result && result.delay_seconds !== undefined) {
+            const sliderValue = secondsToSlider(result.delay_seconds);
+            document.getElementById('trainingDelaySlider').value = sliderValue;
+            updateTrainingDelayLabel(sliderValue);
         }
     }
 
@@ -558,6 +628,7 @@
         loadLenders();
         loadAvailablePools();
         loadPoolCommission();
+        loadTrainingDelay();
     });
 </script>
 {% endblock %}
