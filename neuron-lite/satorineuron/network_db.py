@@ -56,6 +56,14 @@ class NetworkDB:
             CREATE INDEX IF NOT EXISTS idx_obs_stream
             ON observations(stream_name, provider_pubkey, received_at DESC)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS relays (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                relay_url TEXT NOT NULL UNIQUE,
+                first_seen INTEGER NOT NULL,
+                last_active INTEGER NOT NULL
+            )
+        """)
         # Migration: add stale_since if missing (existing DBs)
         try:
             conn.execute("SELECT stale_since FROM subscriptions LIMIT 1")
@@ -101,6 +109,7 @@ class NetworkDB:
             int(time.time()),
         ))
         conn.commit()
+        self.upsert_relay(relay_url)
         return conn.execute(
             "SELECT id FROM subscriptions WHERE stream_name=? AND provider_pubkey=?",
             (stream['stream_name'], stream['nostr_pubkey'])
@@ -120,6 +129,14 @@ class NetworkDB:
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT * FROM subscriptions WHERE active = 1 ORDER BY subscribed_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all(self) -> list[dict]:
+        """Return all subscriptions including soft-deleted."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM subscriptions ORDER BY active DESC, subscribed_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -159,6 +176,7 @@ class NetworkDB:
             WHERE stream_name = ? AND provider_pubkey = ? AND active = 1
         """, (relay_url, stream_name, provider_pubkey))
         conn.commit()
+        self.upsert_relay(relay_url)
 
     def should_recheck_stale(self, stale_since: int,
                              interval: int = 86400) -> bool:
@@ -207,3 +225,30 @@ class NetworkDB:
         if cadence_seconds is None or cadence_seconds <= 0:
             return elapsed > 86400  # irregular: stale after 24h
         return elapsed > (cadence_seconds * multiplier)
+
+    # ── Relays ────────────────────────────────────────────────────
+
+    def upsert_relay(self, relay_url: str):
+        """Record a relay, updating last_active if it already exists."""
+        now = int(time.time())
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO relays (relay_url, first_seen, last_active)
+            VALUES (?, ?, ?)
+            ON CONFLICT(relay_url) DO UPDATE SET last_active = ?
+        """, (relay_url, now, now, now))
+        conn.commit()
+
+    def get_relays(self) -> list[dict]:
+        """Return all known relays."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM relays ORDER BY last_active DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_relay(self, relay_url: str):
+        """Remove a relay from the known list."""
+        conn = self._get_conn()
+        conn.execute("DELETE FROM relays WHERE relay_url = ?", (relay_url,))
+        conn.commit()

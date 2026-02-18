@@ -1669,8 +1669,58 @@ def register_routes(app):
     @app.route('/api/network/subscriptions', methods=['GET'])
     @login_required
     def api_network_subscriptions():
-        """Return active subscriptions."""
+        """Return subscriptions. Pass ?all=1 to include inactive."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
-        return jsonify({'subscriptions': startup.networkDB.get_active()})
+        if request.args.get('all'):
+            subs = startup.networkDB.get_all()
+        else:
+            subs = startup.networkDB.get_active()
+        return jsonify({'subscriptions': subs})
+
+    @app.route('/api/network/relays', methods=['GET'])
+    @login_required
+    def api_network_relays():
+        """Return all known relays merged from central + local DB."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        # Get relays from local DB (keyed by URL)
+        db_relays = {r['relay_url']: r for r in startup.networkDB.get_relays()}
+        # Merge in relays from central
+        try:
+            server_relays = startup.server.getRelays()
+            for r in server_relays:
+                url = r['relay_url']
+                if url not in db_relays:
+                    db_relays[url] = {
+                        'relay_url': url,
+                        'first_seen': None,
+                        'last_active': None,
+                        'source': 'server',
+                    }
+                else:
+                    db_relays[url]['source'] = 'both'
+        except Exception:
+            pass
+        # Mark source for DB-only relays
+        for url, r in db_relays.items():
+            if 'source' not in r:
+                r['source'] = 'local'
+        relays = sorted(db_relays.values(),
+                        key=lambda r: r.get('last_active') or 0, reverse=True)
+        return jsonify({'relays': relays})
+
+    @app.route('/api/network/relay', methods=['DELETE'])
+    @login_required
+    def api_network_relay_delete():
+        """Delete a relay from the local DB."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'relay_url' not in data:
+            return jsonify({'error': 'Missing relay_url'}), 400
+        startup.networkDB.delete_relay(data['relay_url'])
+        return jsonify({'success': True})

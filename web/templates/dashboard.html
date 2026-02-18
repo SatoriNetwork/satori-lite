@@ -382,11 +382,12 @@
     <div class="row g-4 mt-2">
         <div class="col-12">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">playlist_add_check</i>
-                        Active Subscriptions
+                        Subscriptions
                     </h5>
+                    <button id="subsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactiveSubs()">Show Inactive</button>
                 </div>
                 <div class="card-body">
                     <div id="subsEmpty" class="text-center text-muted py-3">
@@ -413,40 +414,63 @@
         </div>
     </div>
 
-    <!-- Relay Datastreams Section -->
+    <!-- Relays Section -->
     <div class="row g-4 mt-2">
         <div class="col-12">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">rss_feed</i>
-                        Relay Datastreams
+                        Relays
                     </h5>
                     <span id="networkStatus" class="badge bg-secondary">Checking...</span>
                 </div>
-                <div class="card-body">
-                    <div id="networkStreamsLoading" class="text-center text-muted py-3">
-                        Loading datastreams...
+                <div class="card-body p-0">
+                    <div id="relaysLoading" class="text-center text-muted py-3">
+                        Loading relays...
                     </div>
-                    <div id="networkStreamsEmpty" class="text-center text-muted py-3" style="display: none;">
-                        No datastreams found on relay.
+                    <div id="relaysEmpty" class="text-center text-muted py-3" style="display: none;">
+                        No relays found.
                     </div>
-                    <div id="networkStreamsTable" style="display: none;">
+                    <div id="relaysTable" style="display: none;">
                         <div class="table-responsive">
                             <table class="table table-sm table-hover mb-0">
                                 <thead>
                                     <tr>
-                                        <th>Stream</th>
-                                        <th>Description</th>
-                                        <th>Cadence</th>
-                                        <th>Price</th>
-                                        <th>Status</th>
-                                        <th>Tags</th>
+                                        <th>Relay URL</th>
+                                        <th>Last Active</th>
+                                        <th>Source</th>
+                                        <th>Streams</th>
+                                        <th></th>
                                         <th></th>
                                     </tr>
                                 </thead>
-                                <tbody id="networkStreamsList"></tbody>
+                                <tbody id="relaysList"></tbody>
                             </table>
+                        </div>
+                    </div>
+                    <!-- Streams drawer -->
+                    <div id="relayDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
+                        <div class="p-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0" id="relayDrawerTitle">Streams</h6>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="closeRelayDrawer()">Close</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover mb-0">
+                                    <thead>
+                                        <tr>
+                                            <th>Stream</th>
+                                            <th>Description</th>
+                                            <th>Cadence</th>
+                                            <th>Price</th>
+                                            <th>Tags</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="relayDrawerStreams"></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1426,6 +1450,15 @@
         loadNetworkSubscriptions();
     }
 
+    async function networkResubscribe(streamName, pubkey, relayUrl) {
+        await fetch('/api/network/subscribe', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({stream_name: streamName, nostr_pubkey: pubkey, relay_url: relayUrl})
+        });
+        loadNetworkSubscriptions();
+    }
+
     async function networkUnsubscribe(streamName, pubkey) {
         await fetch('/api/network/unsubscribe', {
             method: 'POST',
@@ -1436,9 +1469,21 @@
         loadNetworkSubscriptions();
     }
 
+    let showInactiveSubs = false;
+
+    function toggleInactiveSubs() {
+        showInactiveSubs = !showInactiveSubs;
+        const btn = document.getElementById('subsToggleInactive');
+        btn.textContent = showInactiveSubs ? 'Hide Inactive' : 'Show Inactive';
+        loadNetworkSubscriptions();
+    }
+
     async function loadNetworkSubscriptions() {
         try {
-            const resp = await fetch('/api/network/subscriptions');
+            const url = showInactiveSubs
+                ? '/api/network/subscriptions?all=1'
+                : '/api/network/subscriptions';
+            const resp = await fetch(url);
             const data = await resp.json();
             const empty = document.getElementById('subsEmpty');
             const table = document.getElementById('subsTable');
@@ -1454,62 +1499,57 @@
             list.innerHTML = '';
             data.subscriptions.forEach(s => {
                 const row = document.createElement('tr');
+                const inactive = s.active === 0;
                 const stale = s.stale_since != null;
-                if (stale) row.classList.add('text-muted');
-                const statusBadge = stale
-                    ? '<span class="badge bg-warning text-dark">Stale</span>'
-                    : '<span class="badge bg-success">Active</span>';
+                if (inactive) row.classList.add('text-muted');
+                else if (stale) row.classList.add('text-muted');
+                const statusBadge = inactive
+                    ? '<span class="badge bg-secondary">Inactive</span>'
+                    : stale
+                        ? '<span class="badge bg-warning text-dark">Stale</span>'
+                        : '<span class="badge bg-success">Active</span>';
+                const actionBtn = inactive
+                    ? '<button class="btn btn-sm btn-outline-success" onclick="networkResubscribe(\'' +
+                      s.stream_name.replace(/'/g, "\\'") + "', '" +
+                      s.provider_pubkey.replace(/'/g, "\\'") + "', '" +
+                      (s.relay_url || '').replace(/'/g, "\\'") + '\')">Resubscribe</button>'
+                    : '<button class="btn btn-sm btn-outline-danger" onclick="networkUnsubscribe(\'' +
+                      s.stream_name.replace(/'/g, "\\'") + "', '" +
+                      s.provider_pubkey.replace(/'/g, "\\'") + '\')">Unsubscribe</button>';
                 row.innerHTML =
                     '<td><strong>' + (s.name || s.stream_name) + '</strong></td>' +
                     '<td><small class="text-muted">' + (s.relay_url || '-') + '</small></td>' +
                     '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
                     '<td>' + statusBadge + '</td>' +
-                    '<td><button class="btn btn-sm btn-outline-danger" onclick="networkUnsubscribe(\'' +
-                    s.stream_name.replace(/'/g, "\\'") + "', '" +
-                    s.provider_pubkey.replace(/'/g, "\\'") + '\')">Unsubscribe</button></td>';
+                    '<td>' + actionBtn + '</td>';
                 list.appendChild(row);
             });
         } catch (err) { /* ignore */ }
     }
 
-    async function loadNetworkStreams() {
-        try {
-            const resp = await fetch('/api/network/streams');
-            const data = await resp.json();
+    let cachedStreamsByRelay = {};
 
-            const loading = document.getElementById('networkStreamsLoading');
-            const empty = document.getElementById('networkStreamsEmpty');
-            const table = document.getElementById('networkStreamsTable');
-            const list = document.getElementById('networkStreamsList');
-            const status = document.getElementById('networkStatus');
+    function closeRelayDrawer() {
+        document.getElementById('relayDrawer').style.display = 'none';
+    }
 
-            loading.style.display = 'none';
+    function openRelayDrawer(relayUrl) {
+        const streams = (cachedStreamsByRelay[relayUrl] || []).filter(s => s.active);
+        const drawer = document.getElementById('relayDrawer');
+        const title = document.getElementById('relayDrawerTitle');
+        const list = document.getElementById('relayDrawerStreams');
 
-            if (data.connected) {
-                status.className = 'badge bg-success';
-                status.textContent = 'Connected';
-            } else {
-                status.className = 'badge bg-warning text-dark';
-                status.textContent = 'Not connected';
-            }
+        title.textContent = relayUrl;
+        list.innerHTML = '';
 
-            if (!data.streams || data.streams.length === 0) {
-                empty.style.display = 'block';
-                table.style.display = 'none';
-                return;
-            }
-
-            empty.style.display = 'none';
-            table.style.display = 'block';
-            list.innerHTML = '';
-
-            data.streams.forEach(s => {
+        if (streams.length === 0) {
+            list.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No active streams</td></tr>';
+        } else {
+            streams.sort((a, b) => (b.subscribed ? 1 : 0) - (a.subscribed ? 1 : 0));
+            streams.forEach(s => {
                 const tags = (s.tags || []).map(t => '<span class="badge bg-secondary me-1">' + t + '</span>').join('');
                 const row = document.createElement('tr');
-                if (!s.active) row.classList.add('text-muted');
-                const statusBadge = s.active
-                    ? '<span class="badge bg-success">Active</span>'
-                    : '<span class="badge bg-warning text-dark">Stale</span>';
+                if (!s.subscribed) row.classList.add('text-muted');
                 const btnClass = s.subscribed ? 'btn-outline-danger' : 'btn-outline-success';
                 const btnText = s.subscribed ? 'Unsubscribe' : 'Subscribe';
                 const btnAction = s.subscribed
@@ -1520,18 +1560,114 @@
                     '<td>' + (s.description || '-') + '</td>' +
                     '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
                     '<td>' + (s.price_per_obs > 0 ? s.price_per_obs + ' sats' : 'Free') + '</td>' +
-                    '<td>' + statusBadge + '</td>' +
                     '<td>' + tags + '</td>' +
                     '<td><button class="btn btn-sm ' + btnClass + '" onclick="' + btnAction + '">' + btnText + '</button></td>';
                 list.appendChild(row);
             });
+        }
+        drawer.style.display = 'block';
+    }
+
+    function formatTimeAgo(ts) {
+        if (!ts) return '-';
+        const seconds = Math.floor(Date.now() / 1000) - ts;
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+        return Math.floor(seconds / 86400) + 'd ago';
+    }
+
+    async function deleteRelay(relayUrl) {
+        await fetch('/api/network/relay', {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({relay_url: relayUrl})
+        });
+        closeRelayDrawer();
+        loadRelays();
+    }
+
+    async function loadRelays() {
+        try {
+            // Fetch relays list and streams in parallel
+            const [relayResp, streamsResp] = await Promise.all([
+                fetch('/api/network/relays'),
+                fetch('/api/network/streams')
+            ]);
+            const relayData = await relayResp.json();
+            const streamsData = await streamsResp.json();
+
+            const loading = document.getElementById('relaysLoading');
+            const empty = document.getElementById('relaysEmpty');
+            const table = document.getElementById('relaysTable');
+            const list = document.getElementById('relaysList');
+            const status = document.getElementById('networkStatus');
+
+            loading.style.display = 'none';
+
+            if (streamsData.connected) {
+                status.className = 'badge bg-success';
+                status.textContent = 'Connected';
+            } else {
+                status.className = 'badge bg-warning text-dark';
+                status.textContent = 'Not connected';
+            }
+
+            // Group streams by relay for the drawer
+            cachedStreamsByRelay = {};
+            (streamsData.streams || []).forEach(s => {
+                const url = s.relay_url || 'unknown';
+                if (!cachedStreamsByRelay[url]) cachedStreamsByRelay[url] = [];
+                cachedStreamsByRelay[url].push(s);
+            });
+
+            const relays = relayData.relays || [];
+            if (relays.length === 0) {
+                empty.style.display = 'block';
+                table.style.display = 'none';
+                return;
+            }
+
+            empty.style.display = 'none';
+            table.style.display = 'block';
+            list.innerHTML = '';
+
+            relays.forEach(r => {
+                const streams = cachedStreamsByRelay[r.relay_url] || [];
+                const activeCount = streams.filter(s => s.active).length;
+                const hasStreams = streams.length > 0;
+                const row = document.createElement('tr');
+                if (hasStreams) {
+                    row.style.cursor = 'pointer';
+                    row.onclick = function() { openRelayDrawer(r.relay_url); };
+                }
+                const sourceBadge = r.source === 'both'
+                    ? '<span class="badge bg-info">server + local</span>'
+                    : r.source === 'server'
+                        ? '<span class="badge bg-secondary">server</span>'
+                        : '<span class="badge bg-outline-secondary border">local</span>';
+                const deleteBtn = r.source !== 'server'
+                    ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')"><i class="material-icons align-middle" style="font-size: 16px;">delete</i></button>'
+                    : '';
+                const chevron = hasStreams
+                    ? '<i class="material-icons align-middle" style="font-size: 18px;">chevron_right</i>'
+                    : '';
+                row.innerHTML =
+                    '<td>' + r.relay_url + '</td>' +
+                    '<td>' + formatTimeAgo(r.last_active) + '</td>' +
+                    '<td>' + sourceBadge + '</td>' +
+                    '<td>' + (hasStreams ? '<span class="badge bg-info">' + activeCount + '</span>' : '-') + '</td>' +
+                    '<td>' + deleteBtn + '</td>' +
+                    '<td>' + chevron + '</td>';
+                list.appendChild(row);
+            });
         } catch (err) {
-            document.getElementById('networkStreamsLoading').textContent = 'Error loading streams';
+            document.getElementById('relaysLoading').textContent = 'Error loading relays';
             document.getElementById('networkStatus').className = 'badge bg-danger';
             document.getElementById('networkStatus').textContent = 'Error';
         }
     }
-    loadNetworkStreams();
+    loadRelays();
     loadNetworkSubscriptions();
 
     // Wallet Card Functions
