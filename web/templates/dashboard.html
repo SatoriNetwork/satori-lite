@@ -440,7 +440,6 @@
                                         <th>Relay URL</th>
                                         <th>Last Active</th>
                                         <th>Source</th>
-                                        <th>Streams</th>
                                         <th></th>
                                         <th></th>
                                     </tr>
@@ -1533,8 +1532,7 @@
         document.getElementById('relayDrawer').style.display = 'none';
     }
 
-    function openRelayDrawer(relayUrl) {
-        const streams = (cachedStreamsByRelay[relayUrl] || []).filter(s => s.active);
+    function renderDrawerStreams(streams, relayUrl) {
         const drawer = document.getElementById('relayDrawer');
         const title = document.getElementById('relayDrawerTitle');
         const list = document.getElementById('relayDrawerStreams');
@@ -1542,11 +1540,12 @@
         title.textContent = relayUrl;
         list.innerHTML = '';
 
-        if (streams.length === 0) {
+        const active = streams.filter(s => s.active);
+        if (active.length === 0) {
             list.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No active streams</td></tr>';
         } else {
-            streams.sort((a, b) => (b.subscribed ? 1 : 0) - (a.subscribed ? 1 : 0));
-            streams.forEach(s => {
+            active.sort((a, b) => (b.subscribed ? 1 : 0) - (a.subscribed ? 1 : 0));
+            active.forEach(s => {
                 const tags = (s.tags || []).map(t => '<span class="badge bg-secondary me-1">' + t + '</span>').join('');
                 const row = document.createElement('tr');
                 if (!s.subscribed) row.classList.add('text-muted');
@@ -1566,6 +1565,29 @@
             });
         }
         drawer.style.display = 'block';
+    }
+
+    async function openRelayDrawer(relayUrl) {
+        const cached = cachedStreamsByRelay[relayUrl];
+        if (cached && cached.length > 0) {
+            renderDrawerStreams(cached, relayUrl);
+            return;
+        }
+        // No cached data — discover this relay
+        const drawer = document.getElementById('relayDrawer');
+        const title = document.getElementById('relayDrawerTitle');
+        const list = document.getElementById('relayDrawerStreams');
+        title.textContent = relayUrl;
+        list.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Discovering streams...</td></tr>';
+        drawer.style.display = 'block';
+        try {
+            const resp = await fetch('/api/network/streams/relay?url=' + encodeURIComponent(relayUrl));
+            const data = await resp.json();
+            cachedStreamsByRelay[relayUrl] = data.streams || [];
+            renderDrawerStreams(cachedStreamsByRelay[relayUrl], relayUrl);
+        } catch (err) {
+            list.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Discovery failed</td></tr>';
+        }
     }
 
     function formatTimeAgo(ts) {
@@ -1589,13 +1611,8 @@
 
     async function loadRelays() {
         try {
-            // Fetch relays list and streams in parallel
-            const [relayResp, streamsResp] = await Promise.all([
-                fetch('/api/network/relays'),
-                fetch('/api/network/streams')
-            ]);
-            const relayData = await relayResp.json();
-            const streamsData = await streamsResp.json();
+            const resp = await fetch('/api/network/relays');
+            const data = await resp.json();
 
             const loading = document.getElementById('relaysLoading');
             const empty = document.getElementById('relaysEmpty');
@@ -1604,24 +1621,10 @@
             const status = document.getElementById('networkStatus');
 
             loading.style.display = 'none';
+            status.className = 'badge bg-success';
+            status.textContent = (data.relays || []).length + ' relays';
 
-            if (streamsData.connected) {
-                status.className = 'badge bg-success';
-                status.textContent = 'Connected';
-            } else {
-                status.className = 'badge bg-warning text-dark';
-                status.textContent = 'Not connected';
-            }
-
-            // Group streams by relay for the drawer
-            cachedStreamsByRelay = {};
-            (streamsData.streams || []).forEach(s => {
-                const url = s.relay_url || 'unknown';
-                if (!cachedStreamsByRelay[url]) cachedStreamsByRelay[url] = [];
-                cachedStreamsByRelay[url].push(s);
-            });
-
-            const relays = relayData.relays || [];
+            const relays = data.relays || [];
             if (relays.length === 0) {
                 empty.style.display = 'block';
                 table.style.display = 'none';
@@ -1633,14 +1636,9 @@
             list.innerHTML = '';
 
             relays.forEach(r => {
-                const streams = cachedStreamsByRelay[r.relay_url] || [];
-                const activeCount = streams.filter(s => s.active).length;
-                const hasStreams = streams.length > 0;
                 const row = document.createElement('tr');
-                if (hasStreams) {
-                    row.style.cursor = 'pointer';
-                    row.onclick = function() { openRelayDrawer(r.relay_url); };
-                }
+                row.style.cursor = 'pointer';
+                row.onclick = function() { openRelayDrawer(r.relay_url); };
                 const sourceBadge = r.source === 'both'
                     ? '<span class="badge bg-info">server + local</span>'
                     : r.source === 'server'
@@ -1649,16 +1647,12 @@
                 const deleteBtn = r.source !== 'server'
                     ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')"><i class="material-icons align-middle" style="font-size: 16px;">delete</i></button>'
                     : '';
-                const chevron = hasStreams
-                    ? '<i class="material-icons align-middle" style="font-size: 18px;">chevron_right</i>'
-                    : '';
                 row.innerHTML =
                     '<td>' + r.relay_url + '</td>' +
                     '<td>' + formatTimeAgo(r.last_active) + '</td>' +
                     '<td>' + sourceBadge + '</td>' +
-                    '<td>' + (hasStreams ? '<span class="badge bg-info">' + activeCount + '</span>' : '-') + '</td>' +
                     '<td>' + deleteBtn + '</td>' +
-                    '<td>' + chevron + '</td>';
+                    '<td><i class="material-icons align-middle" style="font-size: 18px;">chevron_right</i></td>';
                 list.appendChild(row);
             });
         } catch (err) {

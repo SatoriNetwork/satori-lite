@@ -1620,13 +1620,10 @@ def register_routes(app):
     @app.route('/api/network/streams', methods=['GET'])
     @login_required
     def api_network_streams():
-        """Discover datastreams on all relays (on-demand)."""
+        """Return cached discovered streams (no global discovery trigger)."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
-        # Trigger discovery in background
-        startup.triggerNetworkDiscover()
-        # Return whatever we have now (may be stale on first call)
         connected = len(startup._networkClients) > 0
         streams = []
         for s in startup.networkStreams:
@@ -1638,6 +1635,22 @@ def register_routes(app):
             'connected': connected,
             'streams': streams,
         })
+
+    @app.route('/api/network/streams/relay', methods=['GET'])
+    @login_required
+    def api_network_streams_relay():
+        """Discover streams on a single relay."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        relay_url = request.args.get('url')
+        if not relay_url:
+            return jsonify({'error': 'Missing url parameter'}), 400
+        streams = startup.discoverRelaySync(relay_url)
+        for s in streams:
+            s['subscribed'] = startup.networkDB.is_subscribed(
+                s['stream_name'], s['nostr_pubkey'])
+        return jsonify({'streams': streams})
 
     @app.route('/api/network/subscribe', methods=['POST'])
     @login_required

@@ -305,6 +305,44 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         self.networkStreams = all_streams
 
+    async def _networkDiscoverRelay(self, relay_url: str, ConfigClass):
+        """Discover streams on a single relay. Returns list of stream dicts."""
+        client = await self._networkConnect(relay_url, ConfigClass)
+        if not client:
+            return []
+        result = []
+        try:
+            streams = await client.discover_datastreams()
+            for s in streams:
+                d = s.to_dict()
+                d['relay_url'] = relay_url
+                last_obs, is_active = await self._networkCheckFreshness(
+                    client, s.stream_name, s)
+                d['last_observation_at'] = last_obs
+                d['active'] = is_active
+                result.append(d)
+        except Exception as e:
+            logging.warning(
+                f'Network discover: failed on {relay_url}: {e}')
+        if relay_url not in self._neededRelays():
+            await self._networkDisconnect(relay_url)
+        return result
+
+    def discoverRelaySync(self, relay_url: str) -> list:
+        """Discover streams on a single relay from a sync context.
+
+        Blocks until discovery completes and returns the stream list.
+        """
+        from satorilib.satori_nostr import SatoriNostrConfig
+        if not hasattr(self, '_networkSecretHex'):
+            return []
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                self._networkDiscoverRelay(relay_url, SatoriNostrConfig))
+        finally:
+            loop.close()
+
     def _neededRelays(self) -> set:
         """Return set of relay URLs that have active subscriptions."""
         subs = self.networkDB.get_active()
