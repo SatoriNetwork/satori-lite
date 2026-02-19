@@ -42,6 +42,32 @@
             <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
             Stake Management
         </a>
+        <div class="dropdown me-2">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                <i class="material-icons align-middle" style="font-size: 16px;">tune</i>
+                Training
+            </button>
+            <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <label class="form-label mb-0">AI Engine Training Frequency</label>
+                    <span title="Controls how frequently the AI engine trains new models. Lower frequency = less CPU usage. Higher frequency = faster model improvements.">
+                        <i class="material-icons text-muted" style="font-size: 16px; cursor: help;">info</i>
+                    </span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-muted small">Slow</span>
+                    <input type="range" class="form-range flex-grow-1 mb-0"
+                           id="trainingDelaySlider"
+                           min="0" max="100" step="1" value="50"
+                           oninput="updateTrainingDelayLabel(this.value)"
+                           onchange="setTrainingDelay(this.value)">
+                    <span class="text-muted small">Fast</span>
+                </div>
+                <div class="text-center mt-2">
+                    <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
+                </div>
+            </div>
+        </div>
         <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
             <i class="material-icons" id="themeIcon">light_mode</i>
@@ -238,49 +264,6 @@
             </div>
         </div>
 
-        <!-- Burn Address for Reverse Bridge Section -->
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">local_fire_department</i>
-                        Burn Address for Reverse Bridge
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-3">
-                        Send SATORI tokens on Base chain to this address to bridge them back to Evrmore
-                    </p>
-                    <div class="mb-3">
-                        <label class="form-label">Base Chain Burn Address</label>
-                        <div class="input-group">
-                            {% if eth_wallet_address %}
-                            <input type="text" class="form-control" id="burnAddress" readonly value="{{ eth_wallet_address }}">
-                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('burnAddress')" title="Copy burn address">
-                                <i class="material-icons align-middle">content_copy</i>
-                            </button>
-                            {% else %}
-                            <input type="text" class="form-control" readonly value="Not available" disabled>
-                            {% endif %}
-                        </div>
-                        <small class="text-muted">Ethereum address ending in "DEAD"</small>
-                    </div>
-                    <div class="alert alert-info" role="alert">
-                        <strong>How it works:</strong>
-                        <ol class="mb-0 mt-2">
-                            <li>Send SATORI tokens to this burn address on the <strong>Base blockchain</strong></li>
-                            <li>Tokens are tracked by the bridge system daily at 20:00 UTC</li>
-                            <li>After 30 days, equivalent SATORI will be minted on Evrmore chain to your wallet</li>
-                        </ol>
-                    </div>
-                    <div class="alert alert-danger" role="alert">
-                        <i class="material-icons align-middle me-1" style="font-size: 18px;">warning</i>
-                        <strong>Warning:</strong> Only send SATORI tokens from Base chain. Sending other tokens or from wrong networks will result in permanent loss.
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Balance Section -->
         <div class="col-12 col-lg-6">
             <div class="card h-100">
@@ -343,116 +326,6 @@
 
     </div>
 
-    <!-- AI Engine Training Control Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header"
-                     style="cursor: pointer;"
-                     data-bs-toggle="collapse"
-                     data-bs-target="#aiEngineCollapse"
-                     aria-expanded="false"
-                     aria-controls="aiEngineCollapse">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">psychology</i>
-                        AI Engine Training Frequency
-                    </h5>
-                </div>
-                <div class="collapse" id="aiEngineCollapse">
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Training Frequency</label>
-                        <div class="d-flex align-items-center gap-3">
-                            <span class="text-muted small">Slow</span>
-                            <input type="range" class="form-range flex-grow-1"
-                                   id="trainingDelaySlider"
-                                   min="0" max="100" step="1" value="50"
-                                   oninput="updateTrainingDelayLabel(this.value)"
-                                   onchange="setTrainingDelay(this.value)">
-                            <span class="text-muted small">Fast</span>
-                        </div>
-                        <div class="text-center mt-2">
-                            <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
-                        </div>
-                        <small class="form-text text-muted">
-                            Controls how frequently the AI engine trains new models.
-                            Lower frequency = less CPU usage. Higher frequency = faster model improvements.
-                        </small>
-                    </div>
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- AI Engine Performance Dashboard -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header"
-                     style="cursor: pointer;"
-                     data-bs-toggle="collapse"
-                     data-bs-target="#performanceCollapse"
-                     aria-expanded="false"
-                     aria-controls="performanceCollapse">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">show_chart</i>
-                        AI Engine Performance
-                    </h5>
-                </div>
-                <div class="collapse" id="performanceCollapse">
-                <div class="card-body">
-                    <!-- Stats Summary -->
-                    <div class="row mb-4" id="performanceStats">
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Accuracy</div>
-                                <div class="h4 mb-0" id="accuracyPct">--</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Avg Error</div>
-                                <div class="h5 mb-0" id="avgError">--</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Avg Abs Error</div>
-                                <div class="h5 mb-0" id="avgAbsError">--</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Predictions vs Observations Chart -->
-                    <div class="mb-4">
-                        <h6 class="mb-3">Predictions vs Observations</h6>
-                        <div style="position: relative; height: 300px;">
-                            <canvas id="predVsObsChart"></canvas>
-                        </div>
-                        <small class="text-muted">Last 100 data points</small>
-                    </div>
-
-                    <!-- Accuracy Over Time Chart -->
-                    <div class="mb-3">
-                        <h6 class="mb-3">Prediction Accuracy Over Time</h6>
-                        <div style="position: relative; height: 300px;">
-                            <canvas id="accuracyChart"></canvas>
-                        </div>
-                        <small class="text-muted">Absolute error between prediction and next observation</small>
-                    </div>
-
-                    <div class="text-center mt-3">
-                        <button class="btn btn-outline-primary btn-sm" onclick="refreshPerformance()">
-                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                            Refresh Data
-                        </button>
-                    </div>
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- Disclaimer Footer -->
@@ -2031,7 +1904,6 @@
         // loadAvailablePools();
         // loadPoolCommission();
         loadTrainingDelay();  // Load AI engine training frequency setting
-        loadPerformance();  // Load AI engine performance charts
 
         // Periodic health check - Disabled to reduce unnecessary load
         // setInterval(checkHealth, 30000);

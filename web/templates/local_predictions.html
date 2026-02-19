@@ -64,6 +64,32 @@
             <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
             Stake Management
         </a>
+        <div class="dropdown me-2">
+            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                <i class="material-icons align-middle" style="font-size: 16px;">tune</i>
+                Training
+            </button>
+            <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <label class="form-label mb-0">AI Engine Training Frequency</label>
+                    <span title="Controls how frequently the AI engine trains new models. Lower frequency = less CPU usage. Higher frequency = faster model improvements.">
+                        <i class="material-icons text-muted" style="font-size: 16px; cursor: help;">info</i>
+                    </span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-muted small">Slow</span>
+                    <input type="range" class="form-range flex-grow-1 mb-0"
+                           id="trainingDelaySlider"
+                           min="0" max="100" step="1" value="50"
+                           oninput="updateTrainingDelayLabel(this.value)"
+                           onchange="setTrainingDelay(this.value)">
+                    <span class="text-muted small">Fast</span>
+                </div>
+                <div class="text-center mt-2">
+                    <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
+                </div>
+            </div>
+        </div>
         <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
             <i class="material-icons" id="themeIcon">light_mode</i>
@@ -174,6 +200,16 @@
         </div>
     </div>
 </div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="statusToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <strong class="me-auto">Satori</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toastMessage"></div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -182,6 +218,75 @@ let predictionsChart = null;
 let errorChart = null;
 let currentStream = '';
 let allStreams = [];
+
+function showToast(message, isError = false) {
+    const toast = document.getElementById('statusToast');
+    const toastBody = document.getElementById('toastMessage');
+    toastBody.textContent = message;
+    toastBody.className = 'toast-body ' + (isError ? 'text-danger' : 'text-success');
+    const bsToast = new bootstrap.Toast(toast);
+    bsToast.show();
+}
+
+function sliderToSeconds(sliderValue) {
+    const percentage = sliderValue / 100.0;
+    if (percentage <= 0.0) return 86400;
+    if (percentage >= 1.0) return 0;
+    return Math.round(86400 * Math.pow(1 - percentage, 7));
+}
+
+function secondsToSlider(seconds) {
+    if (seconds >= 86400) return 0;
+    if (seconds <= 0) return 100;
+    const percentage = 1 - Math.pow(seconds / 86400, 1 / 7);
+    return Math.round(percentage * 100);
+}
+
+function formatDelay(seconds) {
+    if (seconds === 0) return "Continuous";
+    if (seconds < 60) return `${seconds} seconds`;
+    if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
+    if (seconds < 86400) return `${Math.round(seconds / 3600)} hours`;
+    return `${Math.round(seconds / 86400)} days`;
+}
+
+function updateTrainingDelayLabel(sliderValue) {
+    const seconds = sliderToSeconds(sliderValue);
+    document.getElementById('trainingDelayLabel').textContent = formatDelay(seconds);
+}
+
+async function setTrainingDelay(sliderValue) {
+    const seconds = sliderToSeconds(sliderValue);
+    try {
+        const response = await fetch('/api/engine/training-delay', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ delay_seconds: seconds }),
+        });
+        if (response.ok) {
+            showToast(`Training frequency updated: ${formatDelay(seconds)}`);
+        } else {
+            showToast('Failed to update training frequency', true);
+        }
+    } catch (error) {
+        console.error('Error setting training delay:', error);
+        showToast('Failed to update training frequency', true);
+    }
+}
+
+async function loadTrainingDelay() {
+    try {
+        const response = await fetch('/api/engine/training-delay');
+        const result = await response.json();
+        if (response.ok && result.delay_seconds !== undefined) {
+            const sliderValue = secondsToSlider(result.delay_seconds);
+            document.getElementById('trainingDelaySlider').value = sliderValue;
+            updateTrainingDelayLabel(sliderValue);
+        }
+    } catch (error) {
+        console.error('Error loading training delay:', error);
+    }
+}
 
 function shortUuid(uuid) {
     if (!uuid || uuid.length < 16) return uuid || '-';
@@ -463,6 +568,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadPerformance();
     });
 
+    await loadTrainingDelay();
     await loadStreams();
 });
 </script>
