@@ -278,8 +278,14 @@ class NetworkDB:
     def save_observation(self, stream_name: str, provider_pubkey: str,
                          value: str = None, event_id: str = None,
                          seq_num: int = None, observed_at: int = None):
-        """Record a received observation."""
+        """Record a received observation. Skips if event_id already exists."""
         conn = self._get_conn()
+        if event_id:
+            existing = conn.execute(
+                "SELECT 1 FROM observations WHERE event_id = ?",
+                (event_id,)).fetchone()
+            if existing:
+                return
         conn.execute("""
             INSERT INTO observations
                 (stream_name, provider_pubkey, seq_num, observed_at,

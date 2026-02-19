@@ -578,12 +578,12 @@ class TestInboundModels:
         inbound = InboundPayment(
             payment=payment,
             event_id="event789",
-            raw_event={"kind": 30103},
+            raw_event={"kind": 34603},
         )
 
         assert inbound.payment.seq_num == 5
         assert inbound.event_id == "event789"
-        assert inbound.raw_event["kind"] == 30103
+        assert inbound.raw_event["kind"] == 34603
 
 
 class TestSatoriNostrConfig:

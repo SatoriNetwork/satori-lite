@@ -4,7 +4,7 @@ Outstanding items from architecture review. Fix as we go.
 
 ## 3. `_networkSubscribed` is in-memory only
 If the neuron restarts, this set is empty, so on first reconcile pass it
-re-announces subscriptions (kind 30102 events) to every relay for every
+re-announces subscriptions (kind 34602 events) to every relay for every
 stream. Not harmful but noisy — publishes duplicate subscription announcements.
 
 ## 4. ~~No actual data flow~~ (FIXED)

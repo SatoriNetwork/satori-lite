@@ -229,11 +229,43 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkSubscribed.pop(relay_url, None)
             logging.info(f'Network: disconnected from {relay_url}', color='yellow')
 
+    async def _networkProcessObservation(self, obs):
+        """Save an observation to DB and run engine if predicting.
+
+        This is the single processing path for all observations, whether
+        received live from a relay listener or fetched during discovery.
+        """
+        obs_json = (obs.observation.to_json()
+                    if obs.observation else None)
+        await asyncio.to_thread(
+            self.networkDB.save_observation,
+            obs.stream_name,
+            obs.nostr_pubkey,
+            obs_json,
+            obs.event_id,
+            obs.observation.seq_num if obs.observation else None,
+            obs.observation.timestamp if obs.observation else None)
+        # Run engine only if we're predicting this stream
+        if obs.observation:
+            predicting = await asyncio.to_thread(
+                self.networkDB.is_predicting,
+                obs.stream_name, obs.nostr_pubkey)
+            if predicting:
+                await self._networkRunEngine(
+                    obs.stream_name,
+                    obs.nostr_pubkey,
+                    obs.observation)
+
     async def _networkCheckFreshness(self, client, stream_name, metadata):
-        """Check if a stream is actively publishing. Returns (last_obs, is_active)."""
+        """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
+
+        Also saves the latest observation to the DB if it's new.
+        """
         try:
-            last_obs = await client.get_last_observation_time(stream_name)
-            if last_obs:
+            obs = await client.get_last_observation(stream_name)
+            if obs and obs.observation:
+                last_obs = obs.observation.timestamp
+                await self._networkProcessObservation(obs)
                 return last_obs, metadata.is_likely_active(last_obs)
             return None, False
         except Exception:
@@ -250,26 +282,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         try:
             async for obs in client.observations():
-                obs_json = (obs.observation.to_json()
-                            if obs.observation else None)
-                await asyncio.to_thread(
-                    self.networkDB.save_observation,
-                    obs.stream_name,
-                    obs.nostr_pubkey,
-                    obs_json,
-                    obs.event_id,
-                    obs.observation.seq_num if obs.observation else None,
-                    obs.observation.timestamp if obs.observation else None)
-                # Run engine only if we're predicting this stream
-                if obs.observation:
-                    predicting = await asyncio.to_thread(
-                        self.networkDB.is_predicting,
-                        obs.stream_name, obs.nostr_pubkey)
-                    if predicting:
-                        await self._networkRunEngine(
-                            obs.stream_name,
-                            obs.nostr_pubkey,
-                            obs.observation)
+                await self._networkProcessObservation(obs)
         except asyncio.CancelledError:
             return
         except Exception as e:
