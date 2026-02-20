@@ -21,6 +21,13 @@
         width: 100%;
         animation: fadeIn 0.6s ease;
     }
+    .version-badge {
+        text-align: center;
+        margin-top: 0.4rem;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        letter-spacing: 0.01em;
+    }
     .logo-container {
         text-align: center;
         margin-bottom: 2rem;
@@ -104,6 +111,7 @@
         <div class="logo-container">
             <header>Welcome to</header>
             <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori Logo">
+            <div class="version-badge">{{ version }}</div>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
