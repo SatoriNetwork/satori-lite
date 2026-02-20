@@ -13,8 +13,9 @@ RUN apt-get update && \
 # Create directory structure
 RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web
 
+# Copy satorilib from external build context (passed via --build-context satorilib=...)
+COPY --from=satorilib satorilib /Satori/Lib/satorilib
 # Copy neuron code
-COPY lib-lite /Satori/Lib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
 COPY web /Satori/web

@@ -1,35 +1,59 @@
 version: '3.8'
 
-# Local development docker-compose override for satori-lite
-# Usage: docker-compose -f ../docker-compose.yml -f docker-compose.local.yml up
+# Local development docker-compose for satori-lite
+#
+# Production-like service:
+#   docker compose -f docker-compose.local.yml up satori-lite
+#
+# Development service (live code mounts):
+#   docker compose -f docker-compose.local.yml up satori-dev
 
 services:
-  # Satori-Lite Web UI + Neuron
+  # Production-like service (code baked into image)
   satori-lite:
     build:
-      context: ./satori-lite
+      context: .
       dockerfile: Dockerfile
     container_name: satori-lite
     environment:
-      # Connect to the API server (use container name for local, remote URL for production)
       SATORI_CENTRAL_URL: http://satori-api:8000
-      # Wallet/vault paths inside container
       WALLET_PATH: /data/wallet.yaml
       VAULT_PATH: /data/vault.yaml
-      # Flask config
       SECRET_KEY: local-dev-secret-key-change-in-production
       WEB_PORT: 24601
     volumes:
-      # Persist wallet data
       - ./data:/data
-      # Mount code for live reload (optional, remove for production-like)
-      # - ./web:/Satori/web
-      # - ./neuron-lite:/Satori/Neuron
     ports:
       - "24601:24601"
-    depends_on:
-      api:
-        condition: service_started
+    networks:
+      - default
+    command: python /Satori/Neuron/start.py
+
+  # Development service (mounts code for live editing)
+  satori-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: satori-dev
+    environment:
+      SATORI_CENTRAL_URL: http://satori-api:8000
+      WALLET_PATH: /data/wallet.yaml
+      VAULT_PATH: /data/vault.yaml
+      SECRET_KEY: local-dev-secret-key-change-in-production
+      WEB_PORT: 24601
+      MUNDO_URL: https://mundo.satorinet.io
+    volumes:
+      # Persist wallet data
+      - ./data:/data
+      # Mount satorilib for live editing
+      - ../satorilib/src:/Satori/Lib
+      # Mount neuron code
+      - ./neuron-lite:/Satori/Neuron
+      - ./engine-lite:/Satori/Engine
+      - ./web:/Satori/web
+      - ./tests:/Satori/tests
+    ports:
+      - "24601:24601"
     networks:
       - default
     command: python /Satori/Neuron/start.py

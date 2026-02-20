@@ -73,16 +73,18 @@ else
 fi
 echo -e "${GREEN}[INFO]${NC} Tags: $TAG_LIST"
 
-# Build
+# Build (satorilib is provided as a named build context so the Dockerfile can COPY --from=satorilib)
 if [ "$PUSH_MODE" = true ]; then
     docker buildx build \
         --platform "$PLATFORMS" \
+        --build-context satorilib=../satorilib/src \
         $TAGS \
         --push \
         .
 else
     echo -e "${YELLOW}[INFO]${NC} Loading into local Docker (current platform only)..."
     docker buildx build \
+        --build-context satorilib=../satorilib/src \
         $TAGS \
         --load \
         .

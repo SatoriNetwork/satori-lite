@@ -37,7 +37,7 @@ create_container() {
         --restart unless-stopped \
         -p 5001:5001 \
         -e SATORI_UI_PORT=5001 \
-        -v "$(pwd)/lib-lite:/Satori/Lib" \
+        -v "$(pwd)/../satorilib/src:/Satori/Lib" \
         -v "$(pwd)/neuron-lite:/Satori/Neuron" \
         -v "$(pwd)/engine-lite:/Satori/Engine" \
         -v "$(pwd)/web:/Satori/web" \
@@ -77,7 +77,7 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "  ./satori-dev restart        # Restart with remote central-lite"
     echo ""
     echo "Development mode mounts local code directories:"
-    echo "  ./lib-lite, ./neuron-lite, ./engine-lite, ./web"
+    echo "  ../satorilib/src, ./neuron-lite, ./engine-lite, ./web"
     echo ""
     echo "Data persists in source directories:"
     echo "  ./neuron-lite/config, ./neuron-lite/wallet,"

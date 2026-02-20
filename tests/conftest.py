@@ -10,8 +10,8 @@ import pytest
 import requests
 from pathlib import Path
 
-# Add neuron lib-lite to Python path
-SATORI_LITE_PATH = Path(__file__).parent.parent / "lib-lite"
+# Add satorilib to Python path
+SATORI_LITE_PATH = Path(__file__).parent.parent.parent / "satorilib" / "src"
 if str(SATORI_LITE_PATH) not in sys.path:
     sys.path.insert(0, str(SATORI_LITE_PATH))
 

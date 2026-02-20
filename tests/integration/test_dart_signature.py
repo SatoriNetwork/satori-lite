@@ -10,8 +10,8 @@ This script tests cross-language compatibility between:
 import sys
 import os
 
-# Add lib-lite to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib-lite'))
+# Add satorilib to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'satorilib', 'src'))
 
 from satorilib.wallet.evrmore.verify import verify
 

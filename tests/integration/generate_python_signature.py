@@ -8,8 +8,8 @@ that can be compared with Dart's output.
 import sys
 from pathlib import Path
 
-# Add lib-lite to path
-SATORI_LITE_PATH = Path(__file__).parent / "lib-lite"
+# Add satorilib to path
+SATORI_LITE_PATH = Path(__file__).parent.parent.parent.parent / "satorilib" / "src"
 if str(SATORI_LITE_PATH) not in sys.path:
     sys.path.insert(0, str(SATORI_LITE_PATH))
 
