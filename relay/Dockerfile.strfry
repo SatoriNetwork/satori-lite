@@ -1,2 +1,0 @@
-FROM dockurr/strfry:latest
-COPY strfry.conf /etc/strfry.conf
