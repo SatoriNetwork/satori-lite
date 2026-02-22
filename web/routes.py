@@ -17,7 +17,7 @@ from threading import Lock
 from cryptography.fernet import Fernet
 from satorilib.config import get_api_url
 
-MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.io')
+MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
