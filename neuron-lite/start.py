@@ -181,7 +181,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         Every 5 minutes:
         1. Reconcile subscriptions (connect, discover, subscribe)
-        2. Fetch any data sources that are due
+        2. Ensure relay connections exist for active publications
+        3. Fetch any data sources that are due
         """
         from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
 
@@ -191,10 +192,31 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.error(f'Network reconcile error: {e}')
             try:
+                await self._networkEnsurePublisherConnections(SatoriNostrConfig)
+            except Exception as e:
+                logging.error(f'Network publisher connect error: {e}')
+            try:
                 await self._networkFetchDataSources()
             except Exception as e:
                 logging.error(f'Network data source fetch error: {e}')
             await asyncio.sleep(300)
+
+    async def _networkEnsurePublisherConnections(self, ConfigClass):
+        """Connect to all known relays if we have active publications.
+
+        Ensures _networkClients is populated for the fetch loop even when
+        there are no active subscriptions keeping connections open.
+        """
+        pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
+        if not pubs:
+            return
+        relays = await asyncio.to_thread(self.networkDB.get_relays)
+        for r in relays:
+            relay_url = r['relay_url']
+            if relay_url not in self._networkClients:
+                client = await self._networkConnect(relay_url, ConfigClass)
+                if client:
+                    await self._networkAnnouncePublications(relay_url)
 
     async def _networkConnect(self, relay_url: str, ConfigClass):
         """Connect to a relay if not already connected. Returns client or None."""
@@ -462,6 +484,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     continue
                 await self._networkAnnouncePublications(relay_url)
                 await self._networkPublishObservation(stream_name, value)
+                await asyncio.sleep(2)  # allow relay to acknowledge before loop closes
                 logging.info(
                     f'Network: publish-now {stream_name} to {relay_url}',
                     color='green')
