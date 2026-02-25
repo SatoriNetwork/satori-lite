@@ -424,6 +424,54 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 loop.close()
         threading.Thread(target=run, daemon=True).start()
 
+    def publishNowSync(self, stream_name: str, value: str):
+        """Connect to all known relays, announce publications, and publish one
+        observation. Non-blocking — runs in a background thread.
+
+        Used on first save so the stream is immediately visible on the relay
+        even when no subscriptions are keeping connections open.
+        """
+        from satorilib.satori_nostr import SatoriNostrConfig
+        if not hasattr(self, '_networkSecretHex'):
+            return
+        def run():
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    self._publishNow(stream_name, value, SatoriNostrConfig))
+            finally:
+                loop.close()
+        threading.Thread(target=run, daemon=True).start()
+
+    async def _publishNow(self, stream_name: str, value: str, ConfigClass):
+        """Connect to all known relays, announce publications, publish observation."""
+        relay_urls = []
+        try:
+            server_relays = await asyncio.to_thread(self.server.getRelays)
+            relay_urls = [r['relay_url'] for r in server_relays]
+        except Exception:
+            pass
+        db_relays = await asyncio.to_thread(self.networkDB.get_relays)
+        for r in db_relays:
+            if r['relay_url'] not in relay_urls:
+                relay_urls.append(r['relay_url'])
+        for relay_url in relay_urls:
+            try:
+                client = await self._networkConnect(relay_url, ConfigClass)
+                if not client:
+                    continue
+                await self._networkAnnouncePublications(relay_url)
+                await self._networkPublishObservation(stream_name, value)
+                logging.info(
+                    f'Network: publish-now {stream_name} to {relay_url}',
+                    color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: publish-now failed on {relay_url}: {e}')
+            finally:
+                if relay_url not in self._neededRelays():
+                    await self._networkDisconnect(relay_url)
+
     async def _networkFetchDataSources(self):
         """Poll active data sources and publish values that are due.
 

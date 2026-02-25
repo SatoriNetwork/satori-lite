@@ -116,24 +116,51 @@
         .satori-nav-item {
             margin: 0 !important;
         }
-        .dashboard-widget-col {
+        .dashboard-widget-col,
+        .p2p-widget-col {
             cursor: default;
         }
-        .dashboard-widget-col > .card {
+        .dashboard-widget-col > .card,
+        .p2p-widget-col > .card {
             cursor: default;
         }
-        .dashboard-widget-col .card-header {
+        .dashboard-widget-col .card-header,
+        .p2p-widget-col .card-header {
             cursor: grab;
         }
-        .dashboard-widget-col .card-header:active {
+        .dashboard-widget-col .card-header:active,
+        .p2p-widget-col .card-header:active {
             cursor: grabbing;
         }
-        .dashboard-widget-col.dragging {
+        .dashboard-widget-col.dragging,
+        .p2p-widget-col.dragging {
             opacity: 0.55;
         }
-        .dashboard-widget-col.drop-target .card {
+        .dashboard-widget-col.drop-target .card,
+        .p2p-widget-col.drop-target .card {
             border-color: var(--accent-primary);
             box-shadow: 0 0 0 2px rgba(90, 90, 255, 0.18);
+        }
+
+        /* Tables - override Bootstrap's white default to match dark theme */
+        .table {
+            --bs-table-bg: transparent;
+            --bs-table-color: var(--text-primary);
+            --bs-table-border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+        .table th {
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.8125rem;
+            border-color: var(--border-color);
+        }
+        .table td {
+            border-color: var(--border-color);
+        }
+        .table-hover > tbody > tr:hover > * {
+            --bs-table-accent-bg: rgba(255, 255, 255, 0.03);
+            color: var(--text-primary);
         }
         .drag-handle {
             display: inline-flex;

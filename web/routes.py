@@ -2307,6 +2307,31 @@ def register_routes(app):
             name=data.get('name', ''),
             description=data.get('description', ''),
             cadence_seconds=cadence or None)
+        # If a URL is configured, immediately fetch and publish so the stream
+        # is visible on relays without waiting for the next cadence cycle
+        if url and parser_config:
+            import requests as http_requests
+            import json as json_mod
+            try:
+                headers = None
+                if data.get('headers'):
+                    try:
+                        headers = json_mod.loads(data['headers'])
+                    except Exception:
+                        pass
+                method = data.get('method', 'GET').upper()
+                if method == 'POST':
+                    resp = http_requests.post(url, headers=headers, timeout=15)
+                else:
+                    resp = http_requests.get(url, headers=headers, timeout=15)
+                resp.raise_for_status()
+                raw = resp.text
+                obj = json_mod.loads(raw)
+                for key in parser_config.split('.'):
+                    obj = obj[int(key)] if key.isdigit() else obj[key]
+                startup.publishNowSync(data['stream_name'], str(obj))
+            except Exception as e:
+                logger.warning(f'publish-on-save failed for {data["stream_name"]}: {e}')
         return jsonify({'success': True})
 
     @app.route('/api/network/publish', methods=['POST'])
