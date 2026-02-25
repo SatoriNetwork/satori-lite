@@ -1,79 +1,25 @@
 {% extends "base.html" %}
 
-{% block title %}Satori - Dashboard{% endblock %}
+{% block title %}Satori - {{ 'P2P' if page_mode == 'p2p' else 'Dashboard' }}{% endblock %}
+{% block extra_css %}
+{% if page_mode == 'dashboard' %}
+<style>
+    #p2p,
+    #p2pLayoutRow {
+        display: none !important;
+    }
+</style>
+{% elif page_mode == 'p2p' %}
+<style>
+    #dashboardLayoutRow {
+        display: none !important;
+    }
+</style>
+{% endif %}
+{% endblock %}
 
 {% block content %}
-<!-- Navigation -->
-<nav class="navbar navbar-expand-lg px-4">
-    <span class="navbar-brand">
-        Satori
-        <small class="text-muted ms-2" style="font-size: 0.65rem; font-weight: 400; opacity: 0.6;">{{ version }}</small>
-    </span>
-    <div class="ms-auto d-flex align-items-center">
-        <!-- Wallet Dropdown -->
-        <div class="dropdown me-3">
-            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="walletDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <i class="material-icons align-middle" style="font-size: 16px;">account_balance_wallet</i>
-                Wallet
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="walletDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color);">
-                <li>
-                    <a class="dropdown-item" href="#" onclick="openImportWalletModal(); return false;" style="color: var(--text-primary);">
-                        <i class="material-icons align-middle me-2" style="font-size: 18px;">upload_file</i>
-                        Import Wallet
-                    </a>
-                </li>
-            </ul>
-        </div>
-
-        <span class="me-3">
-            <span class="status-indicator status-online" id="statusIndicator"></span>
-            <span id="statusText">Connected</span>
-        </span>
-        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm me-2">
-            <i class="material-icons align-middle" style="font-size: 16px;">dashboard</i>
-            Dashboard
-        </a>
-        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm me-2">
-            <i class="material-icons align-middle" style="font-size: 16px;">timeline</i>
-            Local Predictions
-        </a>
-        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm me-2">
-            <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
-            Stake Management
-        </a>
-        <div class="dropdown me-2">
-            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                <i class="material-icons align-middle" style="font-size: 16px;">tune</i>
-                Training
-            </button>
-            <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                    <label class="form-label mb-0">AI Engine Training Frequency</label>
-                    <span title="Controls how frequently the AI engine trains new models. Lower frequency = less CPU usage. Higher frequency = faster model improvements.">
-                        <i class="material-icons text-muted" style="font-size: 16px; cursor: help;">info</i>
-                    </span>
-                </div>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="text-muted small">Slow</span>
-                    <input type="range" class="form-range flex-grow-1 mb-0"
-                           id="trainingDelaySlider"
-                           min="0" max="100" step="1" value="50"
-                           oninput="updateTrainingDelayLabel(this.value)"
-                           onchange="setTrainingDelay(this.value)">
-                    <span class="text-muted small">Fast</span>
-                </div>
-                <div class="text-center mt-2">
-                    <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
-                </div>
-            </div>
-        </div>
-        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
-            <i class="material-icons" id="themeIcon">light_mode</i>
-        </button>
-    </div>
-</nav>
+{% include 'partials/navbar.html' %}
 
 <!-- Import Wallet Modal -->
 <div class="modal fade" id="importWalletModal" tabindex="-1" aria-labelledby="importWalletModalLabel" aria-hidden="true">
@@ -125,19 +71,24 @@
 </div>
 
 <div class="container-fluid py-4">
-    <div class="row g-4">
+    <div class="row g-4" id="dashboardLayoutRow">
         <!-- Wallet Section -->
-        <div class="col-12">
+        <div class="col-12 dashboard-widget-col" data-widget-id="wallet" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">account_balance_wallet</i>
                         Wallet
                     </h5>
-                    <a href="#" class="btn btn-outline-secondary btn-sm" onclick="toggleIdentityWallet(); return false;">
-                        <i class="material-icons align-middle" style="font-size: 16px;">badge</i>
-                        Identity
-                    </a>
+                    <div class="d-flex align-items-center gap-2">
+                        <a href="#" class="btn btn-outline-secondary btn-sm" onclick="toggleIdentityWallet(); return false;">
+                            <i class="material-icons align-middle" style="font-size: 16px;">badge</i>
+                            Identity
+                        </a>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -265,16 +216,21 @@
         </div>
 
         <!-- Balance Section -->
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="balance" draggable="true">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">account_balance_wallet</i>
                         Balance
                     </h5>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance()">
-                        <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                    </button>
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance()">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                        </button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row text-center py-3">
@@ -305,13 +261,16 @@
         </div>
 
         <!-- Reward Address Section -->
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="reward" draggable="true">
             <div class="card h-100">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">card_giftcard</i>
                         Reward Address
                     </h5>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
@@ -327,17 +286,107 @@
             </div>
         </div>
 
+        <div class="col-12 dashboard-widget-col" data-widget-id="monitoring" draggable="true">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">monitor_heart</i>
+                        Neuron Monitoring
+                    </h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <small class="text-muted" id="systemStatsLastUpdate">Waiting for data...</small>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="small text-muted mb-3" id="systemHostInfo">Host details unavailable</div>
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6 col-xl-3">
+                            <div class="card h-100">
+                                <div class="card-body p-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="small text-muted">CPU</span>
+                                        <strong id="systemCpuCurrent">--</strong>
+                                    </div>
+                                    <div style="height: 120px;">
+                                        <canvas id="systemCpuChart"></canvas>
+                                    </div>
+                                    <div class="small text-muted mt-2">System uptime: <span id="systemUptime">--</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6 col-xl-3">
+                            <div class="card h-100">
+                                <div class="card-body p-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="small text-muted">Memory</span>
+                                        <strong id="systemMemCurrent">--</strong>
+                                    </div>
+                                    <div style="height: 120px;">
+                                        <canvas id="systemMemChart"></canvas>
+                                    </div>
+                                    <div class="small text-muted mt-2">Process RSS: <span id="systemProcMemCurrent">--</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6 col-xl-3">
+                            <div class="card h-100">
+                                <div class="card-body p-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="small text-muted">Disk</span>
+                                        <strong id="systemDiskCurrent">--</strong>
+                                    </div>
+                                    <div style="height: 120px;">
+                                        <canvas id="systemDiskChart"></canvas>
+                                    </div>
+                                    <div class="small text-muted mt-2">Root usage trend</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6 col-xl-3">
+                            <div class="card h-100">
+                                <div class="card-body p-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="small text-muted">Process CPU</span>
+                                        <strong id="systemProcCpuCurrent">--</strong>
+                                    </div>
+                                    <div style="height: 120px;">
+                                        <canvas id="systemProcChart"></canvas>
+                                    </div>
+                                    <div class="small text-muted mt-2">Threads: <span id="systemThreads">--</span> | Uptime: <span id="systemProcessUptime">--</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
-    <!-- Relay Settings Section -->
-    <div class="row g-4 mt-2">
+    <div id="p2p" class="row g-4 mt-2">
         <div class="col-12">
+            <div class="d-flex align-items-center gap-2">
+                <i class="material-icons align-middle">hub</i>
+                <h4 class="mb-0">P2P</h4>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mt-2" id="p2pLayoutRow">
+        <!-- Relay Settings Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="relay-settings" draggable="true">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">cell_tower</i>
                         Relay Settings
                     </h5>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
@@ -370,18 +419,21 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Active Subscriptions Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
+        <!-- Active Subscriptions Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="subscriptions" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">playlist_add_check</i>
                         Subscriptions
                     </h5>
-                    <button id="subsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactiveSubs()">Show Inactive</button>
+                    <div class="d-flex align-items-center gap-2">
+                        <button id="subsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactiveSubs()">Show Inactive</button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div id="subsEmpty" class="text-center text-muted py-3">
@@ -439,25 +491,28 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Publications Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
+        <!-- Publications Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="publications" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">publish</i>
                         Publications
                     </h5>
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-primary" onclick="resetDataSourceForm(); toggleDataSourceForm()">New Data Source</button>
-                        <button class="btn btn-sm btn-outline-success" onclick="downloadCsvTemplate()">CSV Template</button>
-                        <label class="btn btn-sm btn-outline-success mb-0">
-                            Upload CSV
-                            <input type="file" id="csvUpload" accept=".csv" style="display:none;" onchange="uploadCsv(this)">
-                        </label>
-                        <button id="pubsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactivePubs()">Show Inactive</button>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="resetDataSourceForm(); toggleDataSourceForm()">New Data Source</button>
+                            <button class="btn btn-sm btn-outline-success" onclick="downloadCsvTemplate()">CSV Template</button>
+                            <label class="btn btn-sm btn-outline-success mb-0">
+                                Upload CSV
+                                <input type="file" id="csvUpload" accept=".csv" style="display:none;" onchange="uploadCsv(this)">
+                            </label>
+                            <button id="pubsToggleInactive" class="btn btn-sm btn-outline-secondary" onclick="toggleInactivePubs()">Show Inactive</button>
+                        </div>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
                     </div>
                 </div>
                 <div class="card-body">
@@ -533,7 +588,7 @@
                         <div id="dsExternalHint" style="display: none;" class="mb-2">
                             <small class="text-muted">
                                 No URL — this stream accepts data via <code>POST /api/network/publish</code>
-                                with <code>{"stream_name": "...", "value": "..."}</code>
+                                with <code>{\"stream_name\": \"...\", \"value\": \"...\"}</code>
                             </small>
                         </div>
                         <div class="d-flex gap-2 mb-2">
@@ -611,11 +666,9 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Relays Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
+        <!-- Relays Section -->
+        <div class="col-12 p2p-widget-col" data-widget-id="relays" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
@@ -628,6 +681,9 @@
                             <button class="btn btn-outline-primary" onclick="addRelay()">Add</button>
                         </div>
                         <span id="networkStatus" class="badge bg-secondary">Checking...</span>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
                     </div>
                 </div>
                 <div class="card-body p-0">
@@ -682,116 +738,6 @@
         </div>
     </div>
 
-    <!-- AI Engine Training Control Section -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header"
-                     style="cursor: pointer;"
-                     data-bs-toggle="collapse"
-                     data-bs-target="#aiEngineCollapse"
-                     aria-expanded="false"
-                     aria-controls="aiEngineCollapse">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">psychology</i>
-                        AI Engine Training Frequency
-                    </h5>
-                </div>
-                <div class="collapse" id="aiEngineCollapse">
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Training Frequency</label>
-                        <div class="d-flex align-items-center gap-3">
-                            <span class="text-muted small">Slow</span>
-                            <input type="range" class="form-range flex-grow-1"
-                                   id="trainingDelaySlider"
-                                   min="0" max="100" step="1" value="50"
-                                   oninput="updateTrainingDelayLabel(this.value)"
-                                   onchange="setTrainingDelay(this.value)">
-                            <span class="text-muted small">Fast</span>
-                        </div>
-                        <div class="text-center mt-2">
-                            <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
-                        </div>
-                        <small class="form-text text-muted">
-                            Controls how frequently the AI engine trains new models.
-                            Lower frequency = less CPU usage. Higher frequency = faster model improvements.
-                        </small>
-                    </div>
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- AI Engine Performance Dashboard -->
-    <div class="row g-4 mt-2">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header"
-                     style="cursor: pointer;"
-                     data-bs-toggle="collapse"
-                     data-bs-target="#performanceCollapse"
-                     aria-expanded="false"
-                     aria-controls="performanceCollapse">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">show_chart</i>
-                        AI Engine Performance
-                    </h5>
-                </div>
-                <div class="collapse" id="performanceCollapse">
-                <div class="card-body">
-                    <!-- Stats Summary -->
-                    <div class="row mb-4" id="performanceStats">
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Accuracy</div>
-                                <div class="h4 mb-0" id="accuracyPct">--</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Avg Error</div>
-                                <div class="h5 mb-0" id="avgError">--</div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-center p-3 bg-secondary bg-opacity-10 rounded">
-                                <div class="text-muted small">Avg Abs Error</div>
-                                <div class="h5 mb-0" id="avgAbsError">--</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Predictions vs Observations Chart -->
-                    <div class="mb-4">
-                        <h6 class="mb-3">Predictions vs Observations</h6>
-                        <div style="position: relative; height: 300px;">
-                            <canvas id="predVsObsChart"></canvas>
-                        </div>
-                        <small class="text-muted">Last 100 data points</small>
-                    </div>
-
-                    <!-- Accuracy Over Time Chart -->
-                    <div class="mb-3">
-                        <h6 class="mb-3">Prediction Accuracy Over Time</h6>
-                        <div style="position: relative; height: 300px;">
-                            <canvas id="accuracyChart"></canvas>
-                        </div>
-                        <small class="text-muted">Absolute error between prediction and next observation</small>
-                    </div>
-
-                    <div class="text-center mt-3">
-                        <button class="btn btn-outline-primary btn-sm" onclick="refreshPerformance()">
-                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                            Refresh Data
-                        </button>
-                    </div>
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- Disclaimer Footer -->
@@ -868,6 +814,7 @@
 {% block extra_js %}
 <script>
     const API_URL = '/api';
+    const pageMode = '{{ page_mode|default("dashboard") }}';
 
     // Helper function to format balance values (removes trailing zeros)
     function formatBalance(value) {
@@ -2662,10 +2609,6 @@
             document.getElementById('networkStatus').textContent = 'Error';
         }
     }
-    loadRelays();
-    loadNetworkSubscriptions();
-    loadPublications();
-
     // Wallet Card Functions
     let privateKeyLoaded = false;
 
@@ -3239,6 +3182,11 @@
 
     // Wallet Import Functionality
     let walletImportFilesModal = [];
+    const systemStatsCharts = { cpu: null, mem: null, disk: null, proc: null };
+    const systemStatsHistory = [];
+    let systemStatsTimer = null;
+    const dashboardLayoutStorageKey = 'satori-dashboard-layout-v1';
+    const p2pLayoutStorageKey = 'satori-p2p-layout-v1';
 
     function openImportWalletModal() {
         const modal = new bootstrap.Modal(document.getElementById('importWalletModal'));
@@ -3398,8 +3346,285 @@
         }
     }
 
+    function saveDashboardLayout() {
+        const row = document.getElementById('dashboardLayoutRow');
+        if (!row) return;
+        const order = Array.from(row.querySelectorAll('.dashboard-widget-col'))
+            .map((el) => el.dataset.widgetId)
+            .filter(Boolean);
+        localStorage.setItem(dashboardLayoutStorageKey, JSON.stringify(order));
+    }
+
+    function applySavedDashboardLayout() {
+        const row = document.getElementById('dashboardLayoutRow');
+        if (!row) return;
+        const raw = localStorage.getItem(dashboardLayoutStorageKey);
+        if (!raw) return;
+
+        let saved = null;
+        try {
+            saved = JSON.parse(raw);
+        } catch (e) {
+            return;
+        }
+        if (!Array.isArray(saved) || saved.length === 0) return;
+
+        const widgetMap = new Map(
+            Array.from(row.querySelectorAll('.dashboard-widget-col'))
+                .map((el) => [el.dataset.widgetId, el])
+        );
+
+        saved.forEach((widgetId) => {
+            const el = widgetMap.get(widgetId);
+            if (el) row.appendChild(el);
+        });
+
+        // Append any newly added widgets not present in saved layout.
+        widgetMap.forEach((el) => {
+            if (!saved.includes(el.dataset.widgetId)) {
+                row.appendChild(el);
+            }
+        });
+    }
+
+    function initDashboardDragDrop() {
+        const row = document.getElementById('dashboardLayoutRow');
+        if (!row || typeof Sortable === 'undefined') return;
+
+        Sortable.create(row, {
+            animation: 180,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            draggable: '.dashboard-widget-col',
+            handle: '.card-header, .drag-handle',
+            ghostClass: 'dragging',
+            chosenClass: 'drop-target',
+            forceFallback: false,
+            filter: 'input,textarea,select,button,a,label,.btn,.form-control,.form-select,.dropdown-item',
+            preventOnFilter: false,
+            onEnd: () => {
+                saveDashboardLayout();
+            },
+        });
+    }
+
+    function saveP2pLayout() {
+        const row = document.getElementById('p2pLayoutRow');
+        if (!row) return;
+        const order = Array.from(row.querySelectorAll('.p2p-widget-col'))
+            .map((el) => el.dataset.widgetId)
+            .filter(Boolean);
+        localStorage.setItem(p2pLayoutStorageKey, JSON.stringify(order));
+    }
+
+    function applySavedP2pLayout() {
+        const row = document.getElementById('p2pLayoutRow');
+        if (!row) return;
+        const raw = localStorage.getItem(p2pLayoutStorageKey);
+        if (!raw) return;
+
+        let saved = null;
+        try {
+            saved = JSON.parse(raw);
+        } catch (e) {
+            return;
+        }
+        if (!Array.isArray(saved) || saved.length === 0) return;
+
+        const widgetMap = new Map(
+            Array.from(row.querySelectorAll('.p2p-widget-col'))
+                .map((el) => [el.dataset.widgetId, el])
+        );
+
+        saved.forEach((widgetId) => {
+            const el = widgetMap.get(widgetId);
+            if (el) row.appendChild(el);
+        });
+
+        widgetMap.forEach((el) => {
+            if (!saved.includes(el.dataset.widgetId)) {
+                row.appendChild(el);
+            }
+        });
+    }
+
+    function initP2pDragDrop() {
+        const row = document.getElementById('p2pLayoutRow');
+        if (!row || typeof Sortable === 'undefined') return;
+
+        Sortable.create(row, {
+            animation: 180,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            draggable: '.p2p-widget-col',
+            handle: '.card-header, .drag-handle',
+            ghostClass: 'dragging',
+            chosenClass: 'drop-target',
+            forceFallback: false,
+            filter: 'input,textarea,select,button,a,label,.btn,.form-control,.form-select,.dropdown-item',
+            preventOnFilter: false,
+            onEnd: () => {
+                saveP2pLayout();
+            },
+        });
+    }
+
+    function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return '--';
+        const total = Math.max(0, Math.floor(Number(seconds)));
+        const d = Math.floor(total / 86400);
+        const h = Math.floor((total % 86400) / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        if (d > 0) return `${d}d ${h}h`;
+        if (h > 0) return `${h}h ${m}m`;
+        return `${m}m`;
+    }
+
+    function systemParseTimestamp(ts) {
+        const d = new Date(ts);
+        if (!Number.isNaN(d.getTime())) return d;
+        const n = Number(ts);
+        if (!Number.isNaN(n)) {
+            return new Date(n > 1e12 ? n : n * 1000);
+        }
+        return new Date();
+    }
+
+    function updateSystemStatsSummary(stats) {
+        const cpu = stats?.cpu?.usage_percent;
+        const mem = stats?.memory?.virtual?.usage_percent;
+        const disk = stats?.disk?.root?.usage_percent;
+        const procCpu = stats?.process?.cpu_percent;
+        const uptime = stats?.uptime?.system_seconds;
+        const processUptime = stats?.uptime?.process_seconds;
+        const threads = stats?.process?.thread_count;
+        const host = stats?.host || {};
+        const memTotal = stats?.memory?.virtual?.total_bytes || 0;
+        const procRss = stats?.process?.memory_rss_bytes || 0;
+        const procMemPct = memTotal > 0 ? (procRss / memTotal) * 100 : null;
+
+        document.getElementById('systemCpuCurrent').textContent = cpu !== null && cpu !== undefined ? `${Number(cpu).toFixed(1)}%` : '--';
+        document.getElementById('systemMemCurrent').textContent = mem !== null && mem !== undefined ? `${Number(mem).toFixed(1)}%` : '--';
+        document.getElementById('systemDiskCurrent').textContent = disk !== null && disk !== undefined ? `${Number(disk).toFixed(1)}%` : '--';
+        document.getElementById('systemProcCpuCurrent').textContent = procCpu !== null && procCpu !== undefined ? `${Number(procCpu).toFixed(1)}%` : '--';
+        document.getElementById('systemProcMemCurrent').textContent = procMemPct !== null && procMemPct !== undefined ? `${Number(procMemPct).toFixed(1)}%` : '--';
+        document.getElementById('systemUptime').textContent = formatDuration(uptime);
+        document.getElementById('systemProcessUptime').textContent = formatDuration(processUptime);
+        document.getElementById('systemThreads').textContent = threads !== null && threads !== undefined ? String(threads) : '--';
+        document.getElementById('systemHostInfo').textContent =
+            `${host.hostname || 'unknown'} • ${host.system || '--'} ${host.release || ''}`.trim();
+
+        const last = systemParseTimestamp(stats?.timestamp_utc || Date.now());
+        document.getElementById('systemStatsLastUpdate').textContent = `Updated ${last.toLocaleTimeString()}`;
+    }
+
+    function createMiniSystemChart(canvasId, label, color) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return null;
+        return new Chart(canvas, {
+            type: 'line',
+            data: {
+                datasets: [
+                    {
+                        label: label,
+                        data: [],
+                        borderColor: color,
+                        backgroundColor: `${color}33`,
+                        tension: 0.25,
+                        pointRadius: 0,
+                        fill: true,
+                    },
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: { tooltipFormat: 'HH:mm:ss' },
+                        ticks: { maxTicksLimit: 4 },
+                    },
+                    y: {
+                        beginAtZero: true,
+                        suggestedMax: 100,
+                        ticks: {
+                            callback: (value) => `${value}%`,
+                            maxTicksLimit: 4,
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    function initSystemStatsCharts() {
+        systemStatsCharts.cpu = createMiniSystemChart('systemCpuChart', 'CPU %', '#60a5fa');
+        systemStatsCharts.mem = createMiniSystemChart('systemMemChart', 'Memory %', '#34d399');
+        systemStatsCharts.disk = createMiniSystemChart('systemDiskChart', 'Disk %', '#fbbf24');
+        systemStatsCharts.proc = createMiniSystemChart('systemProcChart', 'Process CPU %', '#f87171');
+    }
+
+    function refreshSystemStatsCharts() {
+        const mapped = {
+            cpu: systemStatsHistory.map((s) => ({ x: s.ts, y: s.cpu })),
+            mem: systemStatsHistory.map((s) => ({ x: s.ts, y: s.mem })),
+            disk: systemStatsHistory.map((s) => ({ x: s.ts, y: s.disk })),
+            proc: systemStatsHistory.map((s) => ({ x: s.ts, y: s.proc })),
+        };
+        Object.keys(systemStatsCharts).forEach((key) => {
+            const chart = systemStatsCharts[key];
+            if (!chart) return;
+            chart.data.datasets[0].data = mapped[key];
+            chart.update('none');
+        });
+    }
+
+    function pushSystemStatsPoint(stats) {
+        systemStatsHistory.push({
+            ts: systemParseTimestamp(stats?.timestamp_utc || Date.now()),
+            cpu: stats?.cpu?.usage_percent ?? null,
+            mem: stats?.memory?.virtual?.usage_percent ?? null,
+            disk: stats?.disk?.root?.usage_percent ?? null,
+            proc: stats?.process?.cpu_percent ?? null,
+        });
+
+        if (systemStatsHistory.length > 240) {
+            systemStatsHistory.splice(0, systemStatsHistory.length - 240);
+        }
+    }
+
+    async function loadSystemStats() {
+        try {
+            const response = await fetch('/api/system/stats');
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            const stats = await response.json();
+            updateSystemStatsSummary(stats);
+            pushSystemStatsPoint(stats);
+            refreshSystemStatsCharts();
+        } catch (error) {
+            const lastUpdate = document.getElementById('systemStatsLastUpdate');
+            if (lastUpdate) {
+                lastUpdate.textContent = `Monitoring unavailable (${error.message})`;
+            }
+        }
+    }
+
     // Initialize dashboard
     document.addEventListener('DOMContentLoaded', function() {
+        if (pageMode === 'p2p') {
+            applySavedP2pLayout();
+            initP2pDragDrop();
+            loadRelays();
+            loadNetworkSubscriptions();
+            loadPublications();
+        } else {
+            applySavedDashboardLayout();
+            initDashboardDragDrop();
+        }
+
         // Set up wallet import file input handler for modal
         const walletFolderInputModal = document.getElementById('walletFolderInputModal');
         if (walletFolderInputModal) {
@@ -3429,21 +3654,36 @@
             poolManagementCollapse.classList.remove('show');
         }
 
-        // Health check disabled to reduce API load
-        // checkHealth();
-        loadWalletAddresses();
-        loadAllBalances();  // Load both stake and live balances from ElectrumX
-        loadRewardAddress();
-        // Staking/pool API calls moved to dedicated Stake Management page
-        // loadStakingStatus();
-        // loadWorkers();
-        // loadLenders();
-        // loadAvailablePools();
-        // loadPoolCommission();
-        loadTrainingDelay();  // Load AI engine training frequency setting
+        if (pageMode !== 'p2p') {
+            // Health check disabled to reduce API load
+            // checkHealth();
+            loadWalletAddresses();
+            loadAllBalances();  // Load both stake and live balances from ElectrumX
+            loadRewardAddress();
+            // Staking/pool API calls moved to dedicated Stake Management page
+            // loadStakingStatus();
+            // loadWorkers();
+            // loadLenders();
+            // loadAvailablePools();
+            // loadPoolCommission();
+            const trainingDelaySlider = document.getElementById('trainingDelaySlider');
+            if (trainingDelaySlider) {
+                loadTrainingDelay();  // Load AI engine training frequency setting
+            }
+            initSystemStatsCharts();
+            loadSystemStats();
+            systemStatsTimer = setInterval(loadSystemStats, 3000);
+        }
 
         // Periodic health check - Disabled to reduce unnecessary load
         // setInterval(checkHealth, 30000);
+    });
+
+    window.addEventListener('beforeunload', function() {
+        if (systemStatsTimer) {
+            clearInterval(systemStatsTimer);
+            systemStatsTimer = null;
+        }
     });
 </script>
 {% endblock %}

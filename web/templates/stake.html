@@ -4,71 +4,27 @@
 
 {% block content %}
 <!-- Navigation -->
-<nav class="navbar navbar-expand-lg px-4">
-    <span class="navbar-brand">
-        Satori - Stake Management
-        <small class="text-muted ms-2" style="font-size: 0.65rem; font-weight: 400; opacity: 0.6;">{{ version }}</small>
-    </span>
-    <div class="ms-auto d-flex align-items-center">
-        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm me-2">
-            <i class="material-icons align-middle" style="font-size: 16px;">dashboard</i>
-            Dashboard
-        </a>
-        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm me-2">
-            <i class="material-icons align-middle" style="font-size: 16px;">timeline</i>
-            Local Predictions
-        </a>
-        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm me-2">
-            <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
-            Stake Management
-        </a>
-        <div class="dropdown me-2">
-            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                <i class="material-icons align-middle" style="font-size: 16px;">tune</i>
-                Training
-            </button>
-            <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                    <label class="form-label mb-0">AI Engine Training Frequency</label>
-                    <span title="Controls how frequently the AI engine trains new models. Lower frequency = less CPU usage. Higher frequency = faster model improvements.">
-                        <i class="material-icons text-muted" style="font-size: 16px; cursor: help;">info</i>
-                    </span>
-                </div>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="text-muted small">Slow</span>
-                    <input type="range" class="form-range flex-grow-1 mb-0"
-                           id="trainingDelaySlider"
-                           min="0" max="100" step="1" value="50"
-                           oninput="updateTrainingDelayLabel(this.value)"
-                           onchange="setTrainingDelay(this.value)">
-                    <span class="text-muted small">Fast</span>
-                </div>
-                <div class="text-center mt-2">
-                    <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
-                </div>
-            </div>
-        </div>
-        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm me-2">Logout</a>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light mode">
-            <i class="material-icons" id="themeIcon">light_mode</i>
-        </button>
-    </div>
-</nav>
+{% include 'partials/navbar.html' %}
 
 <div class="container-fluid py-4">
-    <div class="row g-4">
+    <div class="row g-4" id="stakeLayoutRow">
 
         <!-- Pool Staking Section -->
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="stake_pool_staking">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">handshake</i>
                         Pool Staking
                     </h5>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="loadAvailablePools()">
-                        <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                    </button>
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAvailablePools()">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                        </button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
@@ -103,13 +59,16 @@
         </div>
 
         <!-- Pool Management Section -->
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="stake_pool_management">
             <div class="card h-100">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">groups</i>
                         Pool Management
                     </h5>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
                 </div>
                 <div class="card-body" id="poolManagementBody">
                     <!-- Pool Staking Notice (shown when user is staking to another pool) -->
@@ -194,6 +153,54 @@
     let isStakingToPool = false;
     let isOpenPool = false;
     let hasWorkers = false;
+    const stakeLayoutStorageKey = 'satori-stake-layout-v1';
+
+    function saveStakeLayout() {
+        const row = document.getElementById('stakeLayoutRow');
+        if (!row) return;
+        const order = Array.from(row.querySelectorAll('.dashboard-widget-col'))
+            .map((el) => el.dataset.widgetId)
+            .filter(Boolean);
+        localStorage.setItem(stakeLayoutStorageKey, JSON.stringify(order));
+    }
+
+    function applyStakeLayout() {
+        const row = document.getElementById('stakeLayoutRow');
+        if (!row) return;
+        const raw = localStorage.getItem(stakeLayoutStorageKey);
+        if (!raw) return;
+        let order = null;
+        try {
+            order = JSON.parse(raw);
+        } catch (e) {
+            return;
+        }
+        if (!Array.isArray(order)) return;
+        const map = new Map(Array.from(row.querySelectorAll('.dashboard-widget-col')).map((el) => [el.dataset.widgetId, el]));
+        order.forEach((id) => {
+            const el = map.get(id);
+            if (el) row.appendChild(el);
+        });
+        map.forEach((el) => {
+            if (!order.includes(el.dataset.widgetId)) row.appendChild(el);
+        });
+    }
+
+    function initStakeDragDrop() {
+        const row = document.getElementById('stakeLayoutRow');
+        if (!row || typeof Sortable === 'undefined') return;
+        Sortable.create(row, {
+            animation: 180,
+            easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            draggable: '.dashboard-widget-col',
+            handle: '.card-header, .drag-handle',
+            ghostClass: 'dragging',
+            chosenClass: 'drop-target',
+            filter: 'input,textarea,select,button,a,label,.btn,.form-control,.form-select,.dropdown-item',
+            preventOnFilter: false,
+            onEnd: () => saveStakeLayout(),
+        });
+    }
 
     // Helper function to format balance values (removes trailing zeros)
     function formatBalance(value) {
@@ -273,7 +280,10 @@
 
     function updateTrainingDelayLabel(sliderValue) {
         const seconds = sliderToSeconds(sliderValue);
-        document.getElementById('trainingDelayLabel').textContent = formatDelay(seconds);
+        const label = document.getElementById('trainingDelayLabel');
+        if (label) {
+            label.textContent = formatDelay(seconds);
+        }
     }
 
     async function setTrainingDelay(sliderValue) {
@@ -285,10 +295,12 @@
     }
 
     async function loadTrainingDelay() {
+        const slider = document.getElementById('trainingDelaySlider');
+        if (!slider) return;
         const result = await apiCall('/engine/training-delay');
         if (result && result.delay_seconds !== undefined) {
             const sliderValue = secondsToSlider(result.delay_seconds);
-            document.getElementById('trainingDelaySlider').value = sliderValue;
+            slider.value = sliderValue;
             updateTrainingDelayLabel(sliderValue);
         }
     }
@@ -623,12 +635,17 @@
 
     // Load all data on page load
     document.addEventListener('DOMContentLoaded', () => {
+        applyStakeLayout();
+        initStakeDragDrop();
+
         loadStakingStatus();
         loadWorkers();
         loadLenders();
         loadAvailablePools();
         loadPoolCommission();
-        loadTrainingDelay();
+        if (document.getElementById('trainingDelaySlider')) {
+            loadTrainingDelay();
+        }
     });
 </script>
 {% endblock %}

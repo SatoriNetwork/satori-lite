@@ -28,6 +28,49 @@
         font-size: 0.75rem;
         letter-spacing: 0.01em;
     }
+    .auth-loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(8, 8, 12, 0.82);
+        backdrop-filter: blur(3px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 3000;
+    }
+    .auth-loading-card {
+        width: min(92vw, 440px);
+        background: linear-gradient(180deg, rgba(20, 20, 20, 0.96), rgba(12, 12, 14, 0.96));
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 1.15rem 1.2rem;
+        box-shadow: var(--shadow);
+    }
+    .auth-loading-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin-bottom: 0.6rem;
+    }
+    .auth-loading-progress {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+    }
+    .auth-loading-progress-bar {
+        height: 100%;
+        width: 0%;
+        background: var(--accent-gradient);
+        transition: width 0.22s ease;
+    }
+    .auth-loading-meta {
+        margin-top: 0.45rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+    }
     .logo-container {
         text-align: center;
         margin-bottom: 2rem;
@@ -124,7 +167,7 @@
             {% endif %}
         {% endwith %}
 
-        <form action="{{ url_for('login') }}" method="POST">
+        <form action="{{ url_for('login') }}" method="POST" id="loginForm">
             <div class="enhanced-input">
                 <input type="password"
                        name="password"
@@ -135,10 +178,65 @@
                        required>
             </div>
 
-            <button type="submit" class="login-btn">
+            <button type="submit" class="login-btn" id="unlockBtn">
                 Unlock Vault
             </button>
         </form>
     </div>
 </div>
+
+<div id="authLoadingOverlay" class="auth-loading-overlay" aria-hidden="true">
+    <div class="auth-loading-card">
+        <div class="auth-loading-title">Unlocking vault...</div>
+        <div class="auth-loading-progress">
+            <div id="authLoadingProgressBar" class="auth-loading-progress-bar"></div>
+        </div>
+        <div class="auth-loading-meta">
+            <span id="authLoadingStep">Verifying credentials...</span>
+            <strong id="authLoadingPercent">0%</strong>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const form = document.getElementById('loginForm');
+        const button = document.getElementById('unlockBtn');
+        const overlay = document.getElementById('authLoadingOverlay');
+        const bar = document.getElementById('authLoadingProgressBar');
+        const percent = document.getElementById('authLoadingPercent');
+        const step = document.getElementById('authLoadingStep');
+        let timer = null;
+
+        if (!form || !button || !overlay || !bar || !percent || !step) {
+            return;
+        }
+
+        form.addEventListener('submit', function () {
+            button.disabled = true;
+            button.textContent = 'Unlocking...';
+            overlay.style.display = 'flex';
+            overlay.setAttribute('aria-hidden', 'false');
+
+            let current = 8;
+            bar.style.width = current + '%';
+            percent.textContent = current + '%';
+            step.textContent = 'Verifying credentials...';
+
+            timer = setInterval(() => {
+                if (current < 92) {
+                    current += Math.max(1, Math.round((92 - current) * 0.14));
+                    bar.style.width = current + '%';
+                    percent.textContent = current + '%';
+                    if (current > 55) {
+                        step.textContent = 'Preparing dashboard...';
+                    }
+                } else if (timer) {
+                    clearInterval(timer);
+                    timer = null;
+                }
+            }, 180);
+        });
+    })();
+</script>
 {% endblock %}

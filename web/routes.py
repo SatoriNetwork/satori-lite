@@ -11,6 +11,10 @@ import os
 import time
 import logging
 import base64
+import os
+import platform
+import socket
+import datetime
 import requests
 import uuid
 from threading import Lock
@@ -51,10 +55,12 @@ from flask import (
     session,
     flash,
     jsonify,
-    current_app
+    current_app,
+    send_file
 )
 
 logger = logging.getLogger(__name__)
+_process_started_at = time.time()
 
 # Global vault reference (will be set by the application) - used by background processes
 _startup_vault = None
@@ -568,7 +574,38 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not get nostr/relay info: {e}")
 
-        return render_template('dashboard.html', version=VERSION, eth_wallet_address=eth_wallet_address, nostr_pubkey=nostr_pubkey, relay_url=relay_url)
+        return render_template(
+            'dashboard.html',
+            version=VERSION,
+            eth_wallet_address=eth_wallet_address,
+            nostr_pubkey=nostr_pubkey,
+            relay_url=relay_url,
+            page_mode='dashboard')
+
+    @app.route('/p2p')
+    @login_required
+    def p2p_page():
+        """P2P page."""
+        from satorineuron import VERSION
+
+        nostr_pubkey = None
+        relay_url = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+            if startup and hasattr(startup, 'server') and startup.server:
+                relay_url = getattr(startup.server, 'relayUrl', None)
+        except Exception as e:
+            logger.warning(f"Could not get nostr/relay info: {e}")
+
+        return render_template(
+            'dashboard.html',
+            version=VERSION,
+            eth_wallet_address=None,
+            nostr_pubkey=nostr_pubkey,
+            relay_url=relay_url,
+            page_mode='p2p')
 
     @app.route('/stake')
     @login_required
@@ -624,6 +661,137 @@ def register_routes(app):
             'subscriptions_count': len(startup.subscriptions) if hasattr(startup, 'subscriptions') and startup.subscriptions else 0,
             'publications_count': len(startup.publications) if hasattr(startup, 'publications') and startup.publications else 0
         })
+
+    @app.route('/api/system/stats', methods=['GET'])
+    @login_required
+    def get_system_stats():
+        """Return host and process metrics available on current neuron server."""
+        try:
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            payload = {
+                'timestamp_utc': now_utc.isoformat(),
+                'host': {
+                    'hostname': socket.gethostname(),
+                    'platform': platform.platform(),
+                    'system': platform.system(),
+                    'release': platform.release(),
+                    'machine': platform.machine(),
+                    'python_version': platform.python_version(),
+                },
+                'uptime': {
+                    'system_seconds': None,
+                    'system_started_at_utc': None,
+                    'process_seconds': None,
+                },
+                'cpu': {
+                    'logical_cores': os.cpu_count(),
+                    'usage_percent': None,
+                    'load_average_1_5_15': None,
+                },
+                'memory': {
+                    'virtual': None,
+                    'swap': None,
+                },
+                'disk': {
+                    'root': None,
+                },
+                'network': {
+                    'io': None,
+                },
+                'process': {
+                    'pid': os.getpid(),
+                    'thread_count': None,
+                    'cpu_percent': None,
+                    'memory_rss_bytes': None,
+                    'memory_vms_bytes': None,
+                    'open_file_count': None,
+                    'create_time_utc': None,
+                },
+            }
+
+            try:
+                import psutil
+            except Exception:
+                psutil = None
+
+            if psutil is not None:
+                boot_ts = psutil.boot_time()
+                payload['uptime']['system_seconds'] = max(0.0, time.time() - boot_ts)
+                payload['uptime']['system_started_at_utc'] = datetime.datetime.fromtimestamp(
+                    boot_ts, tz=datetime.timezone.utc
+                ).isoformat()
+
+                payload['cpu']['usage_percent'] = psutil.cpu_percent(interval=0.1)
+                try:
+                    payload['cpu']['load_average_1_5_15'] = list(os.getloadavg())
+                except Exception:
+                    payload['cpu']['load_average_1_5_15'] = None
+
+                vm = psutil.virtual_memory()
+                payload['memory']['virtual'] = {
+                    'total_bytes': vm.total,
+                    'available_bytes': vm.available,
+                    'used_bytes': vm.used,
+                    'usage_percent': vm.percent,
+                }
+                sw = psutil.swap_memory()
+                payload['memory']['swap'] = {
+                    'total_bytes': sw.total,
+                    'used_bytes': sw.used,
+                    'free_bytes': sw.free,
+                    'usage_percent': sw.percent,
+                }
+
+                root_path = os.path.abspath(os.sep)
+                du = psutil.disk_usage(root_path)
+                payload['disk']['root'] = {
+                    'path': root_path,
+                    'total_bytes': du.total,
+                    'used_bytes': du.used,
+                    'free_bytes': du.free,
+                    'usage_percent': du.percent,
+                }
+
+                nio = psutil.net_io_counters()
+                payload['network']['io'] = {
+                    'bytes_sent': nio.bytes_sent,
+                    'bytes_recv': nio.bytes_recv,
+                    'packets_sent': nio.packets_sent,
+                    'packets_recv': nio.packets_recv,
+                    'errin': nio.errin,
+                    'errout': nio.errout,
+                    'dropin': nio.dropin,
+                    'dropout': nio.dropout,
+                }
+
+                proc = psutil.Process(os.getpid())
+                with proc.oneshot():
+                    proc_create_ts = proc.create_time()
+                    payload['uptime']['process_seconds'] = max(0.0, time.time() - proc_create_ts)
+                    payload['process']['thread_count'] = proc.num_threads()
+                    payload['process']['cpu_percent'] = proc.cpu_percent(interval=0.05)
+                    mem_info = proc.memory_info()
+                    payload['process']['memory_rss_bytes'] = mem_info.rss
+                    payload['process']['memory_vms_bytes'] = mem_info.vms
+                    payload['process']['create_time_utc'] = datetime.datetime.fromtimestamp(
+                        proc_create_ts, tz=datetime.timezone.utc
+                    ).isoformat()
+                    try:
+                        payload['process']['open_file_count'] = len(proc.open_files())
+                    except Exception:
+                        payload['process']['open_file_count'] = None
+            else:
+                payload['warning'] = 'psutil not available; returning limited stats'
+                payload['uptime']['process_seconds'] = max(0.0, time.time() - _process_started_at)
+                try:
+                    payload['cpu']['load_average_1_5_15'] = list(os.getloadavg())
+                except Exception:
+                    payload['cpu']['load_average_1_5_15'] = None
+
+            return jsonify(payload)
+        except Exception as e:
+            logger.error(f"Failed to collect system stats: {e}")
+            return jsonify({'error': str(e)}), 500
 
     # API Proxy Routes
     def get_auth_headers():
@@ -1420,10 +1588,20 @@ def register_routes(app):
                 return jsonify({'error': 'No streams configured'}), 404
 
             try:
-                limit = int(request.args.get('limit', 100))
+                limit = int(request.args.get('limit', 0))
             except (TypeError, ValueError):
-                limit = 100
-            limit = max(10, min(limit, 500))
+                limit = 0
+            limit = max(0, min(limit, 50000))
+
+            raw_days = (request.args.get('days', '10') or '10').strip().lower()
+            if raw_days == 'all':
+                window_days = None
+            else:
+                try:
+                    parsed_days = int(raw_days)
+                except (TypeError, ValueError):
+                    parsed_days = 10
+                window_days = parsed_days if parsed_days > 0 else 10
 
             requested_stream = request.args.get('stream_uuid')
             selected_model = None
@@ -1483,8 +1661,38 @@ def register_routes(app):
             if obs_uuid is None and pred_uuid in pred_to_obs:
                 obs_uuid = pred_to_obs.get(pred_uuid)
 
+            import pandas as pd
+
+            def normalize_ts_column(frame: pd.DataFrame) -> pd.Series:
+                ts_values = frame['ts']
+                parsed = pd.to_datetime(ts_values, errors='coerce', utc=True)
+                numeric = pd.to_numeric(ts_values, errors='coerce')
+                numeric_mask = numeric.notna()
+                if numeric_mask.any():
+                    median_abs = float(numeric[numeric_mask].abs().median())
+                    if median_abs < 1e11:
+                        unit = 's'
+                    elif median_abs < 1e14:
+                        unit = 'ms'
+                    else:
+                        unit = 'ns'
+                    parsed.loc[numeric_mask] = pd.to_datetime(
+                        numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                    )
+                return parsed
+
+            def apply_window(frame: pd.DataFrame) -> pd.DataFrame:
+                frame = frame.reset_index()
+                if window_days is not None:
+                    ts_parsed = normalize_ts_column(frame)
+                    cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=window_days)
+                    frame = frame[ts_parsed >= cutoff].copy()
+                if limit > 0:
+                    frame = frame.tail(limit)
+                return frame.reset_index(drop=True)
+
             obs_df_raw = storage.getStreamData(obs_uuid) if obs_uuid else None
-            obs_df = obs_df_raw.tail(limit).reset_index() if obs_df_raw is not None and not obs_df_raw.empty else None
+            obs_df = apply_window(obs_df_raw) if obs_df_raw is not None and not obs_df_raw.empty else None
             observations = [
                 {'ts': str(row['ts']), 'value': float(row['value'])}
                 for _, row in obs_df.iterrows()
@@ -1500,14 +1708,13 @@ def register_routes(app):
                     'stats': {}
                 })
 
-            pred_df = pred_df.tail(limit).reset_index()
+            pred_df = apply_window(pred_df)
             predictions = [
                 {'ts': str(row['ts']), 'value': float(row['value'])}
                 for _, row in pred_df.iterrows()
             ]
 
             # Calculate accuracy: match each prediction to the next observation
-            import pandas as pd
             accuracy_data = []
             if obs_df is None or obs_df.empty:
                 return jsonify({
@@ -1528,7 +1735,7 @@ def register_routes(app):
                     # Convert pred_ts to match obs_df['ts'] dtype
                     if pd.api.types.is_datetime64_any_dtype(obs_df['ts']):
                         # Observations are datetime - convert pred_ts to datetime
-                        pred_ts_compare = pd.to_datetime(pred_ts)
+                        pred_ts_compare = pd.to_datetime(pred_ts, utc=True)
                     elif pd.api.types.is_numeric_dtype(obs_df['ts']):
                         # Observations are numeric (Unix timestamps)
                         # Try to convert pred_ts to numeric
@@ -1590,7 +1797,8 @@ def register_routes(app):
                 'observations': observations,
                 'predictions': predictions,
                 'accuracy': accuracy_data,
-                'stats': stats
+                'stats': stats,
+                'window_days': window_days
             })
 
         except Exception as e:
@@ -2191,3 +2399,47 @@ def register_routes(app):
             return jsonify({'error': 'Missing relay_url'}), 400
         startup.networkDB.delete_relay(data['relay_url'])
         return jsonify({'success': True})
+
+    @app.route('/api/wallet/download', methods=['GET'])
+    @login_required
+    def api_wallet_download():
+        """Download wallet folder as ZIP compatible with wallet import."""
+        import io
+        import zipfile
+        import datetime
+        from pathlib import Path
+        from satorineuron import config
+
+        try:
+            wallet_dir = Path(config.walletPath())
+            if not wallet_dir.exists():
+                return jsonify({'error': 'Wallet directory not found'}), 404
+
+            allowed_files = ['wallet.yaml', 'vault.yaml', 'wallet.yaml.bak', 'vault.yaml.bak']
+            required_files = ['wallet.yaml', 'vault.yaml']
+
+            missing_required = [name for name in required_files if not (wallet_dir / name).exists()]
+            if missing_required:
+                return jsonify({
+                    'error': f'Missing required wallet files: {", ".join(missing_required)}'
+                }), 404
+
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as zipf:
+                for file_name in allowed_files:
+                    src = wallet_dir / file_name
+                    if src.exists() and src.is_file():
+                        # Keep top-level "wallet" folder so extracted content is import-compatible.
+                        zipf.write(src, arcname=f'wallet/{file_name}')
+
+            archive.seek(0)
+            timestamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            return send_file(
+                archive,
+                mimetype='application/zip',
+                as_attachment=True,
+                download_name=f'wallet_backup_{timestamp}.zip'
+            )
+        except Exception as e:
+            logger.error(f"Wallet download error: {e}")
+            return jsonify({'error': str(e)}), 500
