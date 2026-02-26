@@ -559,7 +559,7 @@
             const countdownEl = document.getElementById('sessionCountdown');
             if (!countdownEl) return;
 
-            const timeoutSeconds = 60;
+            const timeoutSeconds = 86400; // disabled: 24h timeout
             const warningThreshold = 20;
             let remaining = timeoutSeconds;
             let intervalId = null;
