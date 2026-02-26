@@ -210,6 +210,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
         if not pubs:
             return
+        # Sync relay URLs from the server into the DB so we always publish
+        # to the canonical relay (avoids stale wss:// vs ws:// mismatches).
+        try:
+            server_relays = await asyncio.to_thread(self.server.getRelays)
+            for r in server_relays:
+                await asyncio.to_thread(
+                    self.networkDB.upsert_relay, r['relay_url'])
+        except Exception:
+            pass
         relays = await asyncio.to_thread(self.networkDB.get_relays)
         for r in relays:
             relay_url = r['relay_url']

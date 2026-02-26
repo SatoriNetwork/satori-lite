@@ -2481,7 +2481,7 @@
                 const btnText = s.subscribed ? 'Unsubscribe' : 'Subscribe';
                 const btnAction = s.subscribed
                     ? "networkUnsubscribe('" + s.stream_name.replace(/'/g, "\\'") + "', '" + s.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
-                    : "networkSubscribe(" + JSON.stringify(s).replace(/'/g, "\\'") + ", this)";
+                    : "networkSubscribe(" + JSON.stringify(s).replace(/"/g, '&quot;') + ", this)";
                 row.innerHTML =
                     '<td><strong>' + (s.name || s.stream_name) + '</strong><br><small class="text-muted">' + s.stream_name + '</small></td>' +
                     '<td>' + (s.description || '-') + '</td>' +
