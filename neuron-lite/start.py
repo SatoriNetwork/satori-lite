@@ -166,14 +166,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """Background thread entry: runs asyncio event loop with crash recovery."""
         import random
         while True:
+            crashed = False
             try:
                 asyncio.run(self._networkReconcileLoop())
             except Exception as e:
                 logging.error(f'Network client thread crashed: {e}')
-            delay = random.randint(60, 600)
-            logging.info(
-                f'Network: restarting in {delay}s', color='yellow')
-            time.sleep(delay)
+                crashed = True
+            if crashed:
+                delay = random.randint(60, 600)
+                logging.info(
+                    f'Network: restarting in {delay}s', color='yellow')
+                time.sleep(delay)
 
     async def _networkReconcileLoop(self):
         """Reconciliation loop: ensures we are subscribed to all desired streams
@@ -185,6 +188,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         3. Fetch any data sources that are due
         """
         from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
+
+        # Store the running event loop so sync callers can submit coroutines
+        # to it safely via asyncio.run_coroutine_threadsafe().
+        self._networkLoop = asyncio.get_event_loop()
+
+        # Clear any stale SatoriNostr clients that were bound to a previous
+        # (now-dead) event loop.  Keeping them would cause cross-loop
+        # contamination and silent crashes on every await.
+        self._networkClients.clear()
+        self._networkListeners.clear()
+        self._networkSubscribed.clear()
+        self._networkFirstRun = True
 
         while True:
             try:
