@@ -2078,6 +2078,11 @@ def register_routes(app):
         if not relay_url:
             return jsonify({'error': 'Missing url parameter'}), 400
         streams = startup.discoverRelaySync(relay_url)
+        my_pub_names = {
+            p['stream_name']
+            for p in startup.networkDB.get_active_publications()
+        }
+        streams = [s for s in streams if s['stream_name'] not in my_pub_names]
         for s in streams:
             s['subscribed'] = startup.networkDB.is_subscribed(
                 s['stream_name'], s['nostr_pubkey'])

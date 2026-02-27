@@ -743,6 +743,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         desired = await asyncio.to_thread(self.networkDB.get_active)
         if not desired:
             return
+        # Don't subscribe to streams we publish ourselves
+        my_pub_names = {
+            p['stream_name']
+            for p in await asyncio.to_thread(self.networkDB.get_active_publications)
+        }
+        desired = [s for s in desired if s['stream_name'] not in my_pub_names]
+        if not desired:
+            return
 
         # 2. Find inactive subscriptions
         #    On first run, treat all as inactive to establish connections
