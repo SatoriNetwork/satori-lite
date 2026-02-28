@@ -1613,8 +1613,12 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(stream)
         });
-        loadNetworkStreams();
         loadNetworkSubscriptions();
+        if (activeRelayDrawerUrl && cachedStreamsByRelay[activeRelayDrawerUrl]) {
+            const s = cachedStreamsByRelay[activeRelayDrawerUrl].find(s => s.stream_name === stream.stream_name);
+            if (s) s.subscribed = true;
+            renderDrawerStreams(cachedStreamsByRelay[activeRelayDrawerUrl], activeRelayDrawerUrl);
+        }
     }
 
     async function networkResubscribe(streamName, pubkey, relayUrl, btn) {
@@ -1634,8 +1638,12 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({stream_name: streamName, nostr_pubkey: pubkey})
         });
-        loadNetworkStreams();
         loadNetworkSubscriptions();
+        if (activeRelayDrawerUrl && cachedStreamsByRelay[activeRelayDrawerUrl]) {
+            const s = cachedStreamsByRelay[activeRelayDrawerUrl].find(s => s.stream_name === streamName);
+            if (s) s.subscribed = false;
+            renderDrawerStreams(cachedStreamsByRelay[activeRelayDrawerUrl], activeRelayDrawerUrl);
+        }
     }
 
     async function networkPredict(streamName, pubkey, btn) {
@@ -2445,16 +2453,17 @@
 
     async function stopPublication(streamName, btn) {
         if (btn) btnLoading(btn);
-        await fetch('/api/network/stop-predict', {
+        await fetch('/api/network/publication/remove', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({stream_name: streamName.replace(/_pred$/, '')})
+            body: JSON.stringify({stream_name: streamName})
         });
         loadPublications();
         loadNetworkSubscriptions();
     }
 
     let cachedStreamsByRelay = {};
+    let activeRelayDrawerUrl = null;
 
     function closeRelayDrawer() {
         document.getElementById('relayDrawer').style.display = 'none';
@@ -2477,18 +2486,19 @@
                 const tags = (s.tags || []).map(t => '<span class="badge bg-secondary me-1">' + t + '</span>').join('');
                 const row = document.createElement('tr');
                 if (!s.subscribed) row.classList.add('text-muted');
-                const btnClass = s.subscribed ? 'btn-outline-danger' : 'btn-outline-success';
-                const btnText = s.subscribed ? 'Unsubscribe' : 'Subscribe';
-                const btnAction = s.subscribed
+                const btnClass = s.is_mine ? 'btn-outline-secondary' : (s.subscribed ? 'btn-outline-danger' : 'btn-outline-success');
+                const btnText = s.is_mine ? 'Publishing' : (s.subscribed ? 'Unsubscribe' : 'Subscribe');
+                const btnDisabled = s.is_mine ? ' disabled' : '';
+                const btnAction = s.is_mine ? '' : (s.subscribed
                     ? "networkUnsubscribe('" + s.stream_name.replace(/'/g, "\\'") + "', '" + s.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
-                    : "networkSubscribe(" + JSON.stringify(s).replace(/"/g, '&quot;') + ", this)";
+                    : "networkSubscribe(" + JSON.stringify(s).replace(/"/g, '&quot;') + ", this)");
                 row.innerHTML =
                     '<td><strong>' + (s.name || s.stream_name) + '</strong><br><small class="text-muted">' + s.stream_name + '</small></td>' +
                     '<td>' + (s.description || '-') + '</td>' +
                     '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
                     '<td>' + (s.price_per_obs > 0 ? s.price_per_obs + ' sats' : 'Free') + '</td>' +
                     '<td>' + tags + '</td>' +
-                    '<td><button class="btn btn-sm ' + btnClass + '" onclick="' + btnAction + '">' + btnText + '</button></td>';
+                    '<td><button class="btn btn-sm ' + btnClass + '"' + btnDisabled + (btnAction ? ' onclick="' + btnAction + '"' : '') + '>' + btnText + '</button></td>';
                 list.appendChild(row);
             });
         }
@@ -2496,6 +2506,7 @@
     }
 
     async function openRelayDrawer(relayUrl) {
+        activeRelayDrawerUrl = relayUrl;
         const cached = cachedStreamsByRelay[relayUrl];
         if (cached && cached.length > 0) {
             renderDrawerStreams(cached, relayUrl);

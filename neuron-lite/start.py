@@ -328,6 +328,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         try:
             async for obs in client.observations():
+                subscribed = await asyncio.to_thread(
+                    self.networkDB.is_subscribed,
+                    obs.stream_name, obs.nostr_pubkey)
+                if not subscribed:
+                    continue
+                logging.info(
+                    f'Network: received data from {relay_url} '
+                    f'stream={obs.stream_name} value={obs.observation.value if obs.observation else None}',
+                    color='cyan')
                 await self._networkProcessObservation(obs)
         except asyncio.CancelledError:
             return
@@ -449,7 +458,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 await client.publish_observation(observation, metadata)
                 logging.info(
                     f'Network: published {stream_name} seq={seq_num} '
-                    f'to {relay_url}', color='green')
+                    f'value={value} to {relay_url}', color='green')
             except Exception as e:
                 logging.warning(
                     f'Network: publish failed on {relay_url}: {e}')

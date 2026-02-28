@@ -2082,10 +2082,10 @@ def register_routes(app):
             p['stream_name']
             for p in startup.networkDB.get_active_publications()
         }
-        streams = [s for s in streams if s['stream_name'] not in my_pub_names]
         for s in streams:
             s['subscribed'] = startup.networkDB.is_subscribed(
                 s['stream_name'], s['nostr_pubkey'])
+            s['is_mine'] = s['stream_name'] in my_pub_names
         return jsonify({'streams': streams})
 
     @app.route('/api/network/subscribe', methods=['POST'])
@@ -2153,6 +2153,22 @@ def register_routes(app):
             return jsonify({'error': 'Missing stream_name'}), 400
         pred_name = data['stream_name'] + '_pred'
         startup.networkDB.remove_publication(pred_name)
+        return jsonify({'success': True})
+
+    @app.route('/api/network/publication/remove', methods=['POST'])
+    @login_required
+    def api_network_publication_remove():
+        """Remove a publication (data source or prediction) and its _pred counterpart."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json()
+        if not data or 'stream_name' not in data:
+            return jsonify({'error': 'Missing stream_name'}), 400
+        stream_name = data['stream_name']
+        startup.networkDB.remove_publication(stream_name)
+        startup.networkDB.remove_publication(stream_name + '_pred')
+        startup.networkDB.remove_data_source(stream_name)
         return jsonify({'success': True})
 
     @app.route('/api/network/subscriptions', methods=['GET'])
