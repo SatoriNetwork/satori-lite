@@ -460,7 +460,10 @@
                         <div class="p-3">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <h6 class="mb-0" id="obsDrawerTitle">Observations</h6>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="closeObsDrawer()">Close</button>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="exportObsCsv()">Export CSV</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="closeObsDrawer()">Close</button>
+                                </div>
                             </div>
                             <div id="obsChartContainer" style="display: none; max-height: 250px; margin-bottom: 12px;">
                                 <canvas id="obsChart"></canvas>
@@ -635,7 +638,10 @@
                         <div class="p-3">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <h6 class="mb-0" id="pubDrawerTitle">Publication Data</h6>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="closePubDrawer()">Close</button>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="exportPubCsv()">Export CSV</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="closePubDrawer()">Close</button>
+                                </div>
                             </div>
                             <div id="pubChartContainer" style="display: none; max-height: 250px; margin-bottom: 12px;">
                                 <canvas id="pubChart"></canvas>
@@ -1671,11 +1677,53 @@
     // ── Observations drawer ──────────────────────────────────
     let obsDrawerData = {observations: [], predictions: []};
     let obsDrawerTab = 'observations';
+    let obsDrawerStream = {name: '', pubkey: ''};
     let obsChart = null;
 
     function closeObsDrawer() {
         document.getElementById('obsDrawer').style.display = 'none';
         if (obsChart) { obsChart.destroy(); obsChart = null; }
+    }
+
+    async function exportObsCsv() {
+        const {name, pubkey} = obsDrawerStream;
+        if (!name || !pubkey) return;
+        let observations;
+        try {
+            const resp = await fetch('/api/network/observations?stream_name=' +
+                encodeURIComponent(name) + '&provider_pubkey=' +
+                encodeURIComponent(pubkey) + '&limit=10000');
+            const data = await resp.json();
+            observations = data.observations || [];
+        } catch(e) {
+            alert('Failed to fetch data: ' + e.message);
+            return;
+        }
+        if (!observations.length) { alert('No observations to export.'); return; }
+        const blob = new Blob([buildObsCsv(observations)], {type: 'text/csv'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name + '_observations.csv';
+        a.click();
+    }
+
+    function buildObsCsv(observations) {
+        const lines = ['seq_num,observed_at,received_at,value'];
+        observations.forEach(o => {
+            let val = o.value == null ? '' : String(o.value);
+            try {
+                const parsed = JSON.parse(val);
+                if (parsed && parsed.value != null) val = String(parsed.value);
+            } catch(e) {}
+            const fields = [
+                o.seq_num == null ? '' : String(o.seq_num),
+                o.observed_at == null ? '' : String(o.observed_at),
+                o.received_at == null ? '' : String(o.received_at),
+                val
+            ];
+            lines.push(fields.map(f => f.includes(',') || f.includes('"') ? '"' + f.replace(/"/g, '""') + '"' : f).join(','));
+        });
+        return lines.join('\n');
     }
 
     function tryParseFloat(val) {
@@ -1815,6 +1863,7 @@
         const title = document.getElementById('obsDrawerTitle');
         const body = document.getElementById('obsDrawerBody');
         title.textContent = streamName;
+        obsDrawerStream = {name: streamName, pubkey: providerPubkey};
         body.innerHTML = '<tr><td colspan="4" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
         drawer.style.display = 'block';
         obsDrawerTab = 'observations';
@@ -1879,18 +1928,22 @@
                     : '<button class="btn btn-sm btn-outline-danger" onclick="networkUnsubscribe(\'' +
                       s.stream_name.replace(/'/g, "\\'") + "', '" +
                       s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Unsubscribe</button>';
+                const isPredStream = s.stream_name.endsWith('_pred');
                 const predictBtn = inactive ? '' : (s.predicting
                     ? '<button class="btn btn-sm btn-outline-warning ms-1" onclick="networkStopPredict(\'' +
                       s.stream_name.replace(/'/g, "\\'") + '\', this)">Stop Predicting</button>'
+                    : isPredStream
+                    ? '<button class="btn btn-sm btn-outline-secondary ms-1" disabled title="Cannot predict on a prediction stream">Predict</button>'
                     : '<button class="btn btn-sm btn-outline-info ms-1" onclick="networkPredict(\'' +
                       s.stream_name.replace(/'/g, "\\'") + "', '" +
                       s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Predict</button>');
-                const nameLink = '<a href="#" style="text-decoration:none" onclick="openObsDrawer(\'' +
-                    s.stream_name.replace(/'/g, "\\'") + "', '" +
-                    s.provider_pubkey.replace(/'/g, "\\'") + '\'); return false;"><strong>' +
-                    (s.name || s.stream_name) + '</strong></a>';
+                row.style.cursor = 'pointer';
+                row.onclick = function(e) {
+                    if (e.target.closest('button')) return;
+                    openObsDrawer(s.stream_name, s.provider_pubkey);
+                };
                 row.innerHTML =
-                    '<td>' + nameLink + '</td>' +
+                    '<td><strong>' + (s.name || s.stream_name) + '</strong></td>' +
                     '<td><small class="text-muted">' + (s.relay_url || '-') + '</small></td>' +
                     '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
                     '<td>' + statusBadge + '</td>' +
@@ -2240,6 +2293,7 @@
     let pubDrawerData = {observations: [], predictions: []};
     let pubDrawerTab = 'observations';
     let pubChart = null;
+    let pubDrawerStream = {name: '', pubkey: ''};
 
     function toggleInactivePubs() {
         showInactivePubs = !showInactivePubs;
@@ -2251,6 +2305,28 @@
     function closePubDrawer() {
         document.getElementById('pubDrawer').style.display = 'none';
         if (pubChart) { pubChart.destroy(); pubChart = null; }
+    }
+
+    async function exportPubCsv() {
+        const {name, pubkey} = pubDrawerStream;
+        if (!name || !pubkey) { alert('No source stream data to export.'); return; }
+        let observations;
+        try {
+            const resp = await fetch('/api/network/observations?stream_name=' +
+                encodeURIComponent(name) + '&provider_pubkey=' +
+                encodeURIComponent(pubkey) + '&limit=10000');
+            const data = await resp.json();
+            observations = data.observations || [];
+        } catch(e) {
+            alert('Failed to fetch data: ' + e.message);
+            return;
+        }
+        if (!observations.length) { alert('No observations to export.'); return; }
+        const blob = new Blob([buildObsCsv(observations)], {type: 'text/csv'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name + '_observations.csv';
+        a.click();
     }
 
     function switchPubTab(tab, link) {
@@ -2386,6 +2462,7 @@
         // For prediction publications, load source stream data
         const srcStream = pub.source_stream_name;
         const srcPubkey = pub.source_provider_pubkey;
+        pubDrawerStream = {name: srcStream || '', pubkey: srcPubkey || ''};
         if (srcStream && srcPubkey) {
             try {
                 const resp = await fetch('/api/network/observations?stream_name=' +

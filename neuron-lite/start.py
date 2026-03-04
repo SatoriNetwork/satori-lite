@@ -479,6 +479,65 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 loop.close()
         threading.Thread(target=run, daemon=True).start()
 
+    def tombstonePublicationSync(self, stream_name: str):
+        """Publish a tombstone (deleted) Kind 34600 announcement for a removed
+        publication to all known relays. Non-blocking — runs in a background thread.
+
+        Replaces the original announcement so other nodes stop discovering the stream.
+        """
+        from satorilib.satori_nostr import SatoriNostrConfig
+        if not hasattr(self, '_networkSecretHex'):
+            return
+        def run():
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    self._tombstoneNow(stream_name, SatoriNostrConfig))
+            finally:
+                loop.close()
+        threading.Thread(target=run, daemon=True).start()
+
+    async def _tombstoneNow(self, stream_name: str, ConfigClass):
+        """Connect to all known relays and publish a tombstone for stream_name."""
+        from satorilib.satori_nostr.models import DatastreamMetadata
+        relay_urls = []
+        try:
+            server_relays = await asyncio.to_thread(self.server.getRelays)
+            relay_urls = [r['relay_url'] for r in server_relays]
+        except Exception:
+            pass
+        db_relays = await asyncio.to_thread(self.networkDB.get_relays)
+        for r in db_relays:
+            if r['relay_url'] not in relay_urls:
+                relay_urls.append(r['relay_url'])
+        # Minimal metadata — only stream_name and nostr_pubkey matter for the tombstone
+        metadata = DatastreamMetadata(
+            stream_name=stream_name,
+            nostr_pubkey=self.nostrPubkey,
+            name='',
+            description='',
+            encrypted=False,
+            price_per_obs=0,
+            created_at=0,
+            cadence_seconds=None,
+            tags=[],
+        )
+        for relay_url in relay_urls:
+            try:
+                client = await self._networkConnect(relay_url, ConfigClass)
+                if not client:
+                    continue
+                await client.announce_datastream(metadata, deleted=True)
+                logging.info(
+                    f'Network: tombstoned {stream_name} on {relay_url}',
+                    color='yellow')
+            except Exception as e:
+                logging.warning(
+                    f'Network: tombstone failed on {relay_url} for {stream_name}: {e}')
+            finally:
+                if relay_url not in self._neededRelays():
+                    await self._networkDisconnect(relay_url)
+
     def publishNowSync(self, stream_name: str, value: str):
         """Connect to all known relays, announce publications, and publish one
         observation. Non-blocking — runs in a background thread.
