@@ -771,12 +771,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from satorilib.satori_nostr import SatoriNostrConfig
         if not hasattr(self, '_networkSecretHex'):
             return []
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(
-                self._networkDiscoverRelay(relay_url, SatoriNostrConfig))
-        finally:
-            loop.close()
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return []
+        future = asyncio.run_coroutine_threadsafe(
+            self._networkDiscoverRelay(relay_url, SatoriNostrConfig), loop)
+        return future.result(timeout=30)
 
     def _neededRelays(self) -> set:
         """Return set of relay URLs that have active subscriptions."""
