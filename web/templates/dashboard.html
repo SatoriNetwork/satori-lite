@@ -1982,13 +1982,16 @@
         for (let i = 1; i < lines.length; i++) {
             if (!lines[i].trim()) continue;
             // Parse CSV respecting quoted fields
-            const vals = lines[i].match(/(".*?"|[^,]*)/g) || [];
+            const vals = [];
+            let cur = '', inQ = false;
+            for (const ch of lines[i]) {
+                if (ch === '"') { inQ = !inQ; }
+                else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
+                else cur += ch;
+            }
+            vals.push(cur.trim());
             const row = {};
-            headerRow.forEach((h, idx) => {
-                let v = (vals[idx] || '').trim();
-                if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
-                row[h] = v;
-            });
+            headerRow.forEach((h, idx) => { row[h] = vals[idx] || ''; });
             if (!row.stream_name) {
                 errors.push('Row ' + (i+1) + ': missing stream_name');
                 continue;
