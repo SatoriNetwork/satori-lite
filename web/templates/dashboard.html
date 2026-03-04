@@ -720,7 +720,10 @@
                         <div class="p-3">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <h6 class="mb-0" id="relayDrawerTitle">Streams</h6>
-                                <button class="btn btn-sm btn-outline-secondary" onclick="closeRelayDrawer()">Close</button>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="refreshRelayDrawer()">Refresh</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="closeRelayDrawer()">Close</button>
+                                </div>
                             </div>
                             <div class="table-responsive">
                                 <table class="table table-sm table-hover mb-0">
@@ -731,6 +734,7 @@
                                             <th>Cadence</th>
                                             <th>Price</th>
                                             <th>Tags</th>
+                                            <th>Publishers</th>
                                             <th></th>
                                         </tr>
                                     </thead>
@@ -2546,6 +2550,12 @@
         document.getElementById('relayDrawer').style.display = 'none';
     }
 
+    function refreshRelayDrawer() {
+        if (!activeRelayDrawerUrl) return;
+        delete cachedStreamsByRelay[activeRelayDrawerUrl];
+        openRelayDrawer(activeRelayDrawerUrl);
+    }
+
     function renderDrawerStreams(streams, relayUrl) {
         const drawer = document.getElementById('relayDrawer');
         const title = document.getElementById('relayDrawerTitle');
@@ -2555,26 +2565,70 @@
         list.innerHTML = '';
 
         const active = streams.filter(s => s.active);
-        if (active.length === 0) {
-            list.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No active streams</td></tr>';
+
+        // Group all publishers by stream_name
+        const groups = new Map();
+        active.forEach(s => {
+            if (!groups.has(s.stream_name)) groups.set(s.stream_name, []);
+            groups.get(s.stream_name).push(s);
+        });
+
+        const score = s => (s.subscribed ? 4 : 0) + (s.is_mine ? 2 : 0) + (s.last_observation_at ? 1 : 0);
+        const grouped = Array.from(groups.entries()).map(([name, pubs]) => ({
+            stream_name: name,
+            rep: pubs.slice().sort((a, b) => score(b) - score(a))[0],
+            pubs,
+        }));
+
+        if (grouped.length === 0) {
+            list.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No active streams</td></tr>';
         } else {
-            active.sort((a, b) => (b.subscribed ? 1 : 0) - (a.subscribed ? 1 : 0));
-            active.forEach(s => {
+            grouped.sort((a, b) => (b.rep.subscribed ? 1 : 0) - (a.rep.subscribed ? 1 : 0));
+            grouped.forEach(g => {
+                const s = g.rep;
                 const tags = (s.tags || []).map(t => '<span class="badge bg-secondary me-1">' + t + '</span>').join('');
                 const row = document.createElement('tr');
                 if (!s.subscribed) row.classList.add('text-muted');
+
+                const pubId = 'pubs-' + s.stream_name.replace(/[^a-z0-9]/gi, '_');
+                const toggleAction = "var el=document.getElementById('" + pubId + "'),open=el.style.display==='none';el.style.display=open?'block':'none';this.textContent=open?'Close':'Subscribe'";
+
                 const btnClass = s.is_mine ? 'btn-outline-secondary' : (s.subscribed ? 'btn-outline-danger' : 'btn-outline-success');
                 const btnText = s.is_mine ? 'Publishing' : (s.subscribed ? 'Unsubscribe' : 'Subscribe');
                 const btnDisabled = s.is_mine ? ' disabled' : '';
-                const btnAction = s.is_mine ? '' : (s.subscribed
-                    ? "networkUnsubscribe('" + s.stream_name.replace(/'/g, "\\'") + "', '" + s.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
-                    : "networkSubscribe(" + JSON.stringify(s).replace(/"/g, '&quot;') + ", this)");
+                const btnAction = g.pubs.length > 1
+                    ? toggleAction
+                    : (s.is_mine ? '' : (s.subscribed
+                        ? "networkUnsubscribe('" + s.stream_name.replace(/'/g, "\\'") + "', '" + s.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
+                        : "networkSubscribe(" + JSON.stringify(s).replace(/"/g, '&quot;') + ", this)"));
+                let pubsCell;
+                if (g.pubs.length === 1) {
+                    pubsCell = '<small class="text-muted font-monospace">' + s.nostr_pubkey.slice(0, 12) + '…</small>' +
+                        (s.last_observation_at ? '<br><small class="text-muted">' + formatTimeAgo(s.last_observation_at) + '</small>' : '');
+                } else {
+                    const pubRows = g.pubs.map(p => {
+                        const pc = p.is_mine ? 'btn-outline-secondary' : (p.subscribed ? 'btn-outline-danger' : 'btn-outline-success');
+                        const pt = p.is_mine ? 'Publishing' : (p.subscribed ? 'Unsubscribe' : 'Subscribe');
+                        const pd = p.is_mine ? ' disabled' : '';
+                        const pa = p.is_mine ? '' : (p.subscribed
+                            ? "networkUnsubscribe('" + p.stream_name.replace(/'/g, "\\'") + "', '" + p.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
+                            : "networkSubscribe(" + JSON.stringify(p).replace(/"/g, '&quot;') + ", this)");
+                        return '<tr><td class="ps-3 font-monospace" style="font-size:0.75em">' + p.nostr_pubkey + '</td>' +
+                            '<td class="text-muted" style="font-size:0.75em">' + (p.last_observation_at ? formatTimeAgo(p.last_observation_at) : '-') + '</td>' +
+                            '<td><button class="btn btn-xs btn-sm ' + pc + '"' + pd + (pa ? ' onclick="' + pa + '"' : '') + '>' + pt + '</button></td></tr>';
+                    }).join('');
+                    pubsCell = '<button class="btn btn-sm btn-outline-secondary btn-xs" onclick="var el=document.getElementById(\'' + pubId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\'">' +
+                        g.pubs.length + ' publishers</button>' +
+                        '<div id="' + pubId + '" style="display:none;margin-top:4px"><table class="table table-sm mb-0">' + pubRows + '</table></div>';
+                }
+
                 row.innerHTML =
                     '<td><strong>' + (s.name || s.stream_name) + '</strong><br><small class="text-muted">' + s.stream_name + '</small></td>' +
                     '<td>' + (s.description || '-') + '</td>' +
                     '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
                     '<td>' + (s.price_per_obs > 0 ? s.price_per_obs + ' sats' : 'Free') + '</td>' +
                     '<td>' + tags + '</td>' +
+                    '<td>' + pubsCell + '</td>' +
                     '<td><button class="btn btn-sm ' + btnClass + '"' + btnDisabled + (btnAction ? ' onclick="' + btnAction + '"' : '') + '>' + btnText + '</button></td>';
                 list.appendChild(row);
             });
@@ -2594,7 +2648,7 @@
         const title = document.getElementById('relayDrawerTitle');
         const list = document.getElementById('relayDrawerStreams');
         title.textContent = relayUrl;
-        list.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Discovering streams...</td></tr>';
+        list.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Discovering streams...</td></tr>';
         drawer.style.display = 'block';
         try {
             const resp = await fetch('/api/network/streams/relay?url=' + encodeURIComponent(relayUrl));
@@ -2602,7 +2656,7 @@
             cachedStreamsByRelay[relayUrl] = data.streams || [];
             renderDrawerStreams(cachedStreamsByRelay[relayUrl], relayUrl);
         } catch (err) {
-            list.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Discovery failed</td></tr>';
+            list.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Discovery failed</td></tr>';
         }
     }
 
@@ -2673,8 +2727,6 @@
 
             relays.forEach(r => {
                 const row = document.createElement('tr');
-                row.style.cursor = 'pointer';
-                row.onclick = function() { openRelayDrawer(r.relay_url); };
                 const sourceBadge = r.source === 'both'
                     ? '<span class="badge bg-info">server + local</span>'
                     : r.source === 'server'
@@ -2688,7 +2740,7 @@
                     '<td>' + formatTimeAgo(r.last_active) + '</td>' +
                     '<td>' + sourceBadge + '</td>' +
                     '<td>' + deleteBtn + '</td>' +
-                    '<td><i class="material-icons align-middle" style="font-size: 18px;">chevron_right</i></td>';
+                    '<td><button class="btn btn-sm btn-outline-primary" onclick="openRelayDrawer(\'' + r.relay_url.replace(/'/g, "\\'") + '\')">Show active streams</button></td>';
                 list.appendChild(row);
             });
         } catch (err) {
