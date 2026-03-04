@@ -191,7 +191,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         # Store the running event loop so sync callers can submit coroutines
         # to it safely via asyncio.run_coroutine_threadsafe().
-        self._networkLoop = asyncio.get_event_loop()
+        self._networkLoop = asyncio.get_running_loop()
 
         # Clear any stale SatoriNostr clients that were bound to a previous
         # (now-dead) event loop.  Keeping them would cause cross-loop
@@ -470,14 +470,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """
         if not hasattr(self, '_networkSecretHex'):
             return
-        loop = asyncio.new_event_loop()
-        def run():
-            try:
-                loop.run_until_complete(
-                    self._networkPublishObservation(stream_name, value))
-            finally:
-                loop.close()
-        threading.Thread(target=run, daemon=True).start()
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            logging.warning('Network: cannot publish — network loop not running')
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._networkPublishObservation(stream_name, value),
+            loop)
 
     def tombstonePublicationSync(self, stream_name: str):
         """Publish a tombstone (deleted) Kind 34600 announcement for a removed
