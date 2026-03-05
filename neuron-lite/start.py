@@ -432,6 +432,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         seq_num = await asyncio.to_thread(
             self.networkDB.mark_published, stream_name)
+        ts = int(time.time())
+        await asyncio.to_thread(
+            self.networkDB.save_observation,
+            stream_name, self.nostrPubkey, str(value), None, seq_num, ts)
         observation = DatastreamObservation(
             stream_name=stream_name,
             timestamp=int(time.time()),

@@ -454,6 +454,7 @@
                                 <tbody id="subsList"></tbody>
                             </table>
                         </div>
+                        <div id="subsPagination" class="px-3 pb-2"></div>
                     </div>
                     <!-- Observations drawer -->
                     <div id="obsDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
@@ -489,6 +490,7 @@
                                     <tbody id="obsDrawerBody"></tbody>
                                 </table>
                             </div>
+                            <div id="obsDrawerPagination" class="pb-1"></div>
                         </div>
                     </div>
                 </div>
@@ -632,6 +634,7 @@
                                 <tbody id="pubsList"></tbody>
                             </table>
                         </div>
+                        <div id="pubsPagination" class="px-3 pb-2"></div>
                     </div>
                     <!-- Publication data drawer -->
                     <div id="pubDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
@@ -646,27 +649,19 @@
                             <div id="pubChartContainer" style="display: none; max-height: 250px; margin-bottom: 12px;">
                                 <canvas id="pubChart"></canvas>
                             </div>
-                            <ul class="nav nav-tabs mb-2" id="pubDrawerTabs">
-                                <li class="nav-item">
-                                    <a class="nav-link active" href="#" onclick="switchPubTab('observations', this); return false;">Observations</a>
-                                </li>
-                                <li class="nav-item">
-                                    <a class="nav-link" href="#" onclick="switchPubTab('predictions', this); return false;">Predictions</a>
-                                </li>
-                            </ul>
                             <div class="table-responsive">
                                 <table class="table table-sm table-hover mb-0">
                                     <thead id="pubDrawerHead">
                                         <tr>
                                             <th>Seq</th>
-                                            <th>Observed At</th>
-                                            <th>Received At</th>
+                                            <th>Published At</th>
                                             <th>Value</th>
                                         </tr>
                                     </thead>
                                     <tbody id="pubDrawerBody"></tbody>
                                 </table>
                             </div>
+                            <div id="pubDrawerPagination" class="pb-1"></div>
                         </div>
                     </div>
                 </div>
@@ -714,6 +709,7 @@
                                 <tbody id="relaysList"></tbody>
                             </table>
                         </div>
+                        <div id="relaysPagination" class="px-3 pb-2"></div>
                     </div>
                     <!-- Streams drawer -->
                     <div id="relayDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
@@ -741,6 +737,7 @@
                                     <tbody id="relayDrawerStreams"></tbody>
                                 </table>
                             </div>
+                            <div id="relayDrawerPagination" class="px-3 pb-2"></div>
                         </div>
                     </div>
                 </div>
@@ -1684,6 +1681,29 @@
     let obsDrawerStream = {name: '', pubkey: ''};
     let obsChart = null;
 
+    const PAGE_SIZE = 10;
+    let subsCurrentPage = 1, subsAllItems = [];
+    let pubsCurrentPage = 1, pubsAllItems = [];
+    let relaysCurrentPage = 1, relaysAllItems = [];
+    let relayStreamsCurrentPage = 1, relayStreamsAllItems = [];
+    let obsObsCurrentPage = 1, obsPredCurrentPage = 1;
+    let pubObsCurrentPage = 1, pubPredCurrentPage = 1;
+
+    function buildPaginationUI(containerId, total, currentPage, pageSize, goToFn) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const totalPages = Math.ceil(total / pageSize);
+        if (totalPages <= 1) { container.innerHTML = ''; return; }
+        let html = '<nav class="mt-2"><ul class="pagination pagination-sm mb-0 justify-content-center">';
+        html += `<li class="page-item${currentPage === 1 ? ' disabled' : ''}"><a class="page-link" href="#" onclick="${goToFn}(${currentPage - 1}); return false;">&laquo;</a></li>`;
+        for (let p = 1; p <= totalPages; p++) {
+            html += `<li class="page-item${p === currentPage ? ' active' : ''}"><a class="page-link" href="#" onclick="${goToFn}(${p}); return false;">${p}</a></li>`;
+        }
+        html += `<li class="page-item${currentPage === totalPages ? ' disabled' : ''}"><a class="page-link" href="#" onclick="${goToFn}(${currentPage + 1}); return false;">&raquo;</a></li>`;
+        html += '</ul></nav>';
+        container.innerHTML = html;
+    }
+
     function closeObsDrawer() {
         document.getElementById('obsDrawer').style.display = 'none';
         if (obsChart) { obsChart.destroy(); obsChart = null; }
@@ -1820,6 +1840,8 @@
         obsDrawerTab = tab;
         document.querySelectorAll('#obsDrawerTabs .nav-link').forEach(l => l.classList.remove('active'));
         link.classList.add('active');
+        if (tab === 'observations') obsObsCurrentPage = 1;
+        else obsPredCurrentPage = 1;
         renderObsDrawer();
     }
 
@@ -1829,10 +1851,12 @@
         body.innerHTML = '';
         if (obsDrawerTab === 'observations') {
             head.innerHTML = '<tr><th>Seq</th><th>Observed At</th><th>Received At</th><th>Value</th></tr>';
-            obsDrawerData.observations.forEach(o => {
+            const allItems = obsDrawerData.observations;
+            const start = (obsObsCurrentPage - 1) * PAGE_SIZE;
+            allItems.slice(start, start + PAGE_SIZE).forEach(o => {
                 const row = document.createElement('tr');
                 let val = o.value || '';
-                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
+                try { const parsed = JSON.parse(val); val = (parsed && typeof parsed === 'object' && parsed.value != null) ? String(parsed.value) : JSON.stringify(parsed); } catch(e) {}
                 if (val.length > 80) val = val.substring(0, 80) + '...';
                 row.innerHTML =
                     '<td>' + (o.seq_num != null ? o.seq_num : '-') + '</td>' +
@@ -1841,12 +1865,18 @@
                     '<td><code>' + val + '</code></td>';
                 body.appendChild(row);
             });
+            if (body.children.length === 0) {
+                body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No data yet.</td></tr>';
+            }
+            buildPaginationUI('obsDrawerPagination', allItems.length, obsObsCurrentPage, PAGE_SIZE, 'goToObsObsPage');
         } else {
             head.innerHTML = '<tr><th>Obs Seq</th><th>Observed At</th><th>Created At</th><th>Value</th><th>Published</th></tr>';
-            obsDrawerData.predictions.forEach(p => {
+            const allItems = obsDrawerData.predictions;
+            const start = (obsPredCurrentPage - 1) * PAGE_SIZE;
+            allItems.slice(start, start + PAGE_SIZE).forEach(p => {
                 const row = document.createElement('tr');
                 let val = p.value || '';
-                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
+                try { const parsed = JSON.parse(val); val = (parsed && typeof parsed === 'object' && parsed.value != null) ? String(parsed.value) : JSON.stringify(parsed); } catch(e) {}
                 if (val.length > 80) val = val.substring(0, 80) + '...';
                 row.innerHTML =
                     '<td>' + (p.observation_seq != null ? p.observation_seq : '-') + '</td>' +
@@ -1856,11 +1886,15 @@
                     '<td>' + (p.published ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>') + '</td>';
                 body.appendChild(row);
             });
-        }
-        if (body.children.length === 0) {
-            body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data yet.</td></tr>';
+            if (body.children.length === 0) {
+                body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data yet.</td></tr>';
+            }
+            buildPaginationUI('obsDrawerPagination', allItems.length, obsPredCurrentPage, PAGE_SIZE, 'goToObsPredPage');
         }
     }
+
+    function goToObsObsPage(p) { obsObsCurrentPage = p; renderObsDrawer(); }
+    function goToObsPredPage(p) { obsPredCurrentPage = p; renderObsDrawer(); }
 
     async function openObsDrawer(streamName, providerPubkey) {
         const drawer = document.getElementById('obsDrawer');
@@ -1871,6 +1905,8 @@
         body.innerHTML = '<tr><td colspan="4" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
         drawer.style.display = 'block';
         obsDrawerTab = 'observations';
+        obsObsCurrentPage = 1;
+        obsPredCurrentPage = 1;
         document.querySelectorAll('#obsDrawerTabs .nav-link').forEach((l, i) =>
             i === 0 ? l.classList.add('active') : l.classList.remove('active'));
         try {
@@ -1891,8 +1927,61 @@
         showInactiveSubs = !showInactiveSubs;
         const btn = document.getElementById('subsToggleInactive');
         btn.textContent = showInactiveSubs ? 'Hide Inactive' : 'Show Inactive';
+        subsCurrentPage = 1;
         loadNetworkSubscriptions();
     }
+
+    function renderSubsPage(page) {
+        subsCurrentPage = page;
+        const list = document.getElementById('subsList');
+        list.innerHTML = '';
+        const start = (page - 1) * PAGE_SIZE;
+        const pageItems = subsAllItems.slice(start, start + PAGE_SIZE);
+        pageItems.forEach(s => {
+            const row = document.createElement('tr');
+            const inactive = s.active === 0;
+            const stale = s.stale_since != null;
+            if (inactive) row.classList.add('text-muted');
+            else if (stale) row.classList.add('text-muted');
+            const statusBadge = inactive
+                ? '<span class="badge bg-secondary">Inactive</span>'
+                : stale
+                    ? '<span class="badge bg-warning text-dark">Stale</span>'
+                    : '<span class="badge bg-success">Active</span>';
+            const actionBtn = inactive
+                ? '<button class="btn btn-sm btn-outline-success" onclick="networkResubscribe(\'' +
+                  s.stream_name.replace(/'/g, "\\'") + "', '" +
+                  s.provider_pubkey.replace(/'/g, "\\'") + "', '" +
+                  (s.relay_url || '').replace(/'/g, "\\'") + '\', this)">Resubscribe</button>'
+                : '<button class="btn btn-sm btn-outline-danger" onclick="networkUnsubscribe(\'' +
+                  s.stream_name.replace(/'/g, "\\'") + "', '" +
+                  s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Unsubscribe</button>';
+            const isPredStream = s.stream_name.endsWith('_pred');
+            const predictBtn = inactive ? '' : (s.predicting
+                ? '<button class="btn btn-sm btn-outline-warning ms-1" onclick="networkStopPredict(\'' +
+                  s.stream_name.replace(/'/g, "\\'") + '\', this)">Stop Predicting</button>'
+                : isPredStream
+                ? '<button class="btn btn-sm btn-outline-secondary ms-1" disabled title="Cannot predict on a prediction stream">Predict</button>'
+                : '<button class="btn btn-sm btn-outline-info ms-1" onclick="networkPredict(\'' +
+                  s.stream_name.replace(/'/g, "\\'") + "', '" +
+                  s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Predict</button>');
+            row.style.cursor = 'pointer';
+            row.onclick = function(e) {
+                if (e.target.closest('button')) return;
+                openObsDrawer(s.stream_name, s.provider_pubkey);
+            };
+            row.innerHTML =
+                '<td><strong>' + (s.name || s.stream_name) + '</strong></td>' +
+                '<td><small class="text-muted">' + (s.relay_url || '-') + '</small></td>' +
+                '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td>' + actionBtn + predictBtn + '</td>';
+            list.appendChild(row);
+        });
+        buildPaginationUI('subsPagination', subsAllItems.length, page, PAGE_SIZE, 'goToSubsPage');
+    }
+
+    function goToSubsPage(p) { renderSubsPage(p); }
 
     async function loadNetworkSubscriptions() {
         try {
@@ -1903,7 +1992,6 @@
             const data = await resp.json();
             const empty = document.getElementById('subsEmpty');
             const table = document.getElementById('subsTable');
-            const list = document.getElementById('subsList');
 
             if (!data.subscriptions || data.subscriptions.length === 0) {
                 empty.style.display = 'block';
@@ -1912,48 +2000,8 @@
             }
             empty.style.display = 'none';
             table.style.display = 'block';
-            list.innerHTML = '';
-            data.subscriptions.forEach(s => {
-                const row = document.createElement('tr');
-                const inactive = s.active === 0;
-                const stale = s.stale_since != null;
-                if (inactive) row.classList.add('text-muted');
-                else if (stale) row.classList.add('text-muted');
-                const statusBadge = inactive
-                    ? '<span class="badge bg-secondary">Inactive</span>'
-                    : stale
-                        ? '<span class="badge bg-warning text-dark">Stale</span>'
-                        : '<span class="badge bg-success">Active</span>';
-                const actionBtn = inactive
-                    ? '<button class="btn btn-sm btn-outline-success" onclick="networkResubscribe(\'' +
-                      s.stream_name.replace(/'/g, "\\'") + "', '" +
-                      s.provider_pubkey.replace(/'/g, "\\'") + "', '" +
-                      (s.relay_url || '').replace(/'/g, "\\'") + '\', this)">Resubscribe</button>'
-                    : '<button class="btn btn-sm btn-outline-danger" onclick="networkUnsubscribe(\'' +
-                      s.stream_name.replace(/'/g, "\\'") + "', '" +
-                      s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Unsubscribe</button>';
-                const isPredStream = s.stream_name.endsWith('_pred');
-                const predictBtn = inactive ? '' : (s.predicting
-                    ? '<button class="btn btn-sm btn-outline-warning ms-1" onclick="networkStopPredict(\'' +
-                      s.stream_name.replace(/'/g, "\\'") + '\', this)">Stop Predicting</button>'
-                    : isPredStream
-                    ? '<button class="btn btn-sm btn-outline-secondary ms-1" disabled title="Cannot predict on a prediction stream">Predict</button>'
-                    : '<button class="btn btn-sm btn-outline-info ms-1" onclick="networkPredict(\'' +
-                      s.stream_name.replace(/'/g, "\\'") + "', '" +
-                      s.provider_pubkey.replace(/'/g, "\\'") + '\', this)">Predict</button>');
-                row.style.cursor = 'pointer';
-                row.onclick = function(e) {
-                    if (e.target.closest('button')) return;
-                    openObsDrawer(s.stream_name, s.provider_pubkey);
-                };
-                row.innerHTML =
-                    '<td><strong>' + (s.name || s.stream_name) + '</strong></td>' +
-                    '<td><small class="text-muted">' + (s.relay_url || '-') + '</small></td>' +
-                    '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + actionBtn + predictBtn + '</td>';
-                list.appendChild(row);
-            });
+            subsAllItems = data.subscriptions;
+            renderSubsPage(subsCurrentPage);
         } catch (err) { /* ignore */ }
     }
 
@@ -2306,6 +2354,7 @@
         showInactivePubs = !showInactivePubs;
         const btn = document.getElementById('pubsToggleInactive');
         btn.textContent = showInactivePubs ? 'Hide Inactive' : 'Show Inactive';
+        pubsCurrentPage = 1;
         loadPublications();
     }
 
@@ -2336,51 +2385,31 @@
         a.click();
     }
 
-    function switchPubTab(tab, link) {
-        pubDrawerTab = tab;
-        document.querySelectorAll('#pubDrawerTabs .nav-link').forEach(l => l.classList.remove('active'));
-        link.classList.add('active');
-        renderPubDrawerTable();
-    }
-
     function renderPubDrawerTable() {
         const head = document.getElementById('pubDrawerHead');
         const body = document.getElementById('pubDrawerBody');
         body.innerHTML = '';
-        if (pubDrawerTab === 'observations') {
-            head.innerHTML = '<tr><th>Seq</th><th>Observed At</th><th>Received At</th><th>Value</th></tr>';
-            pubDrawerData.observations.forEach(o => {
-                const row = document.createElement('tr');
-                let val = o.value || '';
-                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
-                if (val.length > 80) val = val.substring(0, 80) + '...';
-                row.innerHTML =
-                    '<td>' + (o.seq_num != null ? o.seq_num : '-') + '</td>' +
-                    '<td>' + (o.observed_at ? formatTimeAgo(o.observed_at) : '-') + '</td>' +
-                    '<td>' + formatTimeAgo(o.received_at) + '</td>' +
-                    '<td><code>' + val + '</code></td>';
-                body.appendChild(row);
-            });
-        } else {
-            head.innerHTML = '<tr><th>Obs Seq</th><th>Observed At</th><th>Created At</th><th>Value</th><th>Published</th></tr>';
-            pubDrawerData.predictions.forEach(p => {
-                const row = document.createElement('tr');
-                let val = p.value || '';
-                try { val = JSON.stringify(JSON.parse(val)); } catch(e) {}
-                if (val.length > 80) val = val.substring(0, 80) + '...';
-                row.innerHTML =
-                    '<td>' + (p.observation_seq != null ? p.observation_seq : '-') + '</td>' +
-                    '<td>' + (p.observed_at ? formatTimeAgo(p.observed_at) : '-') + '</td>' +
-                    '<td>' + formatTimeAgo(p.created_at) + '</td>' +
-                    '<td><code>' + val + '</code></td>' +
-                    '<td>' + (p.published ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>') + '</td>';
-                body.appendChild(row);
-            });
-        }
+        head.innerHTML = '<tr><th>Seq</th><th>Published At</th><th>Value</th></tr>';
+        const allItems = pubDrawerData.observations;
+        const start = (pubObsCurrentPage - 1) * PAGE_SIZE;
+        allItems.slice(start, start + PAGE_SIZE).forEach(o => {
+            const row = document.createElement('tr');
+            let val = o.value || '';
+            try { const parsed = JSON.parse(val); val = (parsed && typeof parsed === 'object' && parsed.value != null) ? String(parsed.value) : JSON.stringify(parsed); } catch(e) {}
+            if (val.length > 80) val = val.substring(0, 80) + '...';
+            row.innerHTML =
+                '<td>' + (o.seq_num != null ? o.seq_num : '-') + '</td>' +
+                '<td>' + formatTimeAgo(o.observed_at || o.received_at) + '</td>' +
+                '<td><code>' + val + '</code></td>';
+            body.appendChild(row);
+        });
         if (body.children.length === 0) {
-            body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data yet.</td></tr>';
+            body.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No data yet.</td></tr>';
         }
+        buildPaginationUI('pubDrawerPagination', allItems.length, pubObsCurrentPage, PAGE_SIZE, 'goToPubObsPage');
     }
+
+    function goToPubObsPage(p) { pubObsCurrentPage = p; renderPubDrawerTable(); }
 
     function renderPubChart() {
         const container = document.getElementById('pubChartContainer');
@@ -2452,39 +2481,63 @@
     }
 
     async function openPubDrawer(pub) {
-        // If this is a data source publication (not a prediction), open edit form
-        if (!pub.source_stream_name) {
-            const opened = await editDataSource(pub.stream_name);
-            if (opened) return;
-        }
         const drawer = document.getElementById('pubDrawer');
         const title = document.getElementById('pubDrawerTitle');
         const body = document.getElementById('pubDrawerBody');
         title.textContent = pub.stream_name;
-        body.innerHTML = '<tr><td colspan="4" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
+        body.innerHTML = '<tr><td colspan="3" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
         drawer.style.display = 'block';
-        pubDrawerTab = 'observations';
-        document.querySelectorAll('#pubDrawerTabs .nav-link').forEach((l, i) =>
-            i === 0 ? l.classList.add('active') : l.classList.remove('active'));
-        // For prediction publications, load source stream data
-        const srcStream = pub.source_stream_name;
-        const srcPubkey = pub.source_provider_pubkey;
-        pubDrawerStream = {name: srcStream || '', pubkey: srcPubkey || ''};
-        if (srcStream && srcPubkey) {
-            try {
-                const resp = await fetch('/api/network/observations?stream_name=' +
-                    encodeURIComponent(srcStream) + '&provider_pubkey=' +
-                    encodeURIComponent(srcPubkey));
-                pubDrawerData = await resp.json();
-            } catch(e) {
-                pubDrawerData = {observations: [], predictions: []};
-            }
-        } else {
+        pubObsCurrentPage = 1;
+        const streamName = pub.stream_name;
+        const pubkey = document.getElementById('nostrPubkey').value;
+        pubDrawerStream = {name: streamName, pubkey: pubkey};
+        try {
+            const resp = await fetch('/api/network/observations?stream_name=' +
+                encodeURIComponent(streamName) + '&provider_pubkey=' +
+                encodeURIComponent(pubkey));
+            pubDrawerData = await resp.json();
+        } catch(e) {
             pubDrawerData = {observations: [], predictions: []};
         }
         renderPubChart();
         renderPubDrawerTable();
     }
+
+    function renderPubsPage(page) {
+        pubsCurrentPage = page;
+        const list = document.getElementById('pubsList');
+        list.innerHTML = '';
+        const start = (page - 1) * PAGE_SIZE;
+        const pageItems = pubsAllItems.slice(start, start + PAGE_SIZE);
+        pageItems.forEach(p => {
+            const row = document.createElement('tr');
+            const inactive = p.active === 0;
+            if (inactive) row.classList.add('text-muted');
+            const statusBadge = inactive
+                ? '<span class="badge bg-secondary">Inactive</span>'
+                : '<span class="badge bg-success">Active</span>';
+            const source = p.source_stream_name
+                ? '<small class="text-muted">' + p.source_stream_name + '</small>'
+                : '<span class="badge bg-info">Original</span>';
+            const actionBtn = inactive
+                ? ''
+                : '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); stopPublication(\'' +
+                  p.stream_name.replace(/'/g, "\\'") + '\', this)">Stop</button>';
+            row.style.cursor = 'pointer';
+            row.onclick = function() { openPubDrawer(p); };
+            row.innerHTML =
+                '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
+                '<td>' + source + '</td>' +
+                '<td>' + formatCadence(p.cadence_seconds) + '</td>' +
+                '<td>' + (p.last_seq_num || 0) + '</td>' +
+                '<td>' + statusBadge + '</td>' +
+                '<td>' + actionBtn + '</td>';
+            list.appendChild(row);
+        });
+        buildPaginationUI('pubsPagination', pubsAllItems.length, page, PAGE_SIZE, 'goToPubsPage');
+    }
+
+    function goToPubsPage(p) { renderPubsPage(p); }
 
     async function loadPublications() {
         try {
@@ -2495,7 +2548,6 @@
             const data = await resp.json();
             const empty = document.getElementById('pubsEmpty');
             const table = document.getElementById('pubsTable');
-            const list = document.getElementById('pubsList');
 
             if (!data.publications || data.publications.length === 0) {
                 empty.style.display = 'block';
@@ -2504,34 +2556,8 @@
             }
             empty.style.display = 'none';
             table.style.display = 'block';
-            list.innerHTML = '';
-            data.publications.forEach((p, idx) => {
-                const row = document.createElement('tr');
-                const inactive = p.active === 0;
-                if (inactive) row.classList.add('text-muted');
-                const statusBadge = inactive
-                    ? '<span class="badge bg-secondary">Inactive</span>'
-                    : '<span class="badge bg-success">Active</span>';
-                const source = p.source_stream_name
-                    ? '<small class="text-muted">' + p.source_stream_name + '</small>'
-                    : '<span class="badge bg-info">Original</span>';
-                const actionBtn = inactive
-                    ? ''
-                    : '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); stopPublication(\'' +
-                      p.stream_name.replace(/'/g, "\\'") + '\', this)">Stop</button>';
-                // Store pub data for drawer click
-                row.dataset.pubIdx = idx;
-                row.style.cursor = 'pointer';
-                row.onclick = function() { openPubDrawer(data.publications[idx]); };
-                row.innerHTML =
-                    '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
-                    '<td>' + source + '</td>' +
-                    '<td>' + formatCadence(p.cadence_seconds) + '</td>' +
-                    '<td>' + (p.last_seq_num || 0) + '</td>' +
-                    '<td>' + statusBadge + '</td>' +
-                    '<td>' + actionBtn + '</td>';
-                list.appendChild(row);
-            });
+            pubsAllItems = data.publications;
+            renderPubsPage(pubsCurrentPage);
         } catch (err) { /* ignore */ }
     }
 
@@ -2559,35 +2585,16 @@
         openRelayDrawer(activeRelayDrawerUrl);
     }
 
-    function renderDrawerStreams(streams, relayUrl) {
-        const drawer = document.getElementById('relayDrawer');
-        const title = document.getElementById('relayDrawerTitle');
+    function renderRelayStreamsPage(page) {
+        relayStreamsCurrentPage = page;
         const list = document.getElementById('relayDrawerStreams');
-
-        title.textContent = relayUrl;
         list.innerHTML = '';
-
-        const active = streams.filter(s => s.active);
-
-        // Group all publishers by stream_name
-        const groups = new Map();
-        active.forEach(s => {
-            if (!groups.has(s.stream_name)) groups.set(s.stream_name, []);
-            groups.get(s.stream_name).push(s);
-        });
-
-        const score = s => (s.subscribed ? 4 : 0) + (s.is_mine ? 2 : 0) + (s.last_observation_at ? 1 : 0);
-        const grouped = Array.from(groups.entries()).map(([name, pubs]) => ({
-            stream_name: name,
-            rep: pubs.slice().sort((a, b) => score(b) - score(a))[0],
-            pubs,
-        }));
-
-        if (grouped.length === 0) {
+        const start = (page - 1) * PAGE_SIZE;
+        const pageItems = relayStreamsAllItems.slice(start, start + PAGE_SIZE);
+        if (pageItems.length === 0) {
             list.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No active streams</td></tr>';
         } else {
-            grouped.sort((a, b) => (b.rep.subscribed ? 1 : 0) - (a.rep.subscribed ? 1 : 0));
-            grouped.forEach(g => {
+            pageItems.forEach(g => {
                 const s = g.rep;
                 const tags = (s.tags || []).map(t => '<span class="badge bg-secondary me-1">' + t + '</span>').join('');
                 const row = document.createElement('tr');
@@ -2636,6 +2643,36 @@
                 list.appendChild(row);
             });
         }
+        buildPaginationUI('relayDrawerPagination', relayStreamsAllItems.length, page, PAGE_SIZE, 'goToRelayStreamsPage');
+    }
+
+    function goToRelayStreamsPage(p) { renderRelayStreamsPage(p); }
+
+    function renderDrawerStreams(streams, relayUrl) {
+        const drawer = document.getElementById('relayDrawer');
+        const title = document.getElementById('relayDrawerTitle');
+        title.textContent = relayUrl;
+
+        const active = streams.filter(s => s.active);
+
+        // Group all publishers by stream_name
+        const groups = new Map();
+        active.forEach(s => {
+            if (!groups.has(s.stream_name)) groups.set(s.stream_name, []);
+            groups.get(s.stream_name).push(s);
+        });
+
+        const score = s => (s.subscribed ? 4 : 0) + (s.is_mine ? 2 : 0) + (s.last_observation_at ? 1 : 0);
+        const grouped = Array.from(groups.entries()).map(([name, pubs]) => ({
+            stream_name: name,
+            rep: pubs.slice().sort((a, b) => score(b) - score(a))[0],
+            pubs,
+        }));
+        grouped.sort((a, b) => (b.rep.subscribed ? 1 : 0) - (a.rep.subscribed ? 1 : 0));
+
+        relayStreamsAllItems = grouped;
+        relayStreamsCurrentPage = 1;
+        renderRelayStreamsPage(1);
         drawer.style.display = 'block';
     }
 
@@ -2702,6 +2739,35 @@
         loadRelays();
     }
 
+    function renderRelaysPage(page) {
+        relaysCurrentPage = page;
+        const list = document.getElementById('relaysList');
+        list.innerHTML = '';
+        const start = (page - 1) * PAGE_SIZE;
+        const pageItems = relaysAllItems.slice(start, start + PAGE_SIZE);
+        pageItems.forEach(r => {
+            const row = document.createElement('tr');
+            const sourceBadge = r.source === 'both'
+                ? '<span class="badge bg-info">server + local</span>'
+                : r.source === 'server'
+                    ? '<span class="badge bg-secondary">server</span>'
+                    : '<span class="badge bg-outline-secondary border">local</span>';
+            const deleteBtn = r.source !== 'server'
+                ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')"><i class="material-icons align-middle" style="font-size: 16px;">delete</i></button>'
+                : '';
+            row.innerHTML =
+                '<td>' + r.relay_url + '</td>' +
+                '<td>' + formatTimeAgo(r.last_active) + '</td>' +
+                '<td>' + sourceBadge + '</td>' +
+                '<td>' + deleteBtn + '</td>' +
+                '<td><button class="btn btn-sm btn-outline-primary" onclick="openRelayDrawer(\'' + r.relay_url.replace(/'/g, "\\'") + '\')">Show active streams</button></td>';
+            list.appendChild(row);
+        });
+        buildPaginationUI('relaysPagination', relaysAllItems.length, page, PAGE_SIZE, 'goToRelaysPage');
+    }
+
+    function goToRelaysPage(p) { renderRelaysPage(p); }
+
     async function loadRelays() {
         try {
             const resp = await fetch('/api/network/relays');
@@ -2710,7 +2776,6 @@
             const loading = document.getElementById('relaysLoading');
             const empty = document.getElementById('relaysEmpty');
             const table = document.getElementById('relaysTable');
-            const list = document.getElementById('relaysList');
             const status = document.getElementById('networkStatus');
 
             loading.style.display = 'none';
@@ -2726,26 +2791,8 @@
 
             empty.style.display = 'none';
             table.style.display = 'block';
-            list.innerHTML = '';
-
-            relays.forEach(r => {
-                const row = document.createElement('tr');
-                const sourceBadge = r.source === 'both'
-                    ? '<span class="badge bg-info">server + local</span>'
-                    : r.source === 'server'
-                        ? '<span class="badge bg-secondary">server</span>'
-                        : '<span class="badge bg-outline-secondary border">local</span>';
-                const deleteBtn = r.source !== 'server'
-                    ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')"><i class="material-icons align-middle" style="font-size: 16px;">delete</i></button>'
-                    : '';
-                row.innerHTML =
-                    '<td>' + r.relay_url + '</td>' +
-                    '<td>' + formatTimeAgo(r.last_active) + '</td>' +
-                    '<td>' + sourceBadge + '</td>' +
-                    '<td>' + deleteBtn + '</td>' +
-                    '<td><button class="btn btn-sm btn-outline-primary" onclick="openRelayDrawer(\'' + r.relay_url.replace(/'/g, "\\'") + '\')">Show active streams</button></td>';
-                list.appendChild(row);
-            });
+            relaysAllItems = relays;
+            renderRelaysPage(relaysCurrentPage);
         } catch (err) {
             document.getElementById('relaysLoading').textContent = 'Error loading relays';
             document.getElementById('networkStatus').className = 'badge bg-danger';

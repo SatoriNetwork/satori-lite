@@ -278,12 +278,18 @@ class NetworkDB:
     def save_observation(self, stream_name: str, provider_pubkey: str,
                          value: str = None, event_id: str = None,
                          seq_num: int = None, observed_at: int = None):
-        """Record a received observation. Skips if event_id already exists."""
+        """Record a received observation. Skips duplicates by event_id or seq_num."""
         conn = self._get_conn()
         if event_id:
             existing = conn.execute(
                 "SELECT 1 FROM observations WHERE event_id = ?",
                 (event_id,)).fetchone()
+            if existing:
+                return
+        if seq_num is not None:
+            existing = conn.execute(
+                "SELECT 1 FROM observations WHERE stream_name = ? AND provider_pubkey = ? AND seq_num = ?",
+                (stream_name, provider_pubkey, seq_num)).fetchone()
             if existing:
                 return
         conn.execute("""
