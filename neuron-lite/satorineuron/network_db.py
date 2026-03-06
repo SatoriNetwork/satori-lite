@@ -277,21 +277,22 @@ class NetworkDB:
 
     def save_observation(self, stream_name: str, provider_pubkey: str,
                          value: str = None, event_id: str = None,
-                         seq_num: int = None, observed_at: int = None):
-        """Record a received observation. Skips duplicates by event_id or seq_num."""
+                         seq_num: int = None, observed_at: int = None) -> bool:
+        """Record a received observation. Skips duplicates by event_id or seq_num.
+        Returns True if a new row was inserted, False if skipped as duplicate."""
         conn = self._get_conn()
         if event_id:
             existing = conn.execute(
                 "SELECT 1 FROM observations WHERE event_id = ?",
                 (event_id,)).fetchone()
             if existing:
-                return
+                return False
         if seq_num is not None:
             existing = conn.execute(
                 "SELECT 1 FROM observations WHERE stream_name = ? AND provider_pubkey = ? AND seq_num = ?",
                 (stream_name, provider_pubkey, seq_num)).fetchone()
             if existing:
-                return
+                return False
         conn.execute("""
             INSERT INTO observations
                 (stream_name, provider_pubkey, seq_num, observed_at,
@@ -300,6 +301,7 @@ class NetworkDB:
         """, (stream_name, provider_pubkey, seq_num, observed_at,
               int(time.time()), value, event_id))
         conn.commit()
+        return True
 
     def get_observations(self, stream_name: str, provider_pubkey: str,
                          limit: int = 50) -> list[dict]:

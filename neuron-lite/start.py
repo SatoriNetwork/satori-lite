@@ -283,7 +283,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """
         obs_json = (obs.observation.to_json()
                     if obs.observation else None)
-        await asyncio.to_thread(
+        is_new = await asyncio.to_thread(
             self.networkDB.save_observation,
             obs.stream_name,
             obs.nostr_pubkey,
@@ -291,8 +291,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             obs.event_id,
             obs.observation.seq_num if obs.observation else None,
             obs.observation.timestamp if obs.observation else None)
-        # Run engine only if we're predicting this stream
-        if obs.observation:
+        # Run engine only if this is a new observation (not a duplicate)
+        if is_new and obs.observation:
             predicting = await asyncio.to_thread(
                 self.networkDB.is_predicting,
                 obs.stream_name, obs.nostr_pubkey)
