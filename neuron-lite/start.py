@@ -551,13 +551,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from satorilib.satori_nostr import SatoriNostrConfig
         if not hasattr(self, '_networkSecretHex'):
             return
+        loop = getattr(self, '_networkLoop', None)
+        if loop and not loop.is_closed():
+            asyncio.run_coroutine_threadsafe(
+                self._publishNow(stream_name, value, SatoriNostrConfig),
+                loop)
+            return
         def run():
-            loop = asyncio.new_event_loop()
+            new_loop = asyncio.new_event_loop()
             try:
-                loop.run_until_complete(
+                new_loop.run_until_complete(
                     self._publishNow(stream_name, value, SatoriNostrConfig))
             finally:
-                loop.close()
+                new_loop.close()
         threading.Thread(target=run, daemon=True).start()
 
     async def _publishNow(self, stream_name: str, value: str, ConfigClass):

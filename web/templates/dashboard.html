@@ -2026,6 +2026,11 @@
         if (lines.length < 2) { alert('CSV must have a header and at least one row'); return; }
         const headerRow = lines[0].split(',').map(h => h.trim().toLowerCase());
         if (!headerRow.includes('stream_name')) { alert('Missing required column: stream_name'); return; }
+        const dataRows = lines.slice(1).filter(l => l.trim()).length;
+        if (dataRows > 30) {
+            alert(`CSV contains ${dataRows} streams. Maximum allowed is 30. Please split into smaller files.`);
+            return;
+        }
         let created = 0, errors = [];
         for (let i = 1; i < lines.length; i++) {
             if (!lines[i].trim()) continue;
@@ -2076,6 +2081,7 @@
             } catch(e) {
                 errors.push('Row ' + (i+1) + ': ' + e.message);
             }
+            await new Promise(resolve => setTimeout(resolve, 300));
         }
         let msg = created + ' data source(s) created.';
         if (errors.length) msg += '\n\nErrors:\n' + errors.join('\n');
