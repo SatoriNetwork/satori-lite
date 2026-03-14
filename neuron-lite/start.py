@@ -346,14 +346,30 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     async def _networkRunEngine(self, stream_name: str, provider_pubkey: str,
                                 observation):
-        """Mock engine: echo the observation value as a prediction.
+        """Lite engine: predict from recent observations, echo fallback.
 
         Saves to predictions table, then publishes to the network
         on the corresponding _pred publication stream.
         """
         import json
-        value = observation.value
-        value_str = json.dumps(value) if not isinstance(value, str) else value
+        from satorineuron.lite_engine import LiteEngine
+
+        # Fetch recent observations and run lite prediction
+        observations = await asyncio.to_thread(
+            self.networkDB.get_observations,
+            stream_name, provider_pubkey, limit=30)
+        prediction = LiteEngine().predict(observations)
+
+        if prediction is not None:
+            value_str = prediction
+            method = 'lite'
+        else:
+            # Fallback to echo for non-numeric data
+            value = observation.value
+            value_str = json.dumps(value) if not isinstance(
+                value, str) else value
+            method = 'echo'
+
         try:
             pred_id = await asyncio.to_thread(
                 self.networkDB.save_prediction,
@@ -364,10 +380,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 observed_at=observation.timestamp)
             logging.info(
                 f'Network: prediction #{pred_id} for {stream_name} '
-                f'(echo)', color='cyan')
+                f'({method})', color='cyan')
             # Publish prediction to all connected relays
             pred_stream = stream_name + '_pred'
-            await self._networkPublishObservation(pred_stream, value)
+            await self._networkPublishObservation(pred_stream, value_str)
             await asyncio.to_thread(
                 self.networkDB.mark_prediction_published, pred_id)
         except Exception as e:
