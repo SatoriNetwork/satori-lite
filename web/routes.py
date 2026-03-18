@@ -270,7 +270,7 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
             resp = requests.get(
                 f"{api_url}/api/v1/peer/login",
                 headers=headers,
-                timeout=10
+                timeout=15
             )
 
             if resp.status_code == 200:
@@ -292,7 +292,7 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
             resp = requests.post(
                 f"{api_url}/api/v1/peer/register",
                 headers=headers,
-                timeout=10
+                timeout=15
             )
 
             if resp.status_code == 200:
@@ -410,7 +410,7 @@ def register_routes(app):
                             # Register peer with API server (non-blocking)
                             try:
                                 peer_info = ensure_peer_registered(
-                                    current_app, wallet_manager, max_retries=1)
+                                    current_app, wallet_manager, max_retries=2)
                                 if peer_info:
                                     session['peer_id'] = peer_info.get('peer_id')
                                     logger.info(f"Auto-login successful, peer registered: {peer_info}")
@@ -457,7 +457,7 @@ def register_routes(app):
                         # Register peer with API server (non-blocking)
                         try:
                             peer_info = ensure_peer_registered(
-                                current_app, wallet_manager, max_retries=1)
+                                current_app, wallet_manager, max_retries=2)
                             if peer_info:
                                 session['peer_id'] = peer_info.get('peer_id')
                                 logger.info(f"Peer registered: {peer_info}")
@@ -831,70 +831,93 @@ def register_routes(app):
 
                 now = datetime.now()
 
-                # If no token or expired, perform JWT login
+                # If no token or expired, perform JWT login with retry
                 if not access_token or not token_expiry or now >= token_expiry:
                     logger.info("JWT token missing or expired, performing login")
 
-                    # Generate challenge (timestamp)
-                    challenge = str(time.time())
+                    login_success = False
+                    max_attempts = 2
+                    for attempt in range(max_attempts):
+                        try:
+                            # Generate challenge (timestamp)
+                            challenge = str(time.time())
 
-                    # Sign with wallet
-                    signature = wallet.sign(message=challenge)
-                    if isinstance(signature, bytes):
-                        signature = signature.decode('utf-8')
+                            # Sign with wallet
+                            signature = wallet.sign(message=challenge)
+                            if isinstance(signature, bytes):
+                                signature = signature.decode('utf-8')
 
-                    # Call JWT login endpoint
-                    resp = requests.post(
-                        f"{api_url}/api/v1/auth/login",
-                        headers={
-                            'wallet-pubkey': wallet.pubkey,
-                            'message': challenge,
-                            'signature': signature
-                        },
-                        timeout=10
-                    )
+                            # Call JWT login endpoint
+                            resp = requests.post(
+                                f"{api_url}/api/v1/auth/login",
+                                headers={
+                                    'wallet-pubkey': wallet.pubkey,
+                                    'message': challenge,
+                                    'signature': signature
+                                },
+                                timeout=15
+                            )
 
-                    if resp.status_code != 200:
-                        logger.warning(f"JWT login failed: {resp.text}")
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                access_token = data['access_token']
+                                refresh_token = data['refresh_token']
+                                expires_in = data['expires_in']
+
+                                # Store tokens in session
+                                session['access_token'] = access_token
+                                session['refresh_token'] = refresh_token
+                                session['token_expiry'] = (now + timedelta(seconds=expires_in)).isoformat()
+
+                                logger.info("JWT login successful")
+                                login_success = True
+                                break
+                            else:
+                                logger.warning(f"JWT login failed: {resp.text}")
+                        except requests.RequestException as e:
+                            logger.warning(f"JWT login attempt {attempt + 1}/{max_attempts} failed: {e}")
+                            if attempt < max_attempts - 1:
+                                time.sleep(3)
+
+                    if not login_success:
+                        logger.error("JWT login failed after all retries")
                         return None
-
-                    data = resp.json()
-                    access_token = data['access_token']
-                    refresh_token = data['refresh_token']
-                    expires_in = data['expires_in']
-
-                    # Store tokens in session
-                    session['access_token'] = access_token
-                    session['refresh_token'] = refresh_token
-                    session['token_expiry'] = (now + timedelta(seconds=expires_in)).isoformat()
-
-                    logger.info("JWT login successful")
 
                 # Token expiring soon (within 5 minutes)? Refresh it
                 elif now >= (token_expiry - timedelta(minutes=5)) and refresh_token:
                     logger.info("JWT token expiring soon, refreshing")
 
-                    try:
-                        resp = requests.post(
-                            f"{api_url}/api/v1/auth/refresh",
-                            headers={'Authorization': f'Bearer {refresh_token}'},
-                            timeout=10
-                        )
+                    refresh_success = False
+                    max_attempts = 2
+                    for attempt in range(max_attempts):
+                        try:
+                            resp = requests.post(
+                                f"{api_url}/api/v1/auth/refresh",
+                                headers={'Authorization': f'Bearer {refresh_token}'},
+                                timeout=15
+                            )
 
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            access_token = data['access_token']
-                            expires_in = data['expires_in']
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                access_token = data['access_token']
+                                expires_in = data['expires_in']
 
-                            # Update session with new token
-                            session['access_token'] = access_token
-                            session['token_expiry'] = (now + timedelta(seconds=expires_in)).isoformat()
+                                # Update session with new token
+                                session['access_token'] = access_token
+                                session['token_expiry'] = (now + timedelta(seconds=expires_in)).isoformat()
 
-                            logger.info("JWT token refreshed successfully")
-                        else:
-                            logger.warning(f"JWT refresh failed: {resp.text}")
-                    except Exception as e:
-                        logger.warning(f"JWT refresh failed: {e}")
+                                logger.info("JWT token refreshed successfully")
+                                refresh_success = True
+                                break
+                            else:
+                                logger.warning(f"JWT refresh failed: {resp.text}")
+                        except requests.RequestException as e:
+                            logger.warning(f"JWT refresh attempt {attempt + 1}/{max_attempts} failed: {e}")
+                            if attempt < max_attempts - 1:
+                                time.sleep(3)
+
+                    if not refresh_success:
+                        logger.warning("JWT refresh failed after retries, using existing token")
 
                 # Return JWT Bearer token header
                 return {
