@@ -26,19 +26,20 @@ class NetworkDB:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                stream_name TEXT NOT NULL,
-                relay_url TEXT NOT NULL,
-                provider_pubkey TEXT NOT NULL,
-                name TEXT,
-                description TEXT,
-                cadence_seconds INTEGER,
-                price_per_obs INTEGER DEFAULT 0,
-                encrypted INTEGER DEFAULT 0,
-                tags TEXT,
-                active INTEGER DEFAULT 1,
-                subscribed_at INTEGER NOT NULL,
-                unsubscribed_at INTEGER,
-                stale_since INTEGER,
+                stream_name          TEXT NOT NULL,
+                relay_url            TEXT NOT NULL,
+                provider_pubkey      TEXT NOT NULL,
+                provider_wallet_pubkey TEXT,
+                name                 TEXT,
+                description          TEXT,
+                cadence_seconds      INTEGER,
+                price_per_obs        INTEGER DEFAULT 0,
+                encrypted            INTEGER DEFAULT 0,
+                tags                 TEXT,
+                active               INTEGER DEFAULT 1,
+                subscribed_at        INTEGER NOT NULL,
+                unsubscribed_at      INTEGER,
+                stale_since          INTEGER,
                 UNIQUE(stream_name, provider_pubkey)
             )
         """)
@@ -122,6 +123,14 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN stale_since INTEGER")
+        # Migration: add provider_wallet_pubkey if missing (existing DBs)
+        try:
+            conn.execute(
+                "SELECT provider_wallet_pubkey FROM subscriptions LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE subscriptions "
+                "ADD COLUMN provider_wallet_pubkey TEXT")
         # Migration: add last_seq_num if missing (existing DBs)
         try:
             conn.execute("SELECT last_seq_num FROM publications LIMIT 1")
@@ -189,15 +198,18 @@ class NetworkDB:
         """Subscribe to a stream. Returns row id."""
         conn = self._get_conn()
         tags = ','.join(stream.get('tags', []))
+        wallet_pubkey = (stream.get('metadata') or {}).get('wallet_pubkey')
         conn.execute("""
             INSERT INTO subscriptions
-                (stream_name, relay_url, provider_pubkey, name, description,
-                 cadence_seconds, price_per_obs, encrypted, tags, active,
-                 subscribed_at, stale_since)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL)
+                (stream_name, relay_url, provider_pubkey, provider_wallet_pubkey,
+                 name, description, cadence_seconds, price_per_obs, encrypted,
+                 tags, active, subscribed_at, stale_since)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL)
             ON CONFLICT(stream_name, provider_pubkey) DO UPDATE SET
                 active = 1,
                 relay_url = excluded.relay_url,
+                provider_wallet_pubkey = COALESCE(excluded.provider_wallet_pubkey,
+                                                   provider_wallet_pubkey),
                 name = excluded.name,
                 description = excluded.description,
                 cadence_seconds = excluded.cadence_seconds,
@@ -211,6 +223,7 @@ class NetworkDB:
             stream['stream_name'],
             relay_url,
             stream['nostr_pubkey'],
+            wallet_pubkey,
             stream.get('name', ''),
             stream.get('description', ''),
             stream.get('cadence_seconds'),

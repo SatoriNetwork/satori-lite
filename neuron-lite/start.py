@@ -72,6 +72,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelListeners: dict = {}  # relay_url -> asyncio.Task
+        self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -200,6 +201,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkClients.clear()
         self._networkListeners.clear()
         self._channelListeners.clear()
+        self._channelOpenListeners.clear()
         self._networkSubscribed.clear()
         self._networkFirstRun = True
 
@@ -275,6 +277,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         ctask = self._channelListeners.pop(relay_url, None)
         if ctask and not ctask.done():
             ctask.cancel()
+        otask = self._channelOpenListeners.pop(relay_url, None)
+        if otask and not otask.done():
+            otask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -321,20 +326,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         provider_pubkey: str,
         seq_num: int,
     ) -> None:
-        """Pay for an observation via a channel if one exists for this provider.
+        """Pay for an observation via a channel (sender/buyer side).
 
-        Looks up the subscription to get the price, then finds an open sender
-        channel to that provider and issues a commitment for price_per_obs sats.
-        Silently skips if the stream is free or no channel exists yet.
+        Looks up the subscription for price and provider wallet pubkey.
+        If no channel is open, or the current one is exhausted, auto-opens
+        a new channel using the configured fund amount.
+        Silently skips if the stream is free or no wallet pubkey is known.
         """
         try:
             sub = await asyncio.to_thread(
                 self.networkDB.is_subscribed, stream_name, provider_pubkey)
             if not sub:
                 return
-            # Get price from subscription record
-            conn_rows = await asyncio.to_thread(
-                self.networkDB.get_active)
+            conn_rows = await asyncio.to_thread(self.networkDB.get_active)
             subscription = next(
                 (s for s in conn_rows
                  if s['stream_name'] == stream_name
@@ -343,18 +347,36 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not subscription or subscription.get('price_per_obs', 0) == 0:
                 return  # free stream
             price_sats = subscription['price_per_obs']
-            # Find an open sender channel to this provider
+            provider_wallet_pubkey = subscription.get('provider_wallet_pubkey')
+            if not provider_wallet_pubkey:
+                return  # can't pay without knowing receiver's EVR pubkey
+            # Find an open sender channel with sufficient remainder
             channels = await asyncio.to_thread(
                 self.networkDB.get_channels_as_sender)
             channel = next(
                 (c for c in channels
-                 if c['receiver_pubkey'] == provider_pubkey
+                 if c['receiver_pubkey'] == provider_wallet_pubkey
                  and c['remainder_sats'] >= price_sats),
                 None)
             if not channel:
-                return  # no channel open yet — payment skipped
-            await self.sendChannelPayment(
-                channel['p2sh_address'], price_sats)
+                # Auto-open a fresh channel to this provider
+                fund_sats = self._channelFundSats()
+                timeout_minutes = self._channelTimeoutMinutes()
+                logging.info(
+                    f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
+                    f'fund={fund_sats} sats timeout={timeout_minutes} min',
+                    color='cyan')
+                p2sh = await self.openChannel(
+                    receiver_pubkey=provider_wallet_pubkey,
+                    amount_sats=fund_sats,
+                    minutes=timeout_minutes,
+                    receiver_nostr_pubkey=provider_pubkey,
+                )
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, p2sh)
+                if not channel or channel['remainder_sats'] < price_sats:
+                    return
+            await self.sendChannelPayment(channel['p2sh_address'], price_sats)
         except Exception as e:
             logging.warning(f'Channel: pay-for-observation failed: {e}')
 
@@ -453,6 +475,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkListeners[relay_url] = asyncio.ensure_future(
             self._networkListen(relay_url))
         self._networkEnsureChannelListener(relay_url)
+        self._networkEnsureChannelOpenListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -463,6 +486,65 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         self._channelListeners[relay_url] = asyncio.ensure_future(
             self._channelListen(relay_url))
+
+    def _networkEnsureChannelOpenListener(self, relay_url: str):
+        """Start a channel open announcement listener for a relay if one isn't running."""
+        task = self._channelOpenListeners.get(relay_url)
+        if task and not task.done():
+            return
+        self._channelOpenListeners[relay_url] = asyncio.ensure_future(
+            self._channelOpenListen(relay_url))
+
+    async def _channelOpenListen(self, relay_url: str):
+        """Listen for inbound channel open announcements on a relay.
+
+        When a sender opens a channel to us, they publish a KIND_CHANNEL_OPEN
+        event that we receive here. We save the channel to our DB so we can
+        process future commitments from that sender.
+        """
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            async for inbound in client.channel_opens():
+                await self._channelHandleOpen(inbound)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'Channel: open listener stopped on {relay_url}: {e}')
+
+    async def _channelHandleOpen(self, inbound):
+        """Save an incoming channel open announcement to the DB (receiver side).
+
+        Only saves if the receiver_pubkey in the announcement matches our own
+        wallet pubkey. Silently ignores announcements intended for others.
+        """
+        co = inbound.channel_open
+        if co.receiver_pubkey != self.wallet.pubkey:
+            return
+        existing = await asyncio.to_thread(
+            self.networkDB.get_channel, co.p2sh_address)
+        if existing:
+            return  # already know about this channel
+        await asyncio.to_thread(
+            self.networkDB.save_channel,
+            co.p2sh_address,
+            co.sender_pubkey,
+            co.receiver_pubkey,
+            co.redeem_script,
+            co.funding_txid,
+            co.funding_vout,
+            co.locked_sats,
+            co.locked_sats,  # remainder = locked at time of open
+            False,            # is_sender = False
+            co.blocks,
+            co.minutes,
+        )
+        logging.info(
+            f'Channel: registered inbound channel {co.p2sh_address} '
+            f'from {co.sender_pubkey[:16]}…',
+            color='green')
 
     async def _channelListen(self, relay_url: str):
         """Listen for inbound channel commitments on a relay.
@@ -609,23 +691,35 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Channel: expiry check failed: {e}')
 
+    def _channelFundSats(self) -> int:
+        """Return the configured channel funding amount in sats (default 1 EVR)."""
+        return int(config.get().get('channel_fund_sats', 100_000_000))
+
+    def _channelTimeoutMinutes(self) -> int:
+        """Return the configured channel lifetime in minutes (default 7 days)."""
+        return int(config.get().get('channel_timeout_minutes', 10080))
+
     async def openChannel(
         self,
         receiver_pubkey: str,
         amount_sats: int,
         minutes: int = None,
         blocks: int = None,
+        receiver_nostr_pubkey: str = None,
     ) -> str:
         """Fund a new payment channel to a receiver (sender/buyer side).
 
         Locks funds in a 2-of-2 P2SH multisig with a CSV timeout so the
-        sender can reclaim if the receiver never claims.
+        sender can reclaim if the receiver never claims.  If receiver_nostr_pubkey
+        is provided, a KIND_CHANNEL_OPEN announcement is published to all
+        connected relays so the receiver can register the channel automatically.
 
         Args:
             receiver_pubkey: Receiver's EVR public key (hex)
             amount_sats: Amount to lock in the channel in satoshis
             minutes: CSV timeout in minutes (mutually exclusive with blocks)
             blocks: CSV timeout in blocks (mutually exclusive with minutes)
+            receiver_nostr_pubkey: Receiver's Nostr pubkey for push delivery
 
         Returns:
             The P2SH address of the new channel
@@ -660,6 +754,28 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             f'Channel: opened {p2sh_address} '
             f'amount={amount_sats} sats receiver={receiver_pubkey}',
             color='green')
+        # Announce to receiver via Nostr so they can register the channel
+        if receiver_nostr_pubkey:
+            from satorilib.satori_nostr.models import ChannelOpen
+            channel_open = ChannelOpen(
+                p2sh_address=p2sh_address,
+                sender_pubkey=self.wallet.pubkey,
+                receiver_pubkey=receiver_pubkey,
+                redeem_script=script_payload['redeem_script_hex'],
+                funding_txid=script_payload['funding_txid'],
+                funding_vout=script_payload['funding_vout'] or 0,
+                locked_sats=amount_sats,
+                blocks=blocks,
+                minutes=minutes,
+                timestamp=int(time.time()),
+            )
+            for client in self._networkClients.values():
+                try:
+                    await client.publish_channel_open(
+                        channel_open, receiver_nostr_pubkey)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: failed to announce open: {e}')
         return p2sh_address
 
     async def sendChannelPayment(
@@ -783,6 +899,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     source['source_stream_name'] = pub['source_stream_name']
                     source['source_provider_pubkey'] = pub.get(
                         'source_provider_pubkey', '')
+                # Include our EVR wallet pubkey so subscribers can auto-open
+                # payment channels without any manual configuration.
+                meta_dict = source or {}
+                if hasattr(self, 'wallet') and self.wallet and self.wallet.pubkey:
+                    meta_dict['wallet_pubkey'] = self.wallet.pubkey
                 metadata = DatastreamMetadata(
                     stream_name=pub['stream_name'],
                     nostr_pubkey=self.nostrPubkey,
@@ -793,7 +914,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     created_at=pub['created_at'],
                     cadence_seconds=pub.get('cadence_seconds'),
                     tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
-                    metadata=source or None,
+                    metadata=meta_dict or None,
                 )
                 await client.announce_datastream(metadata)
                 logging.info(
