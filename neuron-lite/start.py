@@ -696,8 +696,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return int(config.get().get('channel_fund_sats', 100_000_000))
 
     def _channelTimeoutMinutes(self) -> int:
-        """Return the configured channel lifetime in minutes (default 7 days)."""
-        return int(config.get().get('channel_timeout_minutes', 10080))
+        """Return the configured channel lifetime in minutes (default 90 days)."""
+        return int(config.get().get('channel_timeout_minutes', 129600))
 
     async def openChannel(
         self,
