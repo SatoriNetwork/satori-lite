@@ -2396,6 +2396,10 @@ def register_routes(app):
         ds = startup.networkDB.get_data_source(stream_name)
         if not ds:
             return jsonify({'error': 'Not found'}), 404
+        # Merge price_per_obs from corresponding publication
+        pubs = startup.networkDB.get_all_publications()
+        pub = next((p for p in pubs if p['stream_name'] == stream_name), None)
+        ds['price_per_obs'] = pub['price_per_obs'] if pub else 0
         return jsonify({'data_source': ds})
 
     @app.route('/api/network/data-source', methods=['POST'])
@@ -2427,11 +2431,18 @@ def register_routes(app):
             method=data.get('method', 'GET'),
             headers=data.get('headers'))
         # Create corresponding publication
+        try:
+            price_per_obs = int(data.get('price_per_obs', 0) or 0)
+        except (ValueError, TypeError):
+            price_per_obs = 0
+        encrypted = bool(data.get('encrypted', False))
         startup.networkDB.add_publication(
             stream_name=data['stream_name'],
             name=data.get('name', ''),
             description=data.get('description', ''),
-            cadence_seconds=cadence or None)
+            cadence_seconds=cadence or None,
+            price_per_obs=price_per_obs,
+            encrypted=encrypted)
         # If a URL is configured, immediately fetch and publish so the stream
         # is visible on relays without waiting for the next cadence cycle
         if url and parser_config:
@@ -2626,6 +2637,7 @@ def register_routes(app):
             return jsonify({'error': 'Not ready'}), 503
         data = request.get_json() or {}
         receiver_pubkey = data.get('receiver_pubkey', '').strip()
+        receiver_nostr_pubkey = data.get('receiver_nostr_pubkey', '') or ''
         try:
             amount_sats = int(data.get('amount_sats', 0))
             minutes = int(data['minutes']) if data.get('minutes') else None
@@ -2645,6 +2657,7 @@ def register_routes(app):
             future = asyncio.run_coroutine_threadsafe(
                 startup.openChannel(
                     receiver_pubkey=receiver_pubkey,
+                    receiver_nostr_pubkey=receiver_nostr_pubkey,
                     amount_sats=amount_sats,
                     minutes=minutes,
                     blocks=blocks),
