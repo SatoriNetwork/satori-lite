@@ -54,6 +54,10 @@
             <i class="material-icons align-middle" style="font-size: 16px;">hub</i>
             P2P
         </a>
+        <a href="{{ url_for('channels_page') }}" class="btn {{ 'btn-primary' if request.endpoint == 'channels_page' else 'btn-outline-light' }} btn-sm satori-nav-item">
+            <i class="material-icons align-middle" style="font-size: 16px;">toll</i>
+            Channels
+        </a>
         <div class="dropdown satori-nav-item">
             <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
                 <i class="material-icons align-middle" style="font-size: 16px;">tune</i>

@@ -7,6 +7,7 @@ Handles all web routes for the minimal UI:
 - API proxy endpoints
 """
 from functools import wraps
+import asyncio
 import os
 import time
 import logging
@@ -2521,3 +2522,117 @@ def register_routes(app):
         except Exception as e:
             logger.error(f"Wallet download error: {e}")
             return jsonify({'error': str(e)}), 500
+
+    # ── Channel routes ────────────────────────────────────────────────────────
+
+    @app.route('/channels')
+    @login_required
+    def channels_page():
+        """Payment channels management page."""
+        from satorineuron import VERSION
+        return render_template('channels.html', version=VERSION)
+
+    @app.route('/api/channels')
+    @login_required
+    def api_channels_list():
+        """Return all channels as JSON."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        try:
+            sending = startup.networkDB.get_channels_as_sender()
+            receiving = startup.networkDB.get_channels_as_receiver()
+            return jsonify({'sending': sending, 'receiving': receiving})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/channels/open', methods=['POST'])
+    @login_required
+    def api_channel_open():
+        """Open a new payment channel."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        receiver_pubkey = data.get('receiver_pubkey', '').strip()
+        try:
+            amount_sats = int(data.get('amount_sats', 0))
+            minutes = int(data['minutes']) if data.get('minutes') else None
+            blocks = int(data['blocks']) if data.get('blocks') else None
+        except (ValueError, TypeError) as e:
+            return jsonify({'error': f'Invalid parameter: {e}'}), 400
+        if not receiver_pubkey:
+            return jsonify({'error': 'receiver_pubkey required'}), 400
+        if amount_sats <= 0:
+            return jsonify({'error': 'amount_sats must be > 0'}), 400
+        if not minutes and not blocks:
+            return jsonify({'error': 'Provide minutes or blocks timeout'}), 400
+        loop = getattr(startup, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return jsonify({'error': 'Network loop not running'}), 503
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                startup.openChannel(
+                    receiver_pubkey=receiver_pubkey,
+                    amount_sats=amount_sats,
+                    minutes=minutes,
+                    blocks=blocks),
+                loop)
+            p2sh_address = future.result(timeout=60)
+            return jsonify({'p2sh_address': p2sh_address})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/channels/pay', methods=['POST'])
+    @login_required
+    def api_channel_pay():
+        """Send a payment commitment over an existing channel."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        p2sh_address = data.get('p2sh_address', '').strip()
+        try:
+            pay_amount_sats = int(data.get('pay_amount_sats', 0))
+        except (ValueError, TypeError) as e:
+            return jsonify({'error': f'Invalid amount: {e}'}), 400
+        if not p2sh_address:
+            return jsonify({'error': 'p2sh_address required'}), 400
+        if pay_amount_sats <= 0:
+            return jsonify({'error': 'pay_amount_sats must be > 0'}), 400
+        loop = getattr(startup, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return jsonify({'error': 'Network loop not running'}), 503
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                startup.sendChannelPayment(
+                    p2sh_address=p2sh_address,
+                    pay_amount_sats=pay_amount_sats),
+                loop)
+            future.result(timeout=30)
+            return jsonify({'ok': True})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/channels/reclaim', methods=['POST'])
+    @login_required
+    def api_channel_reclaim():
+        """Reclaim funds from an expired channel."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        p2sh_address = data.get('p2sh_address', '').strip()
+        if not p2sh_address:
+            return jsonify({'error': 'p2sh_address required'}), 400
+        loop = getattr(startup, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return jsonify({'error': 'Network loop not running'}), 503
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                startup.reclaimChannel(p2sh_address=p2sh_address),
+                loop)
+            txid = future.result(timeout=60)
+            return jsonify({'txid': txid})
+        except Exception as e:
+            return jsonify({'error': str(e)})

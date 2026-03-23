@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block title %}Channels — Satori{% endblock %}
+
+{% block content %}
+{% include "partials/navbar.html" %}
+
+<div class="container-fluid py-4" style="max-width: 960px;">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+      <h4 class="mb-1">Payment Channels</h4>
+      <p class="text-muted small mb-0">
+        Off-chain micropayments for data streams. Open a channel to lock funds,
+        then pay per observation without an on-chain transaction each time.
+      </p>
+    </div>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#openChannelModal">
+      <i class="material-icons align-middle" style="font-size:16px;">add</i>
+      Open Channel
+    </button>
+  </div>
+
+  <!-- Alert area -->
+  <div id="alertArea"></div>
+
+  <!-- Sending channels -->
+  <div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span class="fw-600">Channels I Opened <span class="badge bg-secondary ms-1" id="sendingCount">0</span></span>
+      <button class="btn btn-outline-secondary btn-sm" onclick="loadChannels()">
+        <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+      </button>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Channel (P2SH)</th>
+              <th>Receiver</th>
+              <th class="text-end">Locked</th>
+              <th class="text-end">Remaining</th>
+              <th class="text-end">Timeout</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="sendingTable">
+            <tr><td colspan="6" class="text-muted text-center py-4">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Receiving channels -->
+  <div class="card">
+    <div class="card-header">
+      <span class="fw-600">Channels Others Opened to Me <span class="badge bg-secondary ms-1" id="receivingCount">0</span></span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Channel (P2SH)</th>
+              <th>Sender</th>
+              <th class="text-end">Locked</th>
+              <th class="text-end">Remaining</th>
+              <th class="text-end">Timeout</th>
+            </tr>
+          </thead>
+          <tbody id="receivingTable">
+            <tr><td colspan="5" class="text-muted text-center py-4">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Open Channel Modal -->
+<div class="modal fade" id="openChannelModal" tabindex="-1" aria-labelledby="openChannelLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:var(--bg-card); border:1px solid var(--border-color);">
+      <div class="modal-header" style="border-color:var(--border-color);">
+        <h5 class="modal-title" id="openChannelLabel">Open Payment Channel</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Receiver Public Key (hex)</label>
+          <input type="text" class="form-control font-monospace" id="ocReceiverPubkey"
+                 placeholder="02abc123…">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Amount to Lock (sats)</label>
+          <input type="number" class="form-control" id="ocAmountSats"
+                 placeholder="e.g. 1000000" min="1">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Timeout</label>
+          <div class="input-group">
+            <input type="number" class="form-control" id="ocMinutes"
+                   placeholder="Minutes" min="1">
+            <span class="input-group-text" style="background:var(--bg-input); border-color:var(--border-color); color:var(--text-muted);">or</span>
+            <input type="number" class="form-control" id="ocBlocks"
+                   placeholder="Blocks" min="1">
+          </div>
+          <div class="form-text text-muted">
+            After this timeout you can reclaim unclaimed funds. Provide minutes <em>or</em> blocks.
+          </div>
+        </div>
+        <div id="ocError" class="alert alert-danger d-none"></div>
+      </div>
+      <div class="modal-footer" style="border-color:var(--border-color);">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="ocSubmit" onclick="submitOpenChannel()">
+          Open Channel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pay Modal -->
+<div class="modal fade" id="payModal" tabindex="-1" aria-labelledby="payModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:var(--bg-card); border:1px solid var(--border-color);">
+      <div class="modal-header" style="border-color:var(--border-color);">
+        <h5 class="modal-title" id="payModalLabel">Send Channel Payment</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Channel</label>
+          <input type="text" class="form-control font-monospace" id="payP2sh" readonly>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Amount (sats)</label>
+          <input type="number" class="form-control" id="payAmountSats"
+                 placeholder="e.g. 100" min="1">
+        </div>
+        <div id="payError" class="alert alert-danger d-none"></div>
+      </div>
+      <div class="modal-footer" style="border-color:var(--border-color);">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="submitPay()">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const fmtSats = (n) => Number(n).toLocaleString() + ' sats';
+const fmtAddr = (s) => s ? s.slice(0, 12) + '…' + s.slice(-6) : '—';
+
+function showAlert(msg, type='danger') {
+  const area = document.getElementById('alertArea');
+  area.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show" role="alert">
+    ${msg}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>`;
+}
+
+async function loadChannels() {
+  try {
+    const resp = await fetch('/api/channels');
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    renderSending(data.sending || []);
+    renderReceiving(data.receiving || []);
+  } catch(e) {
+    showAlert('Failed to load channels: ' + e);
+  }
+}
+
+function timeout(ch) {
+  if (ch.minutes) return ch.minutes + ' min';
+  if (ch.blocks)  return ch.blocks + ' blocks';
+  return '—';
+}
+
+function renderSending(rows) {
+  document.getElementById('sendingCount').textContent = rows.length;
+  const tbody = document.getElementById('sendingTable');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4">No channels opened yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(ch => `
+    <tr>
+      <td><code title="${ch.p2sh_address}">${fmtAddr(ch.p2sh_address)}</code></td>
+      <td><code title="${ch.receiver_pubkey}">${fmtAddr(ch.receiver_pubkey)}</code></td>
+      <td class="text-end">${fmtSats(ch.locked_sats)}</td>
+      <td class="text-end">${fmtSats(ch.remainder_sats)}</td>
+      <td class="text-end">${timeout(ch)}</td>
+      <td class="text-end">
+        <button class="btn btn-outline-secondary btn-sm me-1"
+                onclick="openPayModal('${ch.p2sh_address}')">Pay</button>
+        <button class="btn btn-outline-secondary btn-sm"
+                onclick="reclaim('${ch.p2sh_address}')">Reclaim</button>
+      </td>
+    </tr>`).join('');
+}
+
+function renderReceiving(rows) {
+  document.getElementById('receivingCount').textContent = rows.length;
+  const tbody = document.getElementById('receivingTable');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4">No inbound channels.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(ch => `
+    <tr>
+      <td><code title="${ch.p2sh_address}">${fmtAddr(ch.p2sh_address)}</code></td>
+      <td><code title="${ch.sender_pubkey}">${fmtAddr(ch.sender_pubkey)}</code></td>
+      <td class="text-end">${fmtSats(ch.locked_sats)}</td>
+      <td class="text-end">${fmtSats(ch.remainder_sats)}</td>
+      <td class="text-end">${timeout(ch)}</td>
+    </tr>`).join('');
+}
+
+async function submitOpenChannel() {
+  const btn = document.getElementById('ocSubmit');
+  const errEl = document.getElementById('ocError');
+  errEl.classList.add('d-none');
+  btn.disabled = true;
+  btn.textContent = 'Opening…';
+  try {
+    const body = {
+      receiver_pubkey: document.getElementById('ocReceiverPubkey').value.trim(),
+      amount_sats: parseInt(document.getElementById('ocAmountSats').value) || 0,
+      minutes: document.getElementById('ocMinutes').value || null,
+      blocks:  document.getElementById('ocBlocks').value  || null,
+    };
+    const resp = await fetch('/api/channels/open', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('openChannelModal')).hide();
+    showAlert('Channel opened: ' + data.p2sh_address, 'success');
+    loadChannels();
+  } catch(e) {
+    errEl.textContent = String(e);
+    errEl.classList.remove('d-none');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Open Channel';
+  }
+}
+
+function openPayModal(p2sh) {
+  document.getElementById('payP2sh').value = p2sh;
+  document.getElementById('payAmountSats').value = '';
+  document.getElementById('payError').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('payModal')).show();
+}
+
+async function submitPay() {
+  const errEl = document.getElementById('payError');
+  errEl.classList.add('d-none');
+  try {
+    const body = {
+      p2sh_address:   document.getElementById('payP2sh').value,
+      pay_amount_sats: parseInt(document.getElementById('payAmountSats').value) || 0,
+    };
+    const resp = await fetch('/api/channels/pay', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) { errEl.textContent = data.error; errEl.classList.remove('d-none'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('payModal')).hide();
+    showAlert('Payment commitment published.', 'success');
+    loadChannels();
+  } catch(e) {
+    errEl.textContent = String(e);
+    errEl.classList.remove('d-none');
+  }
+}
+
+async function reclaim(p2sh) {
+  if (!confirm('Reclaim funds from ' + p2sh + '?\n\nOnly works after the timeout has expired.')) return;
+  try {
+    const resp = await fetch('/api/channels/reclaim', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({p2sh_address: p2sh}),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Reclaim broadcast. txid: ' + data.txid, 'success');
+    loadChannels();
+  } catch(e) {
+    showAlert(String(e));
+  }
+}
+
+// Load on page ready
+loadChannels();
+// Auto-refresh every 30 seconds
+setInterval(loadChannels, 30000);
+</script>
+{% endblock %}
