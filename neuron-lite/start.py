@@ -71,6 +71,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
+        self._channelListeners: dict = {}  # relay_url -> asyncio.Task
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -198,6 +199,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # contamination and silent crashes on every await.
         self._networkClients.clear()
         self._networkListeners.clear()
+        self._channelListeners.clear()
         self._networkSubscribed.clear()
         self._networkFirstRun = True
 
@@ -262,10 +264,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return None
 
     async def _networkDisconnect(self, relay_url: str):
-        """Disconnect from a relay and cancel its observation listener."""
+        """Disconnect from a relay and cancel its listeners."""
         task = self._networkListeners.pop(relay_url, None)
         if task and not task.done():
             task.cancel()
+        ctask = self._channelListeners.pop(relay_url, None)
+        if ctask and not ctask.done():
+            ctask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -301,6 +306,53 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     obs.stream_name,
                     obs.nostr_pubkey,
                     obs.observation)
+            # Pay for this observation if the stream has a price and we have
+            # an open channel to this provider
+            await self._channelPayForObservation(
+                obs.stream_name, obs.nostr_pubkey, obs.observation.seq_num)
+
+    async def _channelPayForObservation(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+    ) -> None:
+        """Pay for an observation via a channel if one exists for this provider.
+
+        Looks up the subscription to get the price, then finds an open sender
+        channel to that provider and issues a commitment for price_per_obs sats.
+        Silently skips if the stream is free or no channel exists yet.
+        """
+        try:
+            sub = await asyncio.to_thread(
+                self.networkDB.is_subscribed, stream_name, provider_pubkey)
+            if not sub:
+                return
+            # Get price from subscription record
+            conn_rows = await asyncio.to_thread(
+                self.networkDB.get_active)
+            subscription = next(
+                (s for s in conn_rows
+                 if s['stream_name'] == stream_name
+                 and s['provider_pubkey'] == provider_pubkey),
+                None)
+            if not subscription or subscription.get('price_per_obs', 0) == 0:
+                return  # free stream
+            price_sats = subscription['price_per_obs']
+            # Find an open sender channel to this provider
+            channels = await asyncio.to_thread(
+                self.networkDB.get_channels_as_sender)
+            channel = next(
+                (c for c in channels
+                 if c['receiver_pubkey'] == provider_pubkey
+                 and c['remainder_sats'] >= price_sats),
+                None)
+            if not channel:
+                return  # no channel open yet — payment skipped
+            await self.sendChannelPayment(
+                channel['p2sh_address'], price_sats)
+        except Exception as e:
+            logging.warning(f'Channel: pay-for-observation failed: {e}')
 
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
@@ -396,6 +448,255 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         self._networkListeners[relay_url] = asyncio.ensure_future(
             self._networkListen(relay_url))
+        self._networkEnsureChannelListener(relay_url)
+
+    # ── Channel support ───────────────────────────────────────────────────────
+
+    def _networkEnsureChannelListener(self, relay_url: str):
+        """Start a channel commitment listener for a relay if one isn't running."""
+        task = self._channelListeners.get(relay_url)
+        if task and not task.done():
+            return
+        self._channelListeners[relay_url] = asyncio.ensure_future(
+            self._channelListen(relay_url))
+
+    async def _channelListen(self, relay_url: str):
+        """Listen for inbound channel commitments on a relay.
+
+        When the buyer publishes a partial tx addressed to us, we receive it
+        here, sign it, and broadcast — completing the payment.
+        """
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            async for inbound in client.commitments():
+                logging.info(
+                    f'Channel: received commitment on {relay_url} '
+                    f'p2sh={inbound.commitment.p2sh_address} '
+                    f'pay={inbound.commitment.pay_amount_sats} sats',
+                    color='cyan')
+                await self._channelProcessCommitment(inbound.commitment)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(f'Channel: listener stopped on {relay_url}: {e}')
+
+    async def _channelProcessCommitment(self, commitment):
+        """Sign and broadcast an inbound channel commitment (receiver side).
+
+        Called when the buyer has published a half-signed transaction to Nostr.
+        We add our signature and broadcast, then update the channel remainder
+        and tombstone the relay record.
+        """
+        from satorilib.satori_nostr.models import ChannelCommitment
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, commitment.p2sh_address)
+        if not channel:
+            logging.warning(
+                f'Channel: commitment for unknown channel '
+                f'{commitment.p2sh_address} — ignoring')
+            return
+        try:
+            from evrmore.core import CMutableTransaction
+            from evrmore.core.script import CScript
+            tx = CMutableTransaction.deserialize(
+                bytes.fromhex(commitment.partial_tx_hex))
+            redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
+            # Add our (receiver) signature to complete the 2-of-2
+            our_sig = self.wallet.paymentChannelMultisigTransactionMiddle(
+                tx=tx,
+                redeemScript=redeem_script,
+                vinIndex=0)
+            # Combine sender sigs + our sig and broadcast
+            from satorilib.wallet.evrmore.scripts.channels import unlock
+            from functools import partial as funcpartial
+            sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
+            redeemParams = funcpartial(
+                unlock.paymentChannel,
+                sender_sig=sender_sigs[0],
+                receiver_sig=our_sig)
+            self.wallet._compileClaimOnP2SHMultiSigEnd(
+                tx=tx,
+                redeemScript=redeem_script,
+                redeemParams=redeemParams,
+                redeemCount=1)
+            tx_hex = tx.serialize().hex()
+            txid = self.wallet.broadcast(tx_hex)
+            logging.info(
+                f'Channel: claimed {commitment.pay_amount_sats} sats '
+                f'from {commitment.p2sh_address} — txid={txid}',
+                color='green')
+            await asyncio.to_thread(
+                self.networkDB.update_channel_remainder,
+                commitment.p2sh_address,
+                commitment.remainder_sats)
+            # Tombstone the commitment on all relays
+            for client in self._networkClients.values():
+                try:
+                    await client.remove_commitment(commitment.p2sh_address)
+                except Exception:
+                    pass
+        except Exception as e:
+            logging.error(
+                f'Channel: failed to claim {commitment.p2sh_address}: {e}')
+
+    async def openChannel(
+        self,
+        receiver_pubkey: str,
+        amount_sats: int,
+        minutes: int = None,
+        blocks: int = None,
+    ) -> str:
+        """Fund a new payment channel to a receiver (sender/buyer side).
+
+        Locks funds in a 2-of-2 P2SH multisig with a CSV timeout so the
+        sender can reclaim if the receiver never claims.
+
+        Args:
+            receiver_pubkey: Receiver's EVR public key (hex)
+            amount_sats: Amount to lock in the channel in satoshis
+            minutes: CSV timeout in minutes (mutually exclusive with blocks)
+            blocks: CSV timeout in blocks (mutually exclusive with minutes)
+
+        Returns:
+            The P2SH address of the new channel
+        """
+        amount_evr = amount_sats / 1e8
+        txid, script_payload = await asyncio.to_thread(
+            self.wallet.producePaymentChannel,
+            receiver_pubkey,
+            None,       # sender defaults to our own pubkey
+            blocks,
+            minutes,
+            None,       # memo
+            amount_evr,
+            True,       # broadcast
+        )
+        p2sh_address = script_payload['p2sh_address']
+        await asyncio.to_thread(
+            self.networkDB.save_channel,
+            p2sh_address,
+            self.wallet.pubkey,
+            receiver_pubkey,
+            script_payload['redeem_script_hex'],
+            script_payload['funding_txid'],
+            script_payload['funding_vout'] or 0,
+            amount_sats,
+            amount_sats,  # remainder starts equal to locked
+            True,         # is_sender
+            blocks,
+            minutes,
+        )
+        logging.info(
+            f'Channel: opened {p2sh_address} '
+            f'amount={amount_sats} sats receiver={receiver_pubkey}',
+            color='green')
+        return p2sh_address
+
+    async def sendChannelPayment(
+        self,
+        p2sh_address: str,
+        pay_amount_sats: int,
+    ) -> None:
+        """Issue a payment commitment to the receiver over Nostr (sender side).
+
+        Builds a half-signed transaction and publishes it to all connected
+        relays. The receiver's _channelListen loop picks it up and broadcasts.
+
+        Args:
+            p2sh_address: The channel to pay from
+            pay_amount_sats: Amount to pay the receiver this round (sats)
+        """
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, p2sh_address)
+        if not channel:
+            raise ValueError(f'Unknown channel: {p2sh_address}')
+        if pay_amount_sats > channel['remainder_sats']:
+            raise ValueError(
+                f'Pay amount {pay_amount_sats} exceeds channel remainder '
+                f'{channel["remainder_sats"]}')
+        from evrmore.core.script import CScript
+        from satorilib.satori_nostr.models import ChannelCommitment
+        redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
+        pay_amount_evr = pay_amount_sats / 1e8
+        tx, _txin_scripts = await asyncio.to_thread(
+            self.wallet.paymentChannelMultisigTransactionStart,
+            channel['receiver_pubkey'],   # toAddress
+            self.wallet.address,          # changeAddress (back to channel P2SH)
+            [channel['remainder_sats'] / 1e8],  # lockedAmounts
+            pay_amount_evr,               # sendAmount
+            None,                         # memo
+            None,                         # feeOverride
+            [channel['funding_txid']],    # fundingTxIds
+            [channel['funding_vout']],    # fundingVouts
+        )
+        sig = await asyncio.to_thread(
+            self.wallet.paymentChannelMultisigTransactionMiddle,
+            tx,
+            redeem_script,
+            0,    # vinIndex
+            None, # sighashFlag — use default SIGHASH_SINGLE|ANYONECANPAY
+        )
+        remainder = channel['remainder_sats'] - pay_amount_sats
+        commitment = ChannelCommitment(
+            p2sh_address=p2sh_address,
+            sender_pubkey=self.wallet.pubkey,
+            receiver_pubkey=channel['receiver_pubkey'],
+            partial_tx_hex=tx.serialize().hex(),
+            sender_sigs=[sig.hex()],
+            pay_amount_sats=pay_amount_sats,
+            remainder_sats=remainder,
+            fee=0,  # fee is embedded in the tx outputs
+            timestamp=int(time.time()),
+        )
+        for client in self._networkClients.values():
+            try:
+                await client.publish_commitment(commitment)
+            except Exception as e:
+                logging.warning(f'Channel: failed to publish commitment: {e}')
+        logging.info(
+            f'Channel: published commitment {p2sh_address} '
+            f'pay={pay_amount_sats} sats remainder={remainder} sats',
+            color='cyan')
+
+    async def reclaimChannel(self, p2sh_address: str) -> str:
+        """Reclaim locked funds after the CSV timeout has expired (sender side).
+
+        Should be called when the timeout has passed and the receiver has not
+        claimed. Broadcasts the reclaim transaction and removes the channel.
+
+        Args:
+            p2sh_address: The channel to reclaim
+
+        Returns:
+            The broadcast txid
+        """
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, p2sh_address)
+        if not channel:
+            raise ValueError(f'Unknown channel: {p2sh_address}')
+        from evrmore.core.script import CScript
+        redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
+        txid = await asyncio.to_thread(
+            self.wallet.paymentChannelRecallTransaction,
+            self.wallet.address,
+            [channel['remainder_sats'] / 1e8],
+            None,   # memo
+            True,   # broadcast
+            None,   # feeOverride
+            [channel['funding_txid']],
+            [channel['funding_vout']],
+            redeem_script,
+        )
+        await asyncio.to_thread(
+            self.networkDB.delete_channel, p2sh_address)
+        logging.info(
+            f'Channel: reclaimed {p2sh_address} — txid={txid}',
+            color='yellow')
+        return txid
+
+    # ── End channel support ───────────────────────────────────────────────────
 
     async def _networkAnnouncePublications(self, relay_url: str):
         """Announce all our published streams to a relay."""

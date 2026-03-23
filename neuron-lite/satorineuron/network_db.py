@@ -158,6 +158,22 @@ class NetworkDB:
                 "ALTER TABLE observations ADD COLUMN seq_num INTEGER")
             conn.execute(
                 "ALTER TABLE observations ADD COLUMN observed_at INTEGER")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS channels (
+                p2sh_address    TEXT PRIMARY KEY,
+                sender_pubkey   TEXT NOT NULL,
+                receiver_pubkey TEXT NOT NULL,
+                redeem_script   TEXT NOT NULL,
+                funding_txid    TEXT NOT NULL,
+                funding_vout    INTEGER NOT NULL,
+                locked_sats     INTEGER NOT NULL,
+                remainder_sats  INTEGER NOT NULL,
+                blocks          INTEGER,
+                minutes         REAL,
+                is_sender       INTEGER NOT NULL,
+                created_at      INTEGER NOT NULL
+            )
+        """)
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -583,3 +599,82 @@ class NetworkDB:
             "SELECT * FROM data_sources WHERE stream_name = ?",
             (stream_name,)).fetchone()
         return dict(row) if row else None
+
+    # ── Channels ──────────────────────────────────────────────────
+
+    def save_channel(
+        self,
+        p2sh_address: str,
+        sender_pubkey: str,
+        receiver_pubkey: str,
+        redeem_script: str,
+        funding_txid: str,
+        funding_vout: int,
+        locked_sats: int,
+        remainder_sats: int,
+        is_sender: bool,
+        blocks: int = None,
+        minutes: float = None,
+    ) -> None:
+        """Persist a payment channel. Upserts on p2sh_address."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO channels
+                (p2sh_address, sender_pubkey, receiver_pubkey, redeem_script,
+                 funding_txid, funding_vout, locked_sats, remainder_sats,
+                 blocks, minutes, is_sender, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(p2sh_address) DO UPDATE SET
+                redeem_script  = excluded.redeem_script,
+                funding_txid   = excluded.funding_txid,
+                funding_vout   = excluded.funding_vout,
+                locked_sats    = excluded.locked_sats,
+                remainder_sats = excluded.remainder_sats,
+                blocks         = excluded.blocks,
+                minutes        = excluded.minutes
+        """, (
+            p2sh_address, sender_pubkey, receiver_pubkey, redeem_script,
+            funding_txid, funding_vout, locked_sats, remainder_sats,
+            blocks, minutes, 1 if is_sender else 0, int(time.time()),
+        ))
+        conn.commit()
+
+    def get_channel(self, p2sh_address: str) -> dict | None:
+        """Return a single channel by its P2SH address."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM channels WHERE p2sh_address = ?",
+            (p2sh_address,)).fetchone()
+        return dict(row) if row else None
+
+    def get_channels_as_sender(self) -> list[dict]:
+        """Return all channels where we are the sender (buyer)."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM channels WHERE is_sender = 1 ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_channels_as_receiver(self) -> list[dict]:
+        """Return all channels where we are the receiver (seller)."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM channels WHERE is_sender = 0 ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_channel_remainder(self, p2sh_address: str,
+                                 remainder_sats: int) -> None:
+        """Update remaining balance after a commitment is claimed."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE channels SET remainder_sats = ? WHERE p2sh_address = ?",
+            (remainder_sats, p2sh_address))
+        conn.commit()
+
+    def delete_channel(self, p2sh_address: str) -> None:
+        """Remove a channel record (after reclaim or channel close)."""
+        conn = self._get_conn()
+        conn.execute(
+            "DELETE FROM channels WHERE p2sh_address = ?", (p2sh_address,))
+        conn.commit()
