@@ -73,6 +73,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
+        self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -202,6 +203,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkListeners.clear()
         self._channelListeners.clear()
         self._channelOpenListeners.clear()
+        self._channelSettlementListeners.clear()
         self._networkSubscribed.clear()
         self._networkFirstRun = True
 
@@ -280,6 +282,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         otask = self._channelOpenListeners.pop(relay_url, None)
         if otask and not otask.done():
             otask.cancel()
+        stask = self._channelSettlementListeners.pop(relay_url, None)
+        if stask and not stask.done():
+            stask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -476,6 +481,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkListen(relay_url))
         self._networkEnsureChannelListener(relay_url)
         self._networkEnsureChannelOpenListener(relay_url)
+        self._networkEnsureSettlementListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -494,6 +500,55 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         self._channelOpenListeners[relay_url] = asyncio.ensure_future(
             self._channelOpenListen(relay_url))
+
+    def _networkEnsureSettlementListener(self, relay_url: str):
+        """Start a channel settlement listener for a relay if one isn't running."""
+        task = self._channelSettlementListeners.get(relay_url)
+        if task and not task.done():
+            return
+        self._channelSettlementListeners[relay_url] = asyncio.ensure_future(
+            self._channelSettleListen(relay_url))
+
+    async def _channelSettleListen(self, relay_url: str):
+        """Listen for settlement notifications on channels we opened (sender side)."""
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            async for inbound in client.settlements():
+                await self._channelHandleSettlement(inbound)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'Channel: settlement listener stopped on {relay_url}: {e}')
+
+    async def _channelHandleSettlement(self, inbound):
+        """Handle a settlement notification: update DB with new funding UTXO (sender side)."""
+        s = inbound.settlement
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, s.p2sh_address)
+        if not channel or not channel.get('is_sender'):
+            return
+        if s.new_funding_vout == -1 or s.new_locked_sats == 0:
+            # Channel fully drained — delete it; next observation auto-opens a new one
+            await asyncio.to_thread(self.networkDB.delete_channel, s.p2sh_address)
+            logging.info(
+                f'Channel: {s.p2sh_address} fully drained, deleted',
+                color='yellow')
+        else:
+            # Update to new UTXO; cumulative tracking resets to 0
+            await asyncio.to_thread(
+                self.networkDB.update_channel_funding,
+                s.p2sh_address,
+                s.claim_txid,
+                s.new_funding_vout,
+                s.new_locked_sats)
+            logging.info(
+                f'Channel: {s.p2sh_address} settled, new UTXO '
+                f'{s.claim_txid[:12]}…:{s.new_funding_vout} '
+                f'({s.new_locked_sats} sats)',
+                color='green')
 
     async def _channelOpenListen(self, relay_url: str):
         """Listen for inbound channel open announcements on a relay.
@@ -540,6 +595,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             False,            # is_sender = False
             co.blocks,
             co.minutes,
+            sender_nostr_pubkey=co.sender_nostr_pubkey,
         )
         logging.info(
             f'Channel: registered inbound channel {co.p2sh_address} '
@@ -602,9 +658,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
 
-        Reads the latest pending commitment, adds our signature, broadcasts,
-        updates the channel remainder, clears the pending commitment, and
-        tombstones the relay record.
+        Signs and broadcasts the latest pending commitment. Finds the P2SH change
+        output in the tx (Option A: change goes back to P2SH) and updates the
+        channel DB with the new funding UTXO so the sender can continue paying.
+        Publishes a KIND_CHANNEL_SETTLED notification to the sender.
 
         Args:
             p2sh_address: The channel to claim from
@@ -612,7 +669,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The broadcast txid
         """
-        from satorilib.satori_nostr.models import ChannelCommitment
+        from satorilib.satori_nostr.models import ChannelCommitment, ChannelSettlement
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
@@ -650,12 +707,54 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             f'Channel: claimed {commitment.pay_amount_sats} sats '
             f'from {p2sh_address} — txid={txid}',
             color='green')
-        await asyncio.to_thread(
-            self.networkDB.update_channel_remainder,
-            p2sh_address,
-            commitment.remainder_sats)
+        # Find the P2SH change output (Option A: change goes back to P2SH)
+        import hashlib
+        redeem_bytes = bytes.fromhex(channel['redeem_script'])
+        script_hash = hashlib.new(
+            'ripemd160', hashlib.sha256(redeem_bytes).digest()).digest()
+        p2sh_script = bytes([0xa9, 0x14]) + script_hash + bytes([0x87])
+        change_vout = -1
+        change_sats = 0
+        tx_obj = CMutableTransaction.deserialize(bytes.fromhex(tx_hex))
+        for i, out in enumerate(tx_obj.vout):
+            if bytes(out.scriptPubKey) == p2sh_script:
+                change_vout = i
+                change_sats = out.nValue  # satoshis
+                break
+        if change_vout >= 0:
+            # Update receiver DB: new funding UTXO, cumulative resets
+            await asyncio.to_thread(
+                self.networkDB.update_channel_funding,
+                p2sh_address, txid, change_vout, change_sats)
+            logging.info(
+                f'Channel: {p2sh_address} new UTXO '
+                f'{txid[:12]}…:{change_vout} ({change_sats} sats)',
+                color='cyan')
+        else:
+            # No change output — channel fully drained
+            await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+            logging.info(
+                f'Channel: {p2sh_address} fully drained, deleted',
+                color='yellow')
         await asyncio.to_thread(
             self.networkDB.clear_pending_commitment, p2sh_address)
+        # Notify sender so they can update their funding UTXO
+        sender_nostr_pubkey = channel.get('sender_nostr_pubkey')
+        if sender_nostr_pubkey:
+            from satorilib.satori_nostr.models import ChannelSettlement
+            settlement = ChannelSettlement(
+                p2sh_address=p2sh_address,
+                claim_txid=txid,
+                new_funding_vout=change_vout,
+                new_locked_sats=change_sats,
+                timestamp=int(time.time()),
+            )
+            for client in self._networkClients.values():
+                try:
+                    await client.publish_settlement(settlement, sender_nostr_pubkey)
+                except Exception as e:
+                    logging.warning(f'Channel: failed to publish settlement: {e}')
+        # Tombstone the commitment on all relays
         for client in self._networkClients.values():
             try:
                 await client.remove_commitment(p2sh_address)
@@ -749,6 +848,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             True,         # is_sender
             blocks,
             minutes,
+            sender_nostr_pubkey=self.nostrPubkey or '',
         )
         logging.info(
             f'Channel: opened {p2sh_address} '
@@ -768,6 +868,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 blocks=blocks,
                 minutes=minutes,
                 timestamp=int(time.time()),
+                sender_nostr_pubkey=self.nostrPubkey or '',
             )
             for client in self._networkClients.values():
                 try:
@@ -803,12 +904,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from evrmore.core.script import CScript
         from satorilib.satori_nostr.models import ChannelCommitment
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
-        pay_amount_evr = pay_amount_sats / 1e8
+        cumulative_sats = channel['locked_sats'] - channel['remainder_sats'] + pay_amount_sats
+        pay_amount_evr = cumulative_sats / 1e8
         tx, _txin_scripts = await asyncio.to_thread(
             self.wallet.paymentChannelMultisigTransactionStart,
             channel['receiver_pubkey'],   # toAddress
-            self.wallet.address,          # changeAddress (back to channel P2SH)
-            [channel['remainder_sats'] / 1e8],  # lockedAmounts
+            channel['p2sh_address'],      # changeAddress (back to channel P2SH)
+            [channel['locked_sats'] / 1e8],  # lockedAmounts
             pay_amount_evr,               # sendAmount
             None,                         # memo
             None,                         # feeOverride
@@ -839,6 +941,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 await client.publish_commitment(commitment)
             except Exception as e:
                 logging.warning(f'Channel: failed to publish commitment: {e}')
+        # Update sender's remainder so cumulative tracking is correct
+        await asyncio.to_thread(
+            self.networkDB.update_channel_remainder,
+            p2sh_address,
+            remainder)
         logging.info(
             f'Channel: published commitment {p2sh_address} '
             f'pay={pay_amount_sats} sats remainder={remainder} sats',
@@ -865,7 +972,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         txid = await asyncio.to_thread(
             self.wallet.paymentChannelRecallTransaction,
             self.wallet.address,
-            [channel['remainder_sats'] / 1e8],
+            [channel['locked_sats'] / 1e8],
             None,   # memo
             True,   # broadcast
             None,   # feeOverride

@@ -180,6 +180,7 @@ class NetworkDB:
                 blocks              INTEGER,
                 minutes             REAL,
                 is_sender           INTEGER NOT NULL,
+                sender_nostr_pubkey TEXT,
                 created_at          INTEGER NOT NULL,
                 pending_commitment  TEXT
             )
@@ -190,6 +191,12 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN pending_commitment TEXT")
+        # Migration: add sender_nostr_pubkey if missing (existing DBs)
+        try:
+            conn.execute("SELECT sender_nostr_pubkey FROM channels LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE channels ADD COLUMN sender_nostr_pubkey TEXT")
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -635,6 +642,7 @@ class NetworkDB:
         is_sender: bool,
         blocks: int = None,
         minutes: float = None,
+        sender_nostr_pubkey: str = None,
     ) -> None:
         """Persist a payment channel. Upserts on p2sh_address."""
         conn = self._get_conn()
@@ -642,8 +650,8 @@ class NetworkDB:
             INSERT INTO channels
                 (p2sh_address, sender_pubkey, receiver_pubkey, redeem_script,
                  funding_txid, funding_vout, locked_sats, remainder_sats,
-                 blocks, minutes, is_sender, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 blocks, minutes, is_sender, sender_nostr_pubkey, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(p2sh_address) DO UPDATE SET
                 redeem_script  = excluded.redeem_script,
                 funding_txid   = excluded.funding_txid,
@@ -655,7 +663,8 @@ class NetworkDB:
         """, (
             p2sh_address, sender_pubkey, receiver_pubkey, redeem_script,
             funding_txid, funding_vout, locked_sats, remainder_sats,
-            blocks, minutes, 1 if is_sender else 0, int(time.time()),
+            blocks, minutes, 1 if is_sender else 0, sender_nostr_pubkey,
+            int(time.time()),
         ))
         conn.commit()
 
@@ -734,6 +743,29 @@ class NetworkDB:
         conn.execute(
             "UPDATE channels SET remainder_sats = ? WHERE p2sh_address = ?",
             (remainder_sats, p2sh_address))
+        conn.commit()
+
+    def update_channel_funding(
+        self,
+        p2sh_address: str,
+        funding_txid: str,
+        funding_vout: int,
+        locked_sats: int,
+    ) -> None:
+        """Update channel after a claim creates a new P2SH UTXO (Option A).
+
+        Resets locked_sats and remainder_sats to the new UTXO value so
+        cumulative payment tracking restarts from zero.
+        """
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE channels SET
+                funding_txid   = ?,
+                funding_vout   = ?,
+                locked_sats    = ?,
+                remainder_sats = ?
+            WHERE p2sh_address = ?
+        """, (funding_txid, funding_vout, locked_sats, locked_sats, p2sh_address))
         conn.commit()
 
     def delete_channel(self, p2sh_address: str) -> None:
