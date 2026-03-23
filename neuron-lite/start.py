@@ -1,4 +1,5 @@
 from typing import Union, Optional
+import math
 import os
 import time
 import json
@@ -361,7 +362,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             price_sats = subscription['price_per_obs']
             provider_wallet_pubkey = subscription.get('provider_wallet_pubkey')
             if not provider_wallet_pubkey:
-                return  # can't pay without knowing receiver's EVR pubkey
+                return  # can't pay without knowing receiver's Satori wallet pubkey
             # Find an open sender channel with sufficient remainder
             channels = await asyncio.to_thread(
                 self.networkDB.get_channels_as_sender)
@@ -388,7 +389,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     self.networkDB.get_channel, p2sh)
                 if not channel or channel['remainder_sats'] < price_sats:
                     return
-            await self.sendChannelPayment(channel['p2sh_address'], price_sats)
+            await self.sendChannelPayment(channel['p2sh_address'], price_sats, stream_name)
         except Exception as e:
             logging.warning(f'Channel: pay-for-observation failed: {e}')
 
@@ -717,10 +718,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
 
-        Signs and broadcasts the latest pending commitment. Finds the P2SH change
-        output in the tx (Option A: change goes back to P2SH) and updates the
-        channel DB with the new funding UTXO so the sender can continue paying.
-        Publishes a KIND_CHANNEL_SETTLED notification to the sender.
+        Signs and broadcasts the latest pending commitment using 3-path fee logic:
+        PATH A — fee already embedded in the partial tx → broadcast directly.
+        PATH B — fee deficit but receiver has EVR → add EVR input, sign, broadcast.
+        PATH C — no EVR at all → pay SATORI fee to Mundo, Mundo adds EVR.
+
+        Updates the channel DB with the new funding UTXO so the sender can
+        continue paying. Publishes a KIND_CHANNEL_SETTLED notification.
 
         Args:
             p2sh_address: The channel to claim from
@@ -737,51 +741,154 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not commitment_json:
             raise ValueError(f'No pending commitment for channel: {p2sh_address}')
         commitment = ChannelCommitment.from_json(commitment_json)
-        from evrmore.core import CMutableTransaction
-        from evrmore.core.script import CScript
+        from evrmore.core import (
+            CMutableTransaction, CMutableTxIn, CMutableTxOut, COutPoint, lx, Hash160)
+        from evrmore.core.script import (
+            CScript, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
+            OP_DUP, OP_HASH160, OP_EQUALVERIFY, OP_CHECKSIG)
+        from evrmore.wallet import CEvrmoreAddress
+        from satorilib.wallet.utils.transaction import TxUtils
+        from satorilib.wallet.evrmore.scripts.channels import unlock
+        from functools import partial as funcpartial
         tx = CMutableTransaction.deserialize(
             bytes.fromhex(commitment.partial_tx_hex))
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
-        our_sig = await asyncio.to_thread(
-            self.wallet.paymentChannelMultisigTransactionMiddle,
-            tx=tx,
-            redeemScript=redeem_script,
-            vinIndex=0)
-        from satorilib.wallet.evrmore.scripts.channels import unlock
-        from functools import partial as funcpartial
         sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
-        redeemParams = funcpartial(
-            unlock.paymentChannel,
-            sender_sig=sender_sigs[0],
-            receiver_sig=our_sig)
-        await asyncio.to_thread(
-            self.wallet._compileClaimOnP2SHMultiSigEnd,
-            tx=tx,
-            redeemScript=redeem_script,
-            redeemParams=redeemParams,
-            redeemCount=1)
-        tx_hex = tx.serialize().hex()
-        txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
+        # ── Fee estimation ──────────────────────────────────────────────────
+        # Size of the serialised partial tx (P2SH vin has empty scriptSig yet)
+        # plus the space the completed 2-of-2+CSV scriptSig will occupy.
+        P2SH_SCRIPTSIG_SIZE = 265   # 2-of-2 + CSV redeemScript + sigs
+        EVR_INPUT_SIZE = 148        # P2PKH input
+        EVR_CHANGE_SIZE = 34        # P2PKH change output
+        partial_size = len(bytes.fromhex(commitment.partial_tx_hex))
+        estimated_size = partial_size + P2SH_SCRIPTSIG_SIZE
+        existing_fee = commitment.fee   # 0 for EVR-less partial txs
+        required_fee_a = math.ceil(estimated_size * TxUtils.feeRate)
+        deficit = required_fee_a - existing_fee
+
+        def _make_redeem_params(sig):
+            return funcpartial(
+                unlock.paymentChannel,
+                sender_sig=sender_sigs[0],
+                receiver_sig=sig)
+
+        if deficit <= 0:
+            # ── PATH A: fee already embedded ────────────────────────────────
+            our_sig = await asyncio.to_thread(
+                self.wallet.paymentChannelMultisigTransactionMiddle,
+                tx, redeem_script, 0, SIGHASH_ALL)
+            await asyncio.to_thread(
+                self.wallet._compileClaimOnP2SHMultiSigEnd,
+                tx, redeem_script, _make_redeem_params(our_sig), 1, None)
+            tx_hex = tx.serialize().hex()
+            txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
+            logging.info(
+                f'Channel: PATH A claimed {p2sh_address} '
+                f'({commitment.pay_amount_sats} sats) — txid={txid}',
+                color='green')
+        else:
+            # Need extra fee — try PATH B first (receiver adds EVR input)
+            estimated_size_b = estimated_size + EVR_INPUT_SIZE + EVR_CHANGE_SIZE
+            required_fee_b = math.ceil(estimated_size_b * TxUtils.feeRate)
+            # Find a usable EVR UTXO: prefer one that covers the fee exactly,
+            # fall back to the largest available.
+            evr_utxo = None
+            for u in sorted(
+                (self.wallet.unspentCurrency or []),
+                key=lambda x: x.get('value', 0)
+            ):
+                if u.get('value', 0) >= required_fee_b:
+                    evr_utxo = u
+                    break
+            if evr_utxo is None:
+                for u in sorted(
+                    (self.wallet.unspentCurrency or []),
+                    key=lambda x: -x.get('value', 0)
+                ):
+                    if u.get('value', 0) > 0:
+                        evr_utxo = u
+                        break
+
+            # Allow PATH B even if the UTXO can't cover fee+change — any EVR
+            # that covers at least the fee-with-input is usable (excess becomes fee).
+            required_fee_input_only = math.ceil(
+                (estimated_size + EVR_INPUT_SIZE) * TxUtils.feeRate)
+            if evr_utxo and evr_utxo.get('value', 0) >= required_fee_input_only:
+                # ── PATH B: receiver adds EVR input to cover fee ─────────────
+                evr_value = evr_utxo['value']
+                evr_change = evr_value - required_fee_b
+                # Append EVR input
+                evr_txin = CMutableTxIn(
+                    COutPoint(lx(evr_utxo['tx_hash']), evr_utxo['tx_pos']))
+                tx.vin.append(evr_txin)
+                # Append EVR change output if above dust (546 sats)
+                if evr_change >= 546:
+                    tx.vout.append(CMutableTxOut(
+                        evr_change,
+                        CEvrmoreAddress(self.wallet.address).to_scriptPubKey()))
+                # Receiver signs P2SH vin[0] with SIGHASH_ALL
+                our_sig = await asyncio.to_thread(
+                    self.wallet.paymentChannelMultisigTransactionMiddle,
+                    tx, redeem_script, 0, SIGHASH_ALL)
+                # Standard P2PKH scriptPubKey for the EVR input
+                evr_script = CScript([
+                    OP_DUP, OP_HASH160,
+                    Hash160(bytes.fromhex(self.wallet.pubkey)),
+                    OP_EQUALVERIFY, OP_CHECKSIG])
+                # Compile: sets P2SH scriptSig (vin[0]) and signs EVR (vin[1])
+                await asyncio.to_thread(
+                    self.wallet._compileClaimOnP2SHMultiSigEnd,
+                    tx, redeem_script, _make_redeem_params(our_sig), 1,
+                    [evr_script])
+                tx_hex = tx.serialize().hex()
+                txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
+                logging.info(
+                    f'Channel: PATH B claimed {p2sh_address} '
+                    f'({commitment.pay_amount_sats} sats, EVR fee {required_fee_b}) '
+                    f'— txid={txid}',
+                    color='green')
+            else:
+                # ── PATH C: Mundo — receiver has no EVR, pays SATORI fee ─────
+                txid = await self._claimChannelViaMundo(
+                    channel=channel,
+                    commitment=commitment,
+                    partial_tx=tx,
+                    redeem_script=redeem_script,
+                    sender_sigs=sender_sigs)
+                logging.info(
+                    f'Channel: PATH C claimed {p2sh_address} via Mundo '
+                    f'({commitment.pay_amount_sats} sats) — txid={txid}',
+                    color='green')
+        # ── Grant subscriber access before DB update (locked_sats is still ──
+        # ── the pre-claim value here, needed to compute total_paid). ────────
+        total_paid = channel['locked_sats'] - commitment.remainder_sats
+        await self._grantChannelAccess(
+            sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
+            total_paid_sats=total_paid,
+            stream_name=commitment.stream_name)
+        # ── Post-broadcast: update DB ───────────────────────────────────────
         logging.info(
             f'Channel: claimed {commitment.pay_amount_sats} sats '
             f'from {p2sh_address} — txid={txid}',
             color='green')
-        # Find the P2SH change output (Option A: change goes back to P2SH)
-        import hashlib
+        # Find the P2SH change output (change goes back to P2SH for next round)
         redeem_bytes = bytes.fromhex(channel['redeem_script'])
         script_hash = hashlib.new(
             'ripemd160', hashlib.sha256(redeem_bytes).digest()).digest()
         p2sh_script = bytes([0xa9, 0x14]) + script_hash + bytes([0x87])
         change_vout = -1
-        change_sats = 0
-        tx_obj = CMutableTransaction.deserialize(bytes.fromhex(tx_hex))
-        for i, out in enumerate(tx_obj.vout):
+        # SATORI outputs have nValue=0 in the Python Evrmore library;
+        # use commitment.remainder_sats for the canonical SATORI amount.
+        change_sats = commitment.remainder_sats
+        # Determine which vout carries the P2SH change by script comparison.
+        # For PATH A/B we have tx in memory; for PATH C rebuild from commitment.
+        check_tx = CMutableTransaction.deserialize(
+            bytes.fromhex(commitment.partial_tx_hex))
+        for i, out in enumerate(check_tx.vout):
             if bytes(out.scriptPubKey) == p2sh_script:
                 change_vout = i
-                change_sats = out.nValue  # satoshis
                 break
-        if change_vout >= 0:
-            # Update receiver DB: new funding UTXO, cumulative resets
+        if change_vout >= 0 and change_sats > 0:
             await asyncio.to_thread(
                 self.networkDB.update_channel_funding,
                 p2sh_address, txid, change_vout, change_sats)
@@ -821,6 +928,225 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 pass
         return txid
 
+    async def _claimChannelViaMundo(
+        self,
+        channel: dict,
+        commitment,
+        partial_tx,
+        redeem_script,
+        sender_sigs: list,
+    ) -> str:
+        """PATH C claim: receiver has no EVR — pay SATORI fee to Mundo.
+
+        Flow:
+          1. Find receiver's SATORI UTXO.
+          2. Compute final tx shape and request Mundo fee params.
+          3. Rebuild tx: P2SH inputs + SATORI input + existing outputs
+             + SATORI fee output + SATORI change output + EVR change output.
+          4. Sign P2SH vin[0] and SATORI input with SIGHASH_ALL|ANYONECANPAY (0x81).
+          5. POST to Mundo (signOnly=true) — Mundo adds EVR input and returns
+             the fully signed tx hex.
+          6. Broadcast the returned tx and return the txid.
+        """
+        import requests as _requests
+        from evrmore.core import (
+            CMutableTransaction, CMutableTxIn, CMutableTxOut, COutPoint, lx)
+        from evrmore.core.script import (
+            CScript, SIGHASH_ALL, SIGHASH_ANYONECANPAY)
+        from evrmore.wallet import CEvrmoreAddress
+        from satorilib.wallet.evrmore.scripts.channels import unlock
+        from satorilib.wallet.concepts.transaction import AssetTransaction
+        from satorilib.wallet.utils.transaction import TxUtils
+        from functools import partial as funcpartial
+
+        MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
+
+        # Step 1: find receiver's SATORI UTXO
+        satori_utxo = None
+        for u in sorted(
+            [u for u in (self.wallet.unspentAssets or [])
+             if u.get('name', u.get('asset')) == 'SATORI'
+             and u.get('value', 0) > 0],
+            key=lambda x: x.get('value', 0)
+        ):
+            satori_utxo = u
+            break
+        if not satori_utxo:
+            raise ValueError(
+                f'Channel {channel["p2sh_address"]}: no EVR and no SATORI — '
+                f'cannot cover the mining fee to claim this channel')
+
+        # Step 2: compute tx shape for Mundo fee request
+        p2sh_input_count = len(partial_tx.vin)
+        existing_output_count = len(partial_tx.vout)
+        # Inputs: P2SH inputs + 1 SATORI + 1 Mundo EVR (added by Mundo)
+        final_input_count = p2sh_input_count + 1 + 1
+        # Outputs: existing + SATORI fee + SATORI change (maybe) + EVR change
+        final_output_count = existing_output_count + 3
+
+        def _request_mundo():
+            resp = _requests.get(
+                f'{MUNDO_URL}/simple_partial/request/evrmore',
+                params={
+                    'inputCount': final_input_count,
+                    'outputCount': final_output_count},
+                timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+
+        mundo_data = await asyncio.to_thread(_request_mundo)
+        mundo_satori_fee = int(mundo_data['satoriFeeAmount'])
+        mundo_satori_fee_addr = mundo_data['satoriFeeAddress']
+        mundo_evr_change_addr = mundo_data.get('changeAddress', '')
+        mundo_evr_change_amt = int(mundo_data.get('changeAmount', 0))
+        fee_sats_reserved = int(mundo_data['feeSatsReserved'])
+        fee_sats = int(mundo_data['feeSats'])
+
+        satori_value = satori_utxo['value']
+        if satori_value < mundo_satori_fee:
+            raise ValueError(
+                f'Channel: SATORI UTXO ({satori_value} sats) < '
+                f'Mundo fee ({mundo_satori_fee} sats)')
+
+        # Step 3: build new tx with SATORI input + Mundo outputs
+        new_vins = list(partial_tx.vin)
+        new_vouts = list(partial_tx.vout)
+
+        # Add receiver's SATORI input
+        satori_txin = CMutableTxIn(
+            COutPoint(lx(satori_utxo['tx_hash']), satori_utxo['tx_pos']))
+        satori_vin_idx = len(new_vins)
+        new_vins.append(satori_txin)
+
+        # Add SATORI fee output to Mundo
+        from evrmore.core.script import OP_EVR_ASSET, OP_DROP
+        fee_script = CScript([
+            *CEvrmoreAddress(mundo_satori_fee_addr).to_scriptPubKey(),
+            OP_EVR_ASSET,
+            bytes.fromhex(
+                AssetTransaction.satoriHex(self.wallet.symbol) +
+                TxUtils.padHexStringTo8Bytes(
+                    TxUtils.intToLittleEndianHex(mundo_satori_fee))),
+            OP_DROP])
+        new_vouts.append(CMutableTxOut(0, fee_script))
+
+        # Add SATORI change output to receiver (if any)
+        satori_change = satori_value - mundo_satori_fee
+        if satori_change > 0:
+            change_script = CScript([
+                *CEvrmoreAddress(self.wallet.address).to_scriptPubKey(),
+                OP_EVR_ASSET,
+                bytes.fromhex(
+                    AssetTransaction.satoriHex(self.wallet.symbol) +
+                    TxUtils.padHexStringTo8Bytes(
+                        TxUtils.intToLittleEndianHex(satori_change))),
+                OP_DROP])
+            new_vouts.append(CMutableTxOut(0, change_script))
+
+        # Add EVR change output for Mundo
+        if mundo_evr_change_addr and mundo_evr_change_amt > 0:
+            new_vouts.append(CMutableTxOut(
+                mundo_evr_change_amt,
+                CEvrmoreAddress(mundo_evr_change_addr).to_scriptPubKey()))
+
+        new_tx = CMutableTransaction(new_vins, new_vouts)
+
+        # Step 4: sign P2SH vin[0] with 0x81 (SIGHASH_ALL | ANYONECANPAY)
+        # This locks all outputs but still allows Mundo to add its EVR input.
+        mundo_sighash = SIGHASH_ALL | SIGHASH_ANYONECANPAY  # 0x81
+        our_sig = await asyncio.to_thread(
+            self.wallet.paymentChannelMultisigTransactionMiddle,
+            new_tx, redeem_script, 0, mundo_sighash)
+        redeemParams = funcpartial(
+            unlock.paymentChannel,
+            sender_sig=sender_sigs[0],
+            receiver_sig=our_sig)
+        new_tx.vin[0].scriptSig = redeemParams() + redeem_script
+
+        # Sign receiver's SATORI input with 0x81
+        # _compileInputs returns (txins, txinScripts); we need the script
+        _, satori_scripts = await asyncio.to_thread(
+            self.wallet._compileInputs,
+            [],              # gatheredCurrencyUnspents (positional)
+            [satori_utxo],  # gatheredSatoriUnspents (positional)
+        )
+        satori_script = satori_scripts[0]
+        await asyncio.to_thread(
+            self.wallet._signInput,
+            new_tx, satori_vin_idx, satori_txin, satori_script, mundo_sighash)
+
+        # Step 5: serialize and POST to Mundo (signOnly=true)
+        incomplete_hex = new_tx.serialize().hex()
+
+        def _broadcast_via_mundo():
+            resp = _requests.post(
+                f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
+                f'/{fee_sats_reserved}/{fee_sats}/0',
+                params={'signOnly': 'true'},
+                data=incomplete_hex,
+                headers={'Content-Type': 'text/plain'},
+                timeout=30)
+            resp.raise_for_status()
+            return resp.text
+
+        signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
+
+        # Step 6: broadcast the fully-signed tx and return txid
+        txid = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
+        return txid
+
+    async def _grantChannelAccess(
+        self,
+        sender_nostr_pubkey: str,
+        total_paid_sats: int,
+        stream_name: str = '',
+    ) -> None:
+        """Update subscriber access rights after a successful channel claim.
+
+        Computes how many observations the sender has pre-paid for and
+        advances their last_paid_seq in every connected SatoriNostr client.
+
+        If stream_name is provided (populated from the ChannelCommitment Nostr
+        tag), only that specific stream is updated — prevents over-granting
+        access to other streams on the same channel.  If stream_name is empty
+        (old commitment without the tag, or manual call), falls back to
+        granting access across all active paid publications.
+
+        The provider's publish_observation() only sends encrypted data to
+        subscribers whose last_paid_seq >= current seq_num, so this is what
+        unlocks the next batch of observations for the paying subscriber.
+        """
+        if not sender_nostr_pubkey or total_paid_sats <= 0:
+            return
+        pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
+        for pub in pubs:
+            price_per_obs = pub.get('price_per_obs', 0)
+            if price_per_obs <= 0:
+                continue
+            pub_stream = pub['stream_name']
+            # If the commitment names a specific stream, skip all others
+            if stream_name and pub_stream != stream_name:
+                continue
+            paid_count = total_paid_sats // price_per_obs
+            if paid_count <= 0:
+                continue
+            current_seq = pub.get('last_seq_num', 0)
+            grant_to_seq = current_seq + paid_count
+            for client in self._networkClients.values():
+                # Ensure the subscriber is registered before granting access.
+                # record_payment is a no-op if they aren't in _subscribers,
+                # which can happen if a claim fires before their subscription
+                # announcement has been replayed on this relay.
+                if sender_nostr_pubkey not in client._subscribers.get(
+                        pub_stream, {}):
+                    client.record_subscription(pub_stream, sender_nostr_pubkey)
+                client.record_payment(pub_stream, sender_nostr_pubkey, grant_to_seq)
+            logging.info(
+                f'Channel: granted {sender_nostr_pubkey[:16]}… access to '
+                f'{pub_stream} up to seq={grant_to_seq} '
+                f'({paid_count} obs)',
+                color='cyan')
+
     async def _channelExpiryCheck(self):
         """Auto-claim receiver channels that expire within 24 hours.
 
@@ -850,7 +1176,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(f'Channel: expiry check failed: {e}')
 
     def _channelFundSats(self) -> int:
-        """Return the configured channel funding amount in sats (default 1 EVR)."""
+        """Return the configured channel funding amount in sats (default 1 SATORI)."""
         return int(config.get().get('channel_fund_sats', 100_000_000))
 
     def _channelTimeoutMinutes(self) -> int:
@@ -873,7 +1199,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         connected relays so the receiver can register the channel automatically.
 
         Args:
-            receiver_pubkey: Receiver's EVR public key (hex)
+            receiver_pubkey: Receiver's Satori wallet public key (hex)
             amount_sats: Amount to lock in the channel in satoshis
             minutes: CSV timeout in minutes (mutually exclusive with blocks)
             blocks: CSV timeout in blocks (mutually exclusive with minutes)
@@ -882,7 +1208,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The P2SH address of the new channel
         """
-        amount_evr = amount_sats / 1e8
+        amount_satori = amount_sats / 1e8
         txid, script_payload = await asyncio.to_thread(
             self.wallet.producePaymentChannel,
             receiver_pubkey,
@@ -890,7 +1216,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             blocks,
             minutes,
             None,       # memo
-            amount_evr,
+            amount_satori,
             True,       # broadcast
         )
         p2sh_address = script_payload['p2sh_address']
@@ -942,11 +1268,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self,
         p2sh_address: str,
         pay_amount_sats: int,
+        stream_name: str = '',
     ) -> None:
         """Issue a payment commitment to the receiver over Nostr (sender side).
 
         Builds a half-signed transaction and publishes it to all connected
         relays. The receiver's _channelListen loop picks it up and broadcasts.
+
+        The partial tx contains only the P2SH channel input and SATORI outputs
+        (no EVR inputs). The receiver handles the mining fee via 3-path logic:
+        PATH A (fee embedded), PATH B (receiver adds EVR), PATH C (Mundo).
 
         Args:
             p2sh_address: The channel to pay from
@@ -962,26 +1293,37 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{channel["remainder_sats"]}')
         from evrmore.core.script import CScript
         from satorilib.satori_nostr.models import ChannelCommitment
+        from satorilib.wallet.utils.transaction import TxUtils
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
-        cumulative_sats = channel['locked_sats'] - channel['remainder_sats'] + pay_amount_sats
-        pay_amount_evr = cumulative_sats / 1e8
-        tx, _txin_scripts = await asyncio.to_thread(
-            self.wallet.paymentChannelMultisigTransactionStart,
-            channel['receiver_pubkey'],   # toAddress
-            channel['p2sh_address'],      # changeAddress (back to channel P2SH)
-            [channel['locked_sats'] / 1e8],  # lockedAmounts
-            pay_amount_evr,               # sendAmount
-            None,                         # memo
-            None,                         # feeOverride
-            [channel['funding_txid']],    # fundingTxIds
-            [channel['funding_vout']],    # fundingVouts
-        )
+        locked_sats = channel['locked_sats']
+        cumulative_sats = (
+            locked_sats - channel['remainder_sats'] + pay_amount_sats)
+        # Build partial tx with ONLY the P2SH input and SATORI outputs.
+        # No EVR inputs are included — the receiver resolves the fee via
+        # 3-path logic so the sender doesn't need EVR to send micropayments.
+        def _build_partial_tx():
+            sat_sats = TxUtils.roundSatsDownToDivisibility(
+                sats=cumulative_sats,
+                divisibility=self.wallet.divisibility)
+            change_out = self.wallet._compileSatoriChangeOutput(
+                satoriSats=sat_sats,
+                gatheredSatoriSats=locked_sats,
+                changeAddress=channel['p2sh_address'])
+            return self.wallet._compileClaimOnP2SHMultiSigStart(
+                toAddress=channel['receiver_pubkey'],
+                satoriSats=sat_sats,
+                feeOverride=None,
+                fundingTxIds=[channel['funding_txid']],
+                fundingVouts=[channel['funding_vout']],
+                extraVins=[],
+                extraVouts=[change_out] if change_out else [])
+        tx = await asyncio.to_thread(_build_partial_tx)
         sig = await asyncio.to_thread(
             self.wallet.paymentChannelMultisigTransactionMiddle,
             tx,
             redeem_script,
             0,    # vinIndex
-            None, # sighashFlag — use default SIGHASH_SINGLE|ANYONECANPAY
+            None, # sighashFlag — use default SIGHASH_SINGLE|ANYONECANPAY (0x83)
         )
         remainder = channel['remainder_sats'] - pay_amount_sats
         commitment = ChannelCommitment(
@@ -992,8 +1334,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             sender_sigs=[sig.hex()],
             pay_amount_sats=pay_amount_sats,
             remainder_sats=remainder,
-            fee=0,  # fee is embedded in the tx outputs
+            fee=0,  # no fee embedded; receiver handles via 3-path
             timestamp=int(time.time()),
+            stream_name=stream_name,
         )
         for client in self._networkClients.values():
             try:
@@ -1011,10 +1354,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             color='cyan')
 
     async def reclaimChannel(self, p2sh_address: str) -> str:
-        """Reclaim locked funds after the CSV timeout has expired (sender side).
+        """Reclaim locked SATORI after the CSV timeout has expired (sender side).
 
-        Should be called when the timeout has passed and the receiver has not
-        claimed. Broadcasts the reclaim transaction and removes the channel.
+        PATH A: sender has EVR → gather EVR for fees, build reclaim tx using
+                the CSV single-sig unlock path (OP_FALSE branch), sign with
+                SIGHASH_ALL, and broadcast directly.
+        PATH B: no EVR → _reclaimChannelViaMundo pays the mining fee via a
+                SATORI fee output, signing with SIGHASH_ALL|ANYONECANPAY so
+                Mundo can add its EVR input.
 
         Args:
             p2sh_address: The channel to reclaim
@@ -1022,29 +1369,235 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The broadcast txid
         """
+        import math
+        from evrmore.core.script import CScript, OP_FALSE, SIGHASH_ALL
+        from satorilib.wallet.concepts.transaction import TransactionFailure
+        from satorilib.wallet.utils.transaction import TxUtils
+
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
             raise ValueError(f'Unknown channel: {p2sh_address}')
-        from evrmore.core.script import CScript
+
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
-        txid = await asyncio.to_thread(
-            self.wallet.paymentChannelRecallTransaction,
-            self.wallet.address,
-            [channel['locked_sats'] / 1e8],
-            None,   # memo
-            True,   # broadcast
-            None,   # feeOverride
-            [channel['funding_txid']],
-            [channel['funding_vout']],
-            redeem_script,
-        )
-        await asyncio.to_thread(
-            self.networkDB.delete_channel, p2sh_address)
+
+        # Compute CSV sequence value from stored timeout
+        CSV_TIME_BIT = 0x00400000
+        CSV_UNIT_SECS = 512
+        if channel.get('blocks'):
+            csv_value = int(channel['blocks'])
+        elif channel.get('minutes'):
+            csv_value = CSV_TIME_BIT | max(
+                1, math.ceil(int(channel['minutes']) * 60 / CSV_UNIT_SECS))
+        else:
+            raise ValueError(
+                f'Channel {p2sh_address}: no timeout (blocks/minutes) defined')
+
+        sat_sats = TxUtils.roundSatsDownToDivisibility(
+            sats=channel['locked_sats'],
+            divisibility=self.wallet.divisibility)
+
+        def _build_standard_reclaim():
+            """PATH A: gather EVR, build csv reclaim tx, sign, broadcast."""
+            from evrmore.core.script import CScript, OP_FALSE, SIGHASH_ALL
+            fee = TxUtils.defaultFee
+            # raises TransactionFailure if not enough EVR
+            gathered_utxos, gathered_sats = self.wallet._gatherCurrencyUnspents(
+                feeOverride=fee)
+            txins_evr, txin_scripts_evr = self.wallet._compileInputs(
+                gatheredCurrencyUnspents=gathered_utxos)
+            evr_change_out = self.wallet._compileCurrencyChangeOutput(
+                gatheredCurrencySats=gathered_sats,
+                fee=fee)
+            # Build bare tx: P2SH vin + EVR vins, SATORI output + EVR change
+            tx = self.wallet._compileClaimOnP2SHMultiSigStart(
+                toAddress=self.wallet.address,
+                satoriSats=sat_sats,
+                fundingTxIds=[channel['funding_txid']],
+                fundingVouts=[channel['funding_vout']],
+                extraVins=txins_evr,
+                extraVouts=[evr_change_out] if evr_change_out else [])
+            # Set CSV fields BEFORE signing (they are part of the sighash)
+            tx.nVersion = 2
+            tx.vin[0].nSequence = csv_value
+            # Sign P2SH vin[0] with SIGHASH_ALL (single-sig CSV path)
+            sig = self.wallet._compileClaimOnP2SHMultiSigMiddle(
+                tx, redeem_script, 0, SIGHASH_ALL)
+            # redeemParams() must return just the unlock prefix (no sig arg)
+            def redeem_params_csv():
+                return CScript([sig, OP_FALSE])
+            # Set P2SH scriptSig and sign EVR vins
+            self.wallet._compileClaimOnP2SHMultiSigEnd(
+                tx, redeem_script, redeem_params_csv, 1, txin_scripts_evr)
+            return self.wallet.broadcast(self.wallet._txToHex(tx))
+
+        try:
+            txid = await asyncio.to_thread(_build_standard_reclaim)
+        except TransactionFailure:
+            # PATH B: sender has no EVR — fall back to Mundo
+            txid = await self._reclaimChannelViaMundo(
+                channel=channel,
+                redeem_script=redeem_script,
+                csv_value=csv_value,
+                sat_sats=sat_sats)
+
+        await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
         logging.info(
             f'Channel: reclaimed {p2sh_address} — txid={txid}',
             color='yellow')
         return txid
+
+    async def _reclaimChannelViaMundo(
+        self,
+        channel: dict,
+        redeem_script,
+        csv_value: int,
+        sat_sats: int,
+    ) -> str:
+        """PATH B reclaim: sender has no EVR — pay SATORI fee to Mundo.
+
+        Flow:
+          1. Find sender's SATORI UTXO for the fee.
+          2. Request Mundo fee params for final tx shape.
+          3. Build tx: [P2SH vin, SATORI vin] +
+             [SATORI→sender, SATORI fee→Mundo, SATORI change, EVR change].
+          4. Set nVersion=2, nSequence=csv_value on the tx (CSV requirement).
+          5. Sign P2SH vin[0] with 0x81 (SIGHASH_ALL|ANYONECANPAY, CSV branch).
+          6. Sign SATORI vin[1] with 0x81.
+          7. POST to Mundo (signOnly=true) — Mundo adds its EVR input.
+          8. Broadcast the returned fully-signed hex and return the txid.
+        """
+        import requests as _requests
+        from evrmore.core import (
+            CMutableTransaction, CMutableTxIn, CMutableTxOut, COutPoint, lx)
+        from evrmore.core.script import (
+            CScript, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
+            OP_EVR_ASSET, OP_DROP, OP_FALSE)
+        from evrmore.wallet import CEvrmoreAddress
+        from satorilib.wallet.concepts.transaction import AssetTransaction
+        from satorilib.wallet.utils.transaction import TxUtils
+
+        MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
+
+        # Step 1: find sender's SATORI UTXO
+        satori_utxo = None
+        for u in sorted(
+            [u for u in (self.wallet.unspentAssets or [])
+             if u.get('name', u.get('asset')) == 'SATORI'
+             and u.get('value', 0) > 0],
+            key=lambda x: x.get('value', 0)
+        ):
+            satori_utxo = u
+            break
+        if not satori_utxo:
+            raise ValueError(
+                f'Channel {channel["p2sh_address"]}: no EVR and no SATORI — '
+                f'cannot cover the mining fee to reclaim this channel')
+
+        # Step 2: compute final tx shape for Mundo fee request
+        # Inputs: 1 P2SH + 1 SATORI + 1 Mundo EVR
+        # Outputs: 1 SATORI→sender + 1 SATORI fee + 1 SATORI change + 1 EVR change
+        final_input_count = 3
+        final_output_count = 4
+
+        def _request_mundo():
+            resp = _requests.get(
+                f'{MUNDO_URL}/simple_partial/request/evrmore',
+                params={
+                    'inputCount': final_input_count,
+                    'outputCount': final_output_count},
+                timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+
+        mundo_data = await asyncio.to_thread(_request_mundo)
+        mundo_satori_fee = int(mundo_data['satoriFeeAmount'])
+        mundo_satori_fee_addr = mundo_data['satoriFeeAddress']
+        mundo_evr_change_addr = mundo_data.get('changeAddress', '')
+        mundo_evr_change_amt = int(mundo_data.get('changeAmount', 0))
+        fee_sats_reserved = int(mundo_data['feeSatsReserved'])
+        fee_sats = int(mundo_data['feeSats'])
+
+        satori_value = satori_utxo['value']
+        if satori_value < mundo_satori_fee:
+            raise ValueError(
+                f'Channel: SATORI UTXO ({satori_value} sats) < '
+                f'Mundo fee ({mundo_satori_fee} sats)')
+
+        # Step 3: build tx
+        p2sh_txin = CMutableTxIn(
+            COutPoint(lx(channel['funding_txid']), channel['funding_vout']))
+        satori_txin = CMutableTxIn(
+            COutPoint(lx(satori_utxo['tx_hash']), satori_utxo['tx_pos']))
+        satori_vin_idx = 1  # vin[0]=P2SH, vin[1]=SATORI
+
+        def _satori_asset_script(address: str, amount_sats: int) -> CScript:
+            return CScript([
+                *CEvrmoreAddress(address).to_scriptPubKey(),
+                OP_EVR_ASSET,
+                bytes.fromhex(
+                    AssetTransaction.satoriHex(self.wallet.symbol) +
+                    TxUtils.padHexStringTo8Bytes(
+                        TxUtils.intToLittleEndianHex(amount_sats))),
+                OP_DROP])
+
+        vouts = [
+            # SATORI back to sender
+            CMutableTxOut(0, _satori_asset_script(self.wallet.address, sat_sats)),
+            # SATORI fee to Mundo
+            CMutableTxOut(0, _satori_asset_script(mundo_satori_fee_addr, mundo_satori_fee)),
+        ]
+        satori_change = satori_value - mundo_satori_fee
+        if satori_change > 0:
+            vouts.append(CMutableTxOut(
+                0, _satori_asset_script(self.wallet.address, satori_change)))
+        if mundo_evr_change_addr and mundo_evr_change_amt > 0:
+            vouts.append(CMutableTxOut(
+                mundo_evr_change_amt,
+                CEvrmoreAddress(mundo_evr_change_addr).to_scriptPubKey()))
+
+        new_tx = CMutableTransaction([p2sh_txin, satori_txin], vouts)
+
+        # Step 4: set CSV fields BEFORE signing
+        new_tx.nVersion = 2
+        new_tx.vin[0].nSequence = csv_value
+
+        # Step 5: sign P2SH vin[0] with 0x81 (CSV single-sig branch)
+        mundo_sighash = SIGHASH_ALL | SIGHASH_ANYONECANPAY  # 0x81
+        p2sh_sig = await asyncio.to_thread(
+            self.wallet.paymentChannelMultisigTransactionMiddle,
+            new_tx, redeem_script, 0, mundo_sighash)
+        new_tx.vin[0].scriptSig = CScript([p2sh_sig, OP_FALSE]) + redeem_script
+
+        # Step 6: sign SATORI vin[1] with 0x81
+        _, satori_scripts = await asyncio.to_thread(
+            self.wallet._compileInputs,
+            [],              # gatheredCurrencyUnspents
+            [satori_utxo],  # gatheredSatoriUnspents
+        )
+        await asyncio.to_thread(
+            self.wallet._signInput,
+            new_tx, satori_vin_idx, satori_txin,
+            satori_scripts[0], mundo_sighash)
+
+        # Step 7: serialize and POST to Mundo (signOnly=true)
+        incomplete_hex = new_tx.serialize().hex()
+
+        def _broadcast_via_mundo():
+            resp = _requests.post(
+                f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
+                f'/{fee_sats_reserved}/{fee_sats}/0',
+                params={'signOnly': 'true'},
+                data=incomplete_hex,
+                headers={'Content-Type': 'text/plain'},
+                timeout=30)
+            resp.raise_for_status()
+            return resp.text
+
+        signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
+
+        # Step 8: broadcast the fully-signed tx
+        return await asyncio.to_thread(self.wallet.broadcast, signed_hex)
 
     # ── End channel support ───────────────────────────────────────────────────
 
@@ -1065,7 +1618,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     source['source_stream_name'] = pub['source_stream_name']
                     source['source_provider_pubkey'] = pub.get(
                         'source_provider_pubkey', '')
-                # Include our EVR wallet pubkey so subscribers can auto-open
+                # Include our Satori wallet pubkey so subscribers can auto-open
                 # payment channels without any manual configuration.
                 meta_dict = source or {}
                 if hasattr(self, 'wallet') and self.wallet and self.wallet.pubkey:

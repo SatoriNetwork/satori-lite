@@ -539,6 +539,12 @@
                             </div>
                         </div>
                         <div class="row g-2 mb-2">
+                            <div class="col-md-3">
+                                <label class="form-label form-label-sm">Price per Observation <small class="text-muted">(sats, 0 = free)</small></label>
+                                <input type="number" id="dsPricePerObs" class="form-control form-control-sm" value="0" min="0" placeholder="0">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-2">
                             <div class="col-md-6">
                                 <label class="form-label form-label-sm">URL <small class="text-muted">(leave empty for external push)</small></label>
                                 <input type="text" id="dsUrl" class="form-control form-control-sm" placeholder="https://api.example.com/price" oninput="toggleFetchFields()">
@@ -626,6 +632,7 @@
                                         <th>Stream</th>
                                         <th>Source</th>
                                         <th>Cadence</th>
+                                        <th>Price</th>
                                         <th>Seq</th>
                                         <th>Status</th>
                                         <th></th>
@@ -2109,6 +2116,7 @@
         ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython'].forEach(
             id => document.getElementById(id).value = '');
         document.getElementById('dsCadenceMin').value = '';
+        document.getElementById('dsPricePerObs').value = '0';
         document.getElementById('dsMethod').value = 'GET';
         document.getElementById('dsParserType').value = 'json_path';
         toggleParserInput();
@@ -2132,6 +2140,7 @@
             document.getElementById('dsMethod').value = ds.method || 'GET';
             document.getElementById('dsHeaders').value = ds.headers || '';
             document.getElementById('dsCadenceMin').value = ds.cadence_seconds ? Math.round(ds.cadence_seconds / 60) : '';
+            document.getElementById('dsPricePerObs').value = ds.price_per_obs || 0;
             document.getElementById('dsParserType').value = ds.parser_type || 'json_path';
             toggleParserInput();
             if (ds.parser_type === 'python') {
@@ -2340,6 +2349,7 @@
                 cadence_seconds: cadence,
                 parser_type: parserType,
                 parser_config: parserConfig,
+                price_per_obs: parseInt(document.getElementById('dsPricePerObs').value) || 0,
             })
         });
         btnDone(btn);
@@ -2535,6 +2545,7 @@
                 '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
                 '<td>' + source + '</td>' +
                 '<td>' + formatCadence(p.cadence_seconds) + '</td>' +
+                '<td>' + (p.price_per_obs > 0 ? p.price_per_obs + ' sats' : '<span class="text-muted">Free</span>') + '</td>' +
                 '<td>' + (p.last_seq_num || 0) + '</td>' +
                 '<td>' + statusBadge + '</td>' +
                 '<td>' + actionBtn + '</td>';

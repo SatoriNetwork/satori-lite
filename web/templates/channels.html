@@ -11,7 +11,7 @@
     <div>
       <h4 class="mb-1">Payment Channels</h4>
       <p class="text-muted small mb-0">
-        Off-chain micropayments for data streams. Open a channel to lock funds,
+        Off-chain micropayments for data streams. Open a channel to lock SATORI,
         then pay per observation without an on-chain transaction each time.
       </p>
     </div>
@@ -37,16 +37,18 @@
         <table class="table table-hover mb-0">
           <thead>
             <tr>
+              <th style="width:28px;"></th>
               <th>Channel (P2SH)</th>
               <th>Receiver</th>
               <th class="text-end">Locked</th>
+              <th class="text-end">Paid</th>
               <th class="text-end">Remaining</th>
               <th class="text-end">Timeout</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="sendingTable">
-            <tr><td colspan="6" class="text-muted text-center py-4">Loading…</td></tr>
+            <tr><td colspan="8" class="text-muted text-center py-4">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -63,16 +65,17 @@
         <table class="table table-hover mb-0">
           <thead>
             <tr>
+              <th style="width:28px;"></th>
               <th>Channel (P2SH)</th>
               <th>Sender</th>
               <th class="text-end">Locked</th>
-              <th class="text-end">Remaining</th>
+              <th class="text-end">Claimable</th>
               <th class="text-end">Timeout</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="receivingTable">
-            <tr><td colspan="6" class="text-muted text-center py-4">Loading…</td></tr>
+            <tr><td colspan="7" class="text-muted text-center py-4">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -90,14 +93,20 @@
       </div>
       <div class="modal-body">
         <div class="mb-3">
-          <label class="form-label">Receiver Public Key (hex)</label>
+          <label class="form-label">Receiver Wallet Public Key (hex)</label>
           <input type="text" class="form-control font-monospace" id="ocReceiverPubkey"
                  placeholder="02abc123…">
         </div>
         <div class="mb-3">
-          <label class="form-label">Amount to Lock (sats)</label>
-          <input type="number" class="form-control" id="ocAmountSats"
-                 placeholder="e.g. 1000000" min="1">
+          <label class="form-label">Receiver Nostr Public Key (hex) <small class="text-muted">— optional, enables auto-notification</small></label>
+          <input type="text" class="form-control font-monospace" id="ocReceiverNostrPubkey"
+                 placeholder="Leave blank if unknown">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Amount to Lock (SATORI)</label>
+          <input type="number" class="form-control" id="ocAmountSatori"
+                 placeholder="e.g. 1.0" min="0.00000001" step="0.00000001">
+          <div class="form-text text-muted" id="ocAmountSats"></div>
         </div>
         <div class="mb-3">
           <label class="form-label">Timeout</label>
@@ -138,9 +147,10 @@
           <input type="text" class="form-control font-monospace" id="payP2sh" readonly>
         </div>
         <div class="mb-3">
-          <label class="form-label">Amount (sats)</label>
-          <input type="number" class="form-control" id="payAmountSats"
-                 placeholder="e.g. 100" min="1">
+          <label class="form-label">Amount (SATORI)</label>
+          <input type="number" class="form-control" id="payAmountSatori"
+                 placeholder="e.g. 0.000001" min="0.00000001" step="0.00000001">
+          <div class="form-text text-muted" id="payAmountSats"></div>
         </div>
         <div id="payError" class="alert alert-danger d-none"></div>
       </div>
@@ -155,10 +165,58 @@
 {% endblock %}
 
 {% block extra_js %}
+<style>
+.detail-row td { background: var(--bg-card, #1a1a2e); padding: 0 !important; }
+.detail-panel {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color, #333);
+  font-size: 0.82rem;
+}
+.detail-panel .detail-field { margin-bottom: 8px; }
+.detail-panel .detail-label { color: var(--text-muted, #888); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+.detail-panel .detail-value { font-family: monospace; word-break: break-all; }
+.copy-btn { cursor: pointer; border: none; background: none; color: var(--text-muted, #888); padding: 0 4px; font-size: 0.8rem; vertical-align: middle; }
+.copy-btn:hover { color: var(--text-primary, #fff); }
+.claimable-amount { color: #28a745; font-weight: 600; }
+.eye-btn { border: none; background: none; color: var(--text-muted, #888); cursor: pointer; padding: 0 4px; }
+.eye-btn:hover { color: var(--text-primary, #fff); }
+</style>
 <script>
-const fmtSats = (n) => Number(n).toLocaleString() + ' sats';
-const fmtAddr = (s) => s ? s.slice(0, 12) + '…' + s.slice(-6) : '—';
+// ── Formatting ────────────────────────────────────────────────
+function fmtSatori(sats) {
+  const val = Number(sats) / 1e8;
+  // Up to 8 decimal places, strip trailing zeros
+  let s = val.toFixed(8).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return s + ' SATORI';
+}
 
+function satoriToSats(satori) {
+  return Math.round(parseFloat(satori) * 1e8) || 0;
+}
+
+const fmtAddr = (s) => s ? s.slice(0, 10) + '…' + s.slice(-6) : '—';
+
+function timeout(ch) {
+  if (ch.minutes) return ch.minutes.toLocaleString() + ' min';
+  if (ch.blocks)  return ch.blocks.toLocaleString() + ' blocks';
+  return '—';
+}
+
+function fmtTimestamp(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+// ── Copy to clipboard ─────────────────────────────────────────
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '✓';
+    setTimeout(() => btn.innerHTML = orig, 1200);
+  });
+}
+
+// ── Alert ─────────────────────────────────────────────────────
 function showAlert(msg, type='danger') {
   const area = document.getElementById('alertArea');
   area.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show" role="alert">
@@ -167,6 +225,7 @@ function showAlert(msg, type='danger') {
   </div>`;
 }
 
+// ── Load channels ─────────────────────────────────────────────
 async function loadChannels() {
   try {
     const resp = await fetch('/api/channels');
@@ -179,61 +238,140 @@ async function loadChannels() {
   }
 }
 
-function timeout(ch) {
-  if (ch.minutes) return ch.minutes + ' min';
-  if (ch.blocks)  return ch.blocks + ' blocks';
-  return '—';
+// ── Detail panel HTML ─────────────────────────────────────────
+function detailField(label, value, copyable) {
+  const copyBtn = copyable
+    ? ` <button class="copy-btn" onclick="copyText('${value.replace(/'/g, "\\'")}', this)" title="Copy">⧉</button>`
+    : '';
+  return `<div class="detail-field">
+    <div class="detail-label">${label}</div>
+    <div class="detail-value">${value}${copyBtn}</div>
+  </div>`;
 }
 
+function buildDetailPanel(ch, isSender) {
+  const claimable = ch.locked_sats - ch.remainder_sats;
+  const counterpartyLabel = isSender ? 'Receiver Wallet Pubkey' : 'Sender Wallet Pubkey';
+  const counterpartyKey = isSender ? ch.receiver_pubkey : ch.sender_pubkey;
+  const pendingInfo = !isSender
+    ? detailField('Pending Commitment', ch.pending_commitment ? 'Yes — ready to claim' : 'No commitments received yet', false)
+    : '';
+  const senderNostr = ch.sender_nostr_pubkey
+    ? detailField('Sender Nostr Pubkey', ch.sender_nostr_pubkey, true)
+    : '';
+  return `<div class="detail-panel">
+    <div class="row g-3">
+      <div class="col-md-6">
+        ${detailField('P2SH Address', ch.p2sh_address, true)}
+        ${detailField(counterpartyLabel, counterpartyKey, true)}
+        ${senderNostr}
+        ${detailField('Funding TXID', ch.funding_txid, true)}
+        ${detailField('Funding Output Index', String(ch.funding_vout), false)}
+      </div>
+      <div class="col-md-6">
+        ${detailField('Locked', fmtSatori(ch.locked_sats), false)}
+        ${isSender
+          ? detailField('Paid So Far', fmtSatori(claimable), false)
+          : detailField('Claimable', `<span class="claimable-amount">${fmtSatori(claimable)}</span>`, false)}
+        ${detailField('Remaining', fmtSatori(ch.remainder_sats), false)}
+        ${detailField('Timeout', timeout(ch), false)}
+        ${detailField('Opened At', fmtTimestamp(ch.created_at), false)}
+        ${pendingInfo}
+        ${ch.redeem_script ? `<div class="detail-field">
+          <div class="detail-label">Redeem Script</div>
+          <div class="detail-value">
+            <span title="${ch.redeem_script}">${ch.redeem_script.slice(0, 32)}…</span>
+            <button class="copy-btn" onclick="copyText('${ch.redeem_script}', this)" title="Copy full script">⧉</button>
+          </div>
+        </div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Render sending table ──────────────────────────────────────
 function renderSending(rows) {
   document.getElementById('sendingCount').textContent = rows.length;
   const tbody = document.getElementById('sendingTable');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4">No channels opened yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-center py-4">No channels opened yet.</td></tr>';
     return;
   }
-  tbody.innerHTML = rows.map(ch => `
-    <tr>
+  tbody.innerHTML = rows.map((ch, i) => {
+    const paid = ch.locked_sats - ch.remainder_sats;
+    const detailId = `send-detail-${i}`;
+    return `<tr onclick="toggleDetail('${detailId}')" style="cursor:pointer">
+      <td>
+        <button class="eye-btn" onclick="event.stopPropagation(); toggleDetail('${detailId}')" title="Details">
+          <i class="material-icons" style="font-size:16px;">visibility</i>
+        </button>
+      </td>
       <td><code title="${ch.p2sh_address}">${fmtAddr(ch.p2sh_address)}</code></td>
       <td><code title="${ch.receiver_pubkey}">${fmtAddr(ch.receiver_pubkey)}</code></td>
-      <td class="text-end">${fmtSats(ch.locked_sats)}</td>
-      <td class="text-end">${fmtSats(ch.remainder_sats)}</td>
+      <td class="text-end">${fmtSatori(ch.locked_sats)}</td>
+      <td class="text-end">${fmtSatori(paid)}</td>
+      <td class="text-end">${fmtSatori(ch.remainder_sats)}</td>
       <td class="text-end">${timeout(ch)}</td>
-      <td class="text-end">
+      <td class="text-end" onclick="event.stopPropagation()">
         <button class="btn btn-outline-secondary btn-sm me-1"
                 onclick="openPayModal('${ch.p2sh_address}')">Pay</button>
         <button class="btn btn-outline-secondary btn-sm"
                 onclick="reclaim('${ch.p2sh_address}')">Reclaim</button>
       </td>
-    </tr>`).join('');
+    </tr>
+    <tr class="detail-row" id="${detailId}" style="display:none">
+      <td colspan="8">${buildDetailPanel(ch, true)}</td>
+    </tr>`;
+  }).join('');
 }
 
+// ── Render receiving table ────────────────────────────────────
 function renderReceiving(rows) {
   document.getElementById('receivingCount').textContent = rows.length;
   const tbody = document.getElementById('receivingTable');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4">No inbound channels.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">No inbound channels.</td></tr>';
     return;
   }
-  tbody.innerHTML = rows.map(ch => `
-    <tr>
-      <td><code title="${ch.p2sh_address}">${fmtAddr(ch.p2sh_address)}</code></td>
-      <td><code title="${ch.sender_pubkey}">${fmtAddr(ch.sender_pubkey)}</code></td>
-      <td class="text-end">${fmtSats(ch.locked_sats)}</td>
-      <td class="text-end">${fmtSats(ch.remainder_sats)}</td>
-      <td class="text-end">${timeout(ch)}</td>
-      <td class="text-end">
-        <button class="btn btn-outline-success btn-sm${ch.pending_commitment ? '' : ' disabled'}"
-                onclick="claimChannel('${ch.p2sh_address}')"
-                ${ch.pending_commitment ? '' : 'disabled'}>
-          Claim${ch.pending_commitment ? '' : ' (none)'}
+  tbody.innerHTML = rows.map((ch, i) => {
+    const claimable = ch.locked_sats - ch.remainder_sats;
+    const hasPending = !!ch.pending_commitment;
+    const detailId = `recv-detail-${i}`;
+    return `<tr onclick="toggleDetail('${detailId}')" style="cursor:pointer">
+      <td>
+        <button class="eye-btn" onclick="event.stopPropagation(); toggleDetail('${detailId}')" title="Details">
+          <i class="material-icons" style="font-size:16px;">visibility</i>
         </button>
       </td>
-    </tr>`).join('');
+      <td><code title="${ch.p2sh_address}">${fmtAddr(ch.p2sh_address)}</code></td>
+      <td><code title="${ch.sender_pubkey}">${fmtAddr(ch.sender_pubkey)}</code></td>
+      <td class="text-end">${fmtSatori(ch.locked_sats)}</td>
+      <td class="text-end ${hasPending ? 'claimable-amount' : 'text-muted'}">${fmtSatori(claimable)}${hasPending ? '' : ' <small>(pending)</small>'}</td>
+      <td class="text-end">${timeout(ch)}</td>
+      <td class="text-end" onclick="event.stopPropagation()">
+        <button class="btn btn-outline-success btn-sm${hasPending ? '' : ' disabled'}"
+                onclick="claimChannel('${ch.p2sh_address}')"
+                ${hasPending ? '' : 'disabled'}>
+          Claim
+        </button>
+      </td>
+    </tr>
+    <tr class="detail-row" id="${detailId}" style="display:none">
+      <td colspan="7">${buildDetailPanel(ch, false)}</td>
+    </tr>`;
+  }).join('');
 }
 
+// ── Toggle detail row ─────────────────────────────────────────
+function toggleDetail(id) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+
+// ── Claim ─────────────────────────────────────────────────────
 async function claimChannel(p2sh) {
-  if (!confirm('Claim all accumulated micropayments from ' + p2sh + '?\n\nThis broadcasts a transaction and incurs a fee.')) return;
+  if (!confirm('Claim all accumulated SATORI from ' + p2sh + '?\n\nThis broadcasts a transaction and incurs a fee.')) return;
   try {
     const resp = await fetch('/api/channels/claim', {
       method: 'POST',
@@ -249,6 +387,12 @@ async function claimChannel(p2sh) {
   }
 }
 
+// ── Open channel ──────────────────────────────────────────────
+document.getElementById('ocAmountSatori').addEventListener('input', function() {
+  const sats = satoriToSats(this.value);
+  document.getElementById('ocAmountSats').textContent = sats ? sats.toLocaleString() + ' sats' : '';
+});
+
 async function submitOpenChannel() {
   const btn = document.getElementById('ocSubmit');
   const errEl = document.getElementById('ocError');
@@ -256,9 +400,11 @@ async function submitOpenChannel() {
   btn.disabled = true;
   btn.textContent = 'Opening…';
   try {
+    const amountSatori = parseFloat(document.getElementById('ocAmountSatori').value) || 0;
     const body = {
       receiver_pubkey: document.getElementById('ocReceiverPubkey').value.trim(),
-      amount_sats: parseInt(document.getElementById('ocAmountSats').value) || 0,
+      receiver_nostr_pubkey: document.getElementById('ocReceiverNostrPubkey').value.trim() || null,
+      amount_sats: satoriToSats(amountSatori),
       minutes: document.getElementById('ocMinutes').value || null,
       blocks:  document.getElementById('ocBlocks').value  || null,
     };
@@ -281,20 +427,27 @@ async function submitOpenChannel() {
   }
 }
 
+// ── Pay modal ─────────────────────────────────────────────────
 function openPayModal(p2sh) {
   document.getElementById('payP2sh').value = p2sh;
-  document.getElementById('payAmountSats').value = '';
+  document.getElementById('payAmountSatori').value = '';
+  document.getElementById('payAmountSats').textContent = '';
   document.getElementById('payError').classList.add('d-none');
   new bootstrap.Modal(document.getElementById('payModal')).show();
 }
+
+document.getElementById('payAmountSatori').addEventListener('input', function() {
+  const sats = satoriToSats(this.value);
+  document.getElementById('payAmountSats').textContent = sats ? sats.toLocaleString() + ' sats' : '';
+});
 
 async function submitPay() {
   const errEl = document.getElementById('payError');
   errEl.classList.add('d-none');
   try {
     const body = {
-      p2sh_address:   document.getElementById('payP2sh').value,
-      pay_amount_sats: parseInt(document.getElementById('payAmountSats').value) || 0,
+      p2sh_address:    document.getElementById('payP2sh').value,
+      pay_amount_sats: satoriToSats(document.getElementById('payAmountSatori').value),
     };
     const resp = await fetch('/api/channels/pay', {
       method: 'POST',
@@ -312,8 +465,9 @@ async function submitPay() {
   }
 }
 
+// ── Reclaim ───────────────────────────────────────────────────
 async function reclaim(p2sh) {
-  if (!confirm('Reclaim funds from ' + p2sh + '?\n\nOnly works after the timeout has expired.')) return;
+  if (!confirm('Reclaim SATORI from ' + p2sh + '?\n\nOnly works after the timeout has expired.')) return;
   try {
     const resp = await fetch('/api/channels/reclaim', {
       method: 'POST',
@@ -329,9 +483,7 @@ async function reclaim(p2sh) {
   }
 }
 
-// Load on page ready
+// ── Init ──────────────────────────────────────────────────────
 loadChannels();
-// Auto-refresh every 30 seconds
-setInterval(loadChannels, 30000);
 </script>
 {% endblock %}
