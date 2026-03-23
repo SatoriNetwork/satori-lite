@@ -584,9 +584,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     async def _channelExpiryCheck(self):
         """Auto-claim receiver channels that expire within 24 hours.
 
-        Called from the reconcile loop every 5 minutes. Protects the receiver
-        from losing accrued micropayments when a channel times out.
+        Called from the reconcile loop but throttled to run at most every
+        12 hours. Protects the receiver from losing accrued micropayments
+        when a channel times out.
         """
+        now = time.time()
+        last = getattr(self, '_lastChannelExpiryCheck', 0)
+        if now - last < 43200:  # 12 hours
+            return
+        self._lastChannelExpiryCheck = now
         try:
             near_expiry = await asyncio.to_thread(
                 self.networkDB.get_channels_near_expiry, 86400)
