@@ -160,20 +160,27 @@ class NetworkDB:
                 "ALTER TABLE observations ADD COLUMN observed_at INTEGER")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS channels (
-                p2sh_address    TEXT PRIMARY KEY,
-                sender_pubkey   TEXT NOT NULL,
-                receiver_pubkey TEXT NOT NULL,
-                redeem_script   TEXT NOT NULL,
-                funding_txid    TEXT NOT NULL,
-                funding_vout    INTEGER NOT NULL,
-                locked_sats     INTEGER NOT NULL,
-                remainder_sats  INTEGER NOT NULL,
-                blocks          INTEGER,
-                minutes         REAL,
-                is_sender       INTEGER NOT NULL,
-                created_at      INTEGER NOT NULL
+                p2sh_address        TEXT PRIMARY KEY,
+                sender_pubkey       TEXT NOT NULL,
+                receiver_pubkey     TEXT NOT NULL,
+                redeem_script       TEXT NOT NULL,
+                funding_txid        TEXT NOT NULL,
+                funding_vout        INTEGER NOT NULL,
+                locked_sats         INTEGER NOT NULL,
+                remainder_sats      INTEGER NOT NULL,
+                blocks              INTEGER,
+                minutes             REAL,
+                is_sender           INTEGER NOT NULL,
+                created_at          INTEGER NOT NULL,
+                pending_commitment  TEXT
             )
         """)
+        # Migration: add pending_commitment to existing DBs
+        try:
+            conn.execute("SELECT pending_commitment FROM channels LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE channels ADD COLUMN pending_commitment TEXT")
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -638,6 +645,50 @@ class NetworkDB:
             blocks, minutes, 1 if is_sender else 0, int(time.time()),
         ))
         conn.commit()
+
+    def store_pending_commitment(self, p2sh_address: str,
+                                 commitment_json: str) -> None:
+        """Store the latest received commitment for a channel (receiver side).
+
+        Replaces any previously stored commitment — only the latest matters
+        since it includes the cumulative remainder.
+        """
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE channels SET pending_commitment = ? WHERE p2sh_address = ?",
+            (commitment_json, p2sh_address))
+        conn.commit()
+
+    def clear_pending_commitment(self, p2sh_address: str) -> None:
+        """Clear the pending commitment after it has been claimed."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE channels SET pending_commitment = NULL WHERE p2sh_address = ?",
+            (p2sh_address,))
+        conn.commit()
+
+    def get_channels_near_expiry(self, within_seconds: int = 86400) -> list[dict]:
+        """Return receiver channels whose timeout expires within `within_seconds`.
+
+        Used to auto-claim before the sender can reclaim the funds.
+        Only returns channels that have a pending commitment to claim.
+        Minutes-based timeout uses created_at + minutes*60 as the expiry epoch.
+        Block-based timeout uses created_at + blocks*600 (approx 10 min/block).
+        """
+        now = int(time.time())
+        cutoff = now + within_seconds
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM channels
+            WHERE is_sender = 0
+              AND pending_commitment IS NOT NULL
+              AND (
+                (minutes IS NOT NULL AND created_at + minutes * 60 <= ?)
+                OR
+                (blocks IS NOT NULL AND created_at + blocks * 600 <= ?)
+              )
+        """, (cutoff, cutoff)).fetchall()
+        return [dict(r) for r in rows]
 
     def get_channel(self, p2sh_address: str) -> dict | None:
         """Return a single channel by its P2SH address."""

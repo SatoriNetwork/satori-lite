@@ -68,10 +68,11 @@
               <th class="text-end">Locked</th>
               <th class="text-end">Remaining</th>
               <th class="text-end">Timeout</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="receivingTable">
-            <tr><td colspan="5" class="text-muted text-center py-4">Loading…</td></tr>
+            <tr><td colspan="6" class="text-muted text-center py-4">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -211,7 +212,7 @@ function renderReceiving(rows) {
   document.getElementById('receivingCount').textContent = rows.length;
   const tbody = document.getElementById('receivingTable');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4">No inbound channels.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-4">No inbound channels.</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(ch => `
@@ -221,7 +222,31 @@ function renderReceiving(rows) {
       <td class="text-end">${fmtSats(ch.locked_sats)}</td>
       <td class="text-end">${fmtSats(ch.remainder_sats)}</td>
       <td class="text-end">${timeout(ch)}</td>
+      <td class="text-end">
+        <button class="btn btn-outline-success btn-sm${ch.pending_commitment ? '' : ' disabled'}"
+                onclick="claimChannel('${ch.p2sh_address}')"
+                ${ch.pending_commitment ? '' : 'disabled'}>
+          Claim${ch.pending_commitment ? '' : ' (none)'}
+        </button>
+      </td>
     </tr>`).join('');
+}
+
+async function claimChannel(p2sh) {
+  if (!confirm('Claim all accumulated micropayments from ' + p2sh + '?\n\nThis broadcasts a transaction and incurs a fee.')) return;
+  try {
+    const resp = await fetch('/api/channels/claim', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({p2sh_address: p2sh}),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Claim broadcast. txid: ' + data.txid, 'success');
+    loadChannels();
+  } catch(e) {
+    showAlert(String(e));
+  }
 }
 
 async function submitOpenChannel() {

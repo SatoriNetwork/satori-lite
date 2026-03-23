@@ -216,6 +216,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 await self._networkFetchDataSources()
             except Exception as e:
                 logging.error(f'Network data source fetch error: {e}')
+            try:
+                await self._channelExpiryCheck()
+            except Exception as e:
+                logging.error(f'Channel expiry check error: {e}')
             await asyncio.sleep(300)
 
     async def _networkEnsurePublisherConnections(self, ConfigClass):
@@ -483,13 +487,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(f'Channel: listener stopped on {relay_url}: {e}')
 
     async def _channelProcessCommitment(self, commitment):
-        """Sign and broadcast an inbound channel commitment (receiver side).
+        """Store an inbound channel commitment for later claiming (receiver side).
 
         Called when the buyer has published a half-signed transaction to Nostr.
-        We add our signature and broadcast, then update the channel remainder
-        and tombstone the relay record.
+        We store the latest commitment in the DB. The receiver claims manually
+        (or automatically 24 h before channel expiry) to pay a single fee for
+        all accumulated micropayments.
         """
-        from satorilib.satori_nostr.models import ChannelCommitment
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, commitment.p2sh_address)
         if not channel:
@@ -498,48 +502,106 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{commitment.p2sh_address} — ignoring')
             return
         try:
-            from evrmore.core import CMutableTransaction
-            from evrmore.core.script import CScript
-            tx = CMutableTransaction.deserialize(
-                bytes.fromhex(commitment.partial_tx_hex))
-            redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
-            # Add our (receiver) signature to complete the 2-of-2
-            our_sig = self.wallet.paymentChannelMultisigTransactionMiddle(
-                tx=tx,
-                redeemScript=redeem_script,
-                vinIndex=0)
-            # Combine sender sigs + our sig and broadcast
-            from satorilib.wallet.evrmore.scripts.channels import unlock
-            from functools import partial as funcpartial
-            sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
-            redeemParams = funcpartial(
-                unlock.paymentChannel,
-                sender_sig=sender_sigs[0],
-                receiver_sig=our_sig)
-            self.wallet._compileClaimOnP2SHMultiSigEnd(
-                tx=tx,
-                redeemScript=redeem_script,
-                redeemParams=redeemParams,
-                redeemCount=1)
-            tx_hex = tx.serialize().hex()
-            txid = self.wallet.broadcast(tx_hex)
-            logging.info(
-                f'Channel: claimed {commitment.pay_amount_sats} sats '
-                f'from {commitment.p2sh_address} — txid={txid}',
-                color='green')
+            commitment_json = commitment.to_json()
             await asyncio.to_thread(
-                self.networkDB.update_channel_remainder,
+                self.networkDB.store_pending_commitment,
                 commitment.p2sh_address,
-                commitment.remainder_sats)
-            # Tombstone the commitment on all relays
-            for client in self._networkClients.values():
-                try:
-                    await client.remove_commitment(commitment.p2sh_address)
-                except Exception:
-                    pass
+                commitment_json)
+            logging.info(
+                f'Channel: stored commitment {commitment.p2sh_address} '
+                f'pay={commitment.pay_amount_sats} sats '
+                f'remainder={commitment.remainder_sats} sats',
+                color='cyan')
         except Exception as e:
             logging.error(
-                f'Channel: failed to claim {commitment.p2sh_address}: {e}')
+                f'Channel: failed to store commitment '
+                f'{commitment.p2sh_address}: {e}')
+
+    async def claimChannel(self, p2sh_address: str) -> str:
+        """Claim accumulated micropayments from a channel (receiver side).
+
+        Reads the latest pending commitment, adds our signature, broadcasts,
+        updates the channel remainder, clears the pending commitment, and
+        tombstones the relay record.
+
+        Args:
+            p2sh_address: The channel to claim from
+
+        Returns:
+            The broadcast txid
+        """
+        from satorilib.satori_nostr.models import ChannelCommitment
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, p2sh_address)
+        if not channel:
+            raise ValueError(f'Unknown channel: {p2sh_address}')
+        commitment_json = channel.get('pending_commitment')
+        if not commitment_json:
+            raise ValueError(f'No pending commitment for channel: {p2sh_address}')
+        commitment = ChannelCommitment.from_json(commitment_json)
+        from evrmore.core import CMutableTransaction
+        from evrmore.core.script import CScript
+        tx = CMutableTransaction.deserialize(
+            bytes.fromhex(commitment.partial_tx_hex))
+        redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
+        our_sig = await asyncio.to_thread(
+            self.wallet.paymentChannelMultisigTransactionMiddle,
+            tx=tx,
+            redeemScript=redeem_script,
+            vinIndex=0)
+        from satorilib.wallet.evrmore.scripts.channels import unlock
+        from functools import partial as funcpartial
+        sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
+        redeemParams = funcpartial(
+            unlock.paymentChannel,
+            sender_sig=sender_sigs[0],
+            receiver_sig=our_sig)
+        await asyncio.to_thread(
+            self.wallet._compileClaimOnP2SHMultiSigEnd,
+            tx=tx,
+            redeemScript=redeem_script,
+            redeemParams=redeemParams,
+            redeemCount=1)
+        tx_hex = tx.serialize().hex()
+        txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
+        logging.info(
+            f'Channel: claimed {commitment.pay_amount_sats} sats '
+            f'from {p2sh_address} — txid={txid}',
+            color='green')
+        await asyncio.to_thread(
+            self.networkDB.update_channel_remainder,
+            p2sh_address,
+            commitment.remainder_sats)
+        await asyncio.to_thread(
+            self.networkDB.clear_pending_commitment, p2sh_address)
+        for client in self._networkClients.values():
+            try:
+                await client.remove_commitment(p2sh_address)
+            except Exception:
+                pass
+        return txid
+
+    async def _channelExpiryCheck(self):
+        """Auto-claim receiver channels that expire within 24 hours.
+
+        Called from the reconcile loop every 5 minutes. Protects the receiver
+        from losing accrued micropayments when a channel times out.
+        """
+        try:
+            near_expiry = await asyncio.to_thread(
+                self.networkDB.get_channels_near_expiry, 86400)
+            for channel in near_expiry:
+                p2sh = channel['p2sh_address']
+                logging.info(
+                    f'Channel: auto-claiming near-expiry channel {p2sh}',
+                    color='yellow')
+                try:
+                    await self.claimChannel(p2sh)
+                except Exception as e:
+                    logging.error(
+                        f'Channel: auto-claim failed for {p2sh}: {e}')
+        except Exception as e:
+            logging.warning(f'Channel: expiry check failed: {e}')
 
     async def openChannel(
         self,

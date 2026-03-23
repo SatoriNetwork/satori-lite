@@ -2636,3 +2636,26 @@ def register_routes(app):
             return jsonify({'txid': txid})
         except Exception as e:
             return jsonify({'error': str(e)})
+
+    @app.route('/api/channels/claim', methods=['POST'])
+    @login_required
+    def api_channel_claim():
+        """Claim accumulated micropayments from a receiver channel."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        p2sh_address = data.get('p2sh_address', '').strip()
+        if not p2sh_address:
+            return jsonify({'error': 'p2sh_address required'}), 400
+        loop = getattr(startup, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return jsonify({'error': 'Network loop not running'}), 503
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                startup.claimChannel(p2sh_address=p2sh_address),
+                loop)
+            txid = future.result(timeout=60)
+            return jsonify({'txid': txid})
+        except Exception as e:
+            return jsonify({'error': str(e)})
