@@ -74,6 +74,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
+        self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
+        self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -204,6 +206,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelListeners.clear()
         self._channelOpenListeners.clear()
         self._channelSettlementListeners.clear()
+        self._channelTombstoneListeners.clear()
+        self._settledChannels.clear()
         self._networkSubscribed.clear()
         self._networkFirstRun = True
 
@@ -285,6 +289,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         stask = self._channelSettlementListeners.pop(relay_url, None)
         if stask and not stask.done():
             stask.cancel()
+        ttask = self._channelTombstoneListeners.pop(relay_url, None)
+        if ttask and not ttask.done():
+            ttask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -482,6 +489,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsureChannelListener(relay_url)
         self._networkEnsureChannelOpenListener(relay_url)
         self._networkEnsureSettlementListener(relay_url)
+        self._networkEnsureTombstoneListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -530,6 +538,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.networkDB.get_channel, s.p2sh_address)
         if not channel or not channel.get('is_sender'):
             return
+        # Mark as settled so the tombstone fallback doesn't double-reset
+        self._settledChannels.add(s.p2sh_address)
         if s.new_funding_vout == -1 or s.new_locked_sats == 0:
             # Channel fully drained — delete it; next observation auto-opens a new one
             await asyncio.to_thread(self.networkDB.delete_channel, s.p2sh_address)
@@ -549,6 +559,55 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{s.claim_txid[:12]}…:{s.new_funding_vout} '
                 f'({s.new_locked_sats} sats)',
                 color='green')
+
+    def _networkEnsureTombstoneListener(self, relay_url: str):
+        """Start a tombstone listener for a relay if one isn't running."""
+        task = self._channelTombstoneListeners.get(relay_url)
+        if task and not task.done():
+            return
+        self._channelTombstoneListeners[relay_url] = asyncio.ensure_future(
+            self._channelTombstoneListen(relay_url))
+
+    async def _channelTombstoneListen(self, relay_url: str):
+        """Listen for commitment tombstones as a fallback reset (sender side).
+
+        KIND_CHANNEL_SETTLED is the primary mechanism. This handles the case
+        where that event is not received (network issue, offline sender, etc.)
+        by using the tombstone the receiver always publishes after claiming.
+        """
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            async for p2sh in client.tombstones():
+                await self._channelHandleTombstone(p2sh)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'Channel: tombstone listener stopped on {relay_url}: {e}')
+
+    async def _channelHandleTombstone(self, p2sh_address: str):
+        """Fallback reset: delete a sender channel when its tombstone arrives.
+
+        If KIND_CHANNEL_SETTLED was already received and processed, the channel
+        is in _settledChannels and we skip deletion — the settlement already
+        handled the proper Option A UTXO update. If the settlement was NOT
+        received, this is the safety net: delete the stale channel so the next
+        observation auto-opens a fresh one.
+        """
+        if p2sh_address in self._settledChannels:
+            self._settledChannels.discard(p2sh_address)
+            return  # settlement already handled this properly
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, p2sh_address)
+        if not channel or not channel.get('is_sender'):
+            return
+        await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+        logging.info(
+            f'Channel: {p2sh_address} tombstone fallback reset — '
+            f'deleted, next observation will re-open',
+            color='yellow')
 
     async def _channelOpenListen(self, relay_url: str):
         """Listen for inbound channel open announcements on a relay.
