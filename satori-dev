@@ -1,6 +1,8 @@
 #!/bin/bash
 
 CONTAINER_NAME="satori"
+PUBLIC_RELAY_PORT="${SATORI_RELAY_PUBLIC_PORT:-7777}"
+PRIVATE_RELAY_PORT="${SATORI_RELAY_PRIVATE_PORT:-7171}"
 
 # Dev mode - always mount local code
 IMAGE_TAG="dev"
@@ -36,7 +38,10 @@ create_container() {
     docker run -d --name $CONTAINER_NAME \
         --restart unless-stopped \
         -p 5001:5001 \
+        -v /var/run/docker.sock:/var/run/docker.sock \
         -e SATORI_UI_PORT=5001 \
+        -e SATORI_RELAY_PUBLIC_PORT=${PUBLIC_RELAY_PORT} \
+        -e SATORI_RELAY_PRIVATE_PORT=${PRIVATE_RELAY_PORT} \
         -v "$(pwd)/../satorilib/src:/Satori/Lib" \
         -v "$(pwd)/neuron-lite:/Satori/Neuron" \
         -v "$(pwd)/engine-lite:/Satori/Engine" \

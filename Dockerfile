@@ -19,7 +19,6 @@ COPY --from=satorilib satorilib /Satori/Lib/satorilib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
 COPY web /Satori/web
-COPY tests /Satori/tests
 
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt
@@ -29,8 +28,10 @@ RUN pip install --upgrade pip && \
     pip install --no-cache-dir coincurve && \
     pip install pytest
 
-# Set Python path - include /Satori so 'from web.app' imports work
-ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
+COPY tests /Satori/tests
+
+# Set Python path - satorilib lives under /Satori/Lib/satorilib/src in the image.
+ENV PYTHONPATH="/Satori/Lib/satorilib/src:/Satori/Neuron:/Satori/Engine:/Satori"
 
 # Create symbolic links for docker-compose.yaml compatibility
 # Remove existing directories first, then create symlinks

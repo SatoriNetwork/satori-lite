@@ -13,6 +13,7 @@ from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.server import SatoriServerClient
 from satorineuron import logging
 from satorineuron import config
+from satorineuron.relay_manager import LocalRelayManager
 from satorineuron.init.wallet import WalletManager
 from satorineuron.structs.start import RunMode, StartupDagStruct
 # from satorilib.utils.ip import getPublicIpv4UsingCurl  # Removed - not needed
@@ -68,6 +69,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.subscriptions: list[Stream] = []  # Keep for engine
         self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
         self.nostrPubkey: Optional[str] = self._initNostrKeys()
+        self.localRelay = LocalRelayManager(self)
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
@@ -2006,6 +2008,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
         self.startNetworkClient()
+        self.localRelay.ensure_state_async()
         self.setupDefaultStream()
         self.spawnEngine()
         startWebUI(self, port=self.uiPort)  # Start web UI after sync
@@ -2032,6 +2035,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
         self.startNetworkClient()
+        self.localRelay.ensure_state_async()
         self.setupDefaultStream()
         self.spawnEngine()
         startWebUI(self, port=self.uiPort)  # Start web UI after sync

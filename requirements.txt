@@ -61,6 +61,7 @@ marshmallow>=3.22.0
 requests>=2.31.0
 websockets>=15.0.0
 nostr-sdk>=0.44.0
+docker>=7.1.0
 
 # Web UI
 flask>=3.0.0

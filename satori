@@ -15,6 +15,8 @@ fi
 # Production mode - uses Docker image code
 LOCAL_MODE=false
 BASE_PORT=24601
+PUBLIC_RELAY_BASE_PORT="${SATORI_RELAY_PUBLIC_BASE_PORT:-7777}"
+PRIVATE_RELAY_BASE_PORT="${SATORI_RELAY_PRIVATE_BASE_PORT:-7171}"
 
 # Parse "local" flag first
 if [ "$1" = "local" ]; then
@@ -36,6 +38,8 @@ IMAGE="satorinet/satori-lite:${IMAGE_TAG}"
 
 CONTAINER_NAME="satori-${INSTANCE}"
 PORT=$((BASE_PORT + INSTANCE - 1))
+PUBLIC_RELAY_PORT="${SATORI_RELAY_PUBLIC_PORT:-$((PUBLIC_RELAY_BASE_PORT + INSTANCE - 1))}"
+PRIVATE_RELAY_PORT="${SATORI_RELAY_PRIVATE_PORT:-$((PRIVATE_RELAY_BASE_PORT + INSTANCE - 1))}"
 DATA_DIR="$(pwd)/${INSTANCE}"
 
 # Function to create data directories
@@ -70,8 +74,11 @@ create_container() {
     docker run -d --name $CONTAINER_NAME \
         --restart unless-stopped \
         -p ${PORT}:${PORT} \
+        -v /var/run/docker.sock:/var/run/docker.sock \
         -e SATORI_ENV=${SATORI_ENV} \
         -e SATORI_UI_PORT=${PORT} \
+        -e SATORI_RELAY_PUBLIC_PORT=${PUBLIC_RELAY_PORT} \
+        -e SATORI_RELAY_PRIVATE_PORT=${PRIVATE_RELAY_PORT} \
         ${SATORI_CENTRAL_URL:+-e SATORI_CENTRAL_URL=${SATORI_CENTRAL_URL}} \
         ${SATORI_API_URL:+-e SATORI_API_URL=${SATORI_API_URL}} \
         -v "${DATA_DIR}/config:/Satori/Neuron/config" \
@@ -97,6 +104,10 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "  SATORI_FORCE_ENV   Force container SATORI_ENV (e.g. prod)"
     echo "  SATORI_CENTRAL_URL Override central URL"
     echo "  SATORI_API_URL     Alias override for central URL"
+    echo ""
+    echo "Managed relay ports:"
+    echo "  Public relay  base port: ${PUBLIC_RELAY_BASE_PORT}"
+    echo "  Private relay base port: ${PRIVATE_RELAY_BASE_PORT}"
     echo ""
     echo "Instance:"
     echo "  (number)    Instance number (default: 1)"

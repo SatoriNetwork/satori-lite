@@ -21,8 +21,11 @@ services:
       VAULT_PATH: /data/vault.yaml
       SECRET_KEY: local-dev-secret-key-change-in-production
       WEB_PORT: 24601
+      SATORI_RELAY_PUBLIC_PORT: 7777
+      SATORI_RELAY_PRIVATE_PORT: 7171
     volumes:
       - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "24601:24601"
     networks:
@@ -42,9 +45,12 @@ services:
       SECRET_KEY: local-dev-secret-key-change-in-production
       WEB_PORT: 24601
       MUNDO_URL: https://mundo.satorinet.org
+      SATORI_RELAY_PUBLIC_PORT: 7777
+      SATORI_RELAY_PRIVATE_PORT: 7171
     volumes:
       # Persist wallet data
       - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
       # Mount satorilib for live editing
       - ../satorilib/src:/Satori/Lib
       # Mount neuron code
