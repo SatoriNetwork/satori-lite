@@ -23,9 +23,10 @@ services:
       WEB_PORT: 24601
       SATORI_RELAY_PUBLIC_PORT: 7777
       SATORI_RELAY_PRIVATE_PORT: 7171
+      DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}
     volumes:
       - ./data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SATORI_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     ports:
       - "24601:24601"
     networks:
@@ -47,10 +48,11 @@ services:
       MUNDO_URL: https://mundo.satorinet.org
       SATORI_RELAY_PUBLIC_PORT: 7777
       SATORI_RELAY_PRIVATE_PORT: 7171
+      DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}
     volumes:
       # Persist wallet data
       - ./data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${SATORI_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       # Mount satorilib for live editing
       - ../satorilib/src:/Satori/Lib
       # Mount neuron code

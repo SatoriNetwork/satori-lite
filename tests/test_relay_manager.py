@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[1]
@@ -32,6 +33,7 @@ class DummyStartup:
             return {
                 'docker_available': False,
                 'docker_error': 'not mounted in test',
+                'docker_endpoint': None,
                 'desired_mode': 'off',
                 'running_mode': 'off',
                 'running': False,
@@ -84,6 +86,24 @@ def test_names_are_deterministic_per_mode():
     assert public.nginx.endswith('-public-nginx')
     assert private.strfry.endswith('-private-strfry')
     assert public.network != private.network
+
+
+def test_docker_candidate_endpoints_respect_env_and_common_paths():
+    manager = LocalRelayManager(DummyStartup())
+    with patch.dict('os.environ', {
+        'DOCKER_HOST': 'tcp://docker.example.internal:2375',
+        'SATORI_DOCKER_SOCKET': '/custom/docker.sock',
+    }, clear=False), patch(
+        'os.path.exists',
+        side_effect=lambda path: path in {
+            '/custom/docker.sock',
+            '/var/run/docker.sock',
+        },
+    ):
+        endpoints = manager._docker_candidate_endpoints()
+    assert endpoints[0] == 'tcp://docker.example.internal:2375'
+    assert 'unix:///custom/docker.sock' in endpoints
+    assert 'unix:///var/run/docker.sock' in endpoints
 
 
 def test_settings_page_renders_for_logged_in_session():

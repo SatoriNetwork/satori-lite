@@ -135,6 +135,10 @@
                             <div class="settings-stat-value" id="relayDockerStatus">{{ 'Available' if relay_status.docker_available else 'Unavailable' }}</div>
                         </div>
                         <div class="settings-stat">
+                            <div class="settings-stat-label">Docker Endpoint</div>
+                            <div class="settings-stat-value font-mono-small" id="relayDockerEndpoint">{{ relay_status.docker_endpoint or '-' }}</div>
+                        </div>
+                        <div class="settings-stat">
                             <div class="settings-stat-label">Public Relay URL</div>
                             <div class="settings-stat-value font-mono-small" id="relayPublicUrl">{{ relay_status.public_url_hint or '-' }}</div>
                         </div>
@@ -297,6 +301,7 @@
         currentRelayStatus = status;
         document.getElementById('relayNostrPubkey').textContent = status.nostr_pubkey || 'Not generated';
         document.getElementById('relayDockerStatus').textContent = status.docker_available ? 'Available' : ('Unavailable' + (status.docker_error ? ' - ' + status.docker_error : ''));
+        document.getElementById('relayDockerEndpoint').textContent = status.docker_endpoint || '-';
         document.getElementById('relayPublicUrl').textContent = status.public_url_hint || '-';
         document.getElementById('relayPrivateUrl').textContent = status.private_url_hint || '-';
         document.getElementById('relayPublicPort').textContent = status.public_port ?? '-';

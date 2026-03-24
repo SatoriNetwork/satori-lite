@@ -363,6 +363,7 @@ def register_routes(app):
             return {
                 'docker_available': False,
                 'docker_error': 'startup relay manager unavailable',
+                'docker_endpoint': None,
                 'desired_mode': 'off',
                 'running_mode': 'off',
                 'running': False,

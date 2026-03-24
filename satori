@@ -17,6 +17,42 @@ LOCAL_MODE=false
 BASE_PORT=24601
 PUBLIC_RELAY_BASE_PORT="${SATORI_RELAY_PUBLIC_BASE_PORT:-7777}"
 PRIVATE_RELAY_BASE_PORT="${SATORI_RELAY_PRIVATE_BASE_PORT:-7171}"
+RELAY_DOCKER_MOUNT_ARGS=""
+RELAY_DOCKER_ENV_ARGS=""
+
+detect_relay_docker_access() {
+    local candidates=()
+    if [ -n "${SATORI_DOCKER_SOCKET:-}" ]; then
+        candidates+=("${SATORI_DOCKER_SOCKET}")
+    fi
+    if [ -n "${DOCKER_HOST:-}" ]; then
+        if [[ "${DOCKER_HOST}" == unix://* ]]; then
+            local socket_path="${DOCKER_HOST#unix://}"
+            if [ -S "${socket_path}" ]; then
+                RELAY_DOCKER_MOUNT_ARGS="-v ${socket_path}:/var/run/docker.sock"
+                RELAY_DOCKER_ENV_ARGS="-e DOCKER_HOST=unix:///var/run/docker.sock"
+                return 0
+            fi
+        else
+            RELAY_DOCKER_ENV_ARGS="-e DOCKER_HOST=${DOCKER_HOST}"
+            return 0
+        fi
+    fi
+    candidates+=("/var/run/docker.sock" "/run/docker.sock")
+    if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        candidates+=("${XDG_RUNTIME_DIR}/docker.sock")
+    fi
+    for socket_path in "${candidates[@]}"; do
+        if [ -S "${socket_path}" ]; then
+            RELAY_DOCKER_MOUNT_ARGS="-v ${socket_path}:/var/run/docker.sock"
+            RELAY_DOCKER_ENV_ARGS="-e DOCKER_HOST=unix:///var/run/docker.sock"
+            return 0
+        fi
+    done
+    RELAY_DOCKER_MOUNT_ARGS=""
+    RELAY_DOCKER_ENV_ARGS=""
+    return 1
+}
 
 # Parse "local" flag first
 if [ "$1" = "local" ]; then
@@ -70,15 +106,18 @@ create_container() {
         SATORI_ENV="${SATORI_FORCE_ENV}"
     fi
 
+    detect_relay_docker_access >/dev/null 2>&1 || true
+
     # Production mode: mount data only
     docker run -d --name $CONTAINER_NAME \
         --restart unless-stopped \
         -p ${PORT}:${PORT} \
-        -v /var/run/docker.sock:/var/run/docker.sock \
+        ${RELAY_DOCKER_MOUNT_ARGS} \
         -e SATORI_ENV=${SATORI_ENV} \
         -e SATORI_UI_PORT=${PORT} \
         -e SATORI_RELAY_PUBLIC_PORT=${PUBLIC_RELAY_PORT} \
         -e SATORI_RELAY_PRIVATE_PORT=${PRIVATE_RELAY_PORT} \
+        ${RELAY_DOCKER_ENV_ARGS} \
         ${SATORI_CENTRAL_URL:+-e SATORI_CENTRAL_URL=${SATORI_CENTRAL_URL}} \
         ${SATORI_API_URL:+-e SATORI_API_URL=${SATORI_API_URL}} \
         -v "${DATA_DIR}/config:/Satori/Neuron/config" \
@@ -104,6 +143,8 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "  SATORI_FORCE_ENV   Force container SATORI_ENV (e.g. prod)"
     echo "  SATORI_CENTRAL_URL Override central URL"
     echo "  SATORI_API_URL     Alias override for central URL"
+    echo "  SATORI_DOCKER_SOCKET Override Docker socket path for relay sidecars"
+    echo "  DOCKER_HOST        Pass Docker endpoint through to the container relay manager"
     echo ""
     echo "Managed relay ports:"
     echo "  Public relay  base port: ${PUBLIC_RELAY_BASE_PORT}"

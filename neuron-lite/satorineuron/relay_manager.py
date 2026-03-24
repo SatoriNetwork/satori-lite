@@ -4,6 +4,7 @@ import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from satorineuron import config
 from satorineuron import logging
@@ -51,6 +52,7 @@ class LocalRelayManager:
         self.public_host = ''
         self.private_host = ''
         self._base_name = f"satori-local-relay-{startup.uiPort}"
+        self._docker_base_url = None
 
     def _refresh_ports(self) -> None:
         cfg = config.get()
@@ -78,16 +80,78 @@ class LocalRelayManager:
         host = str(value).strip()
         return host.strip('/')
 
+    def _docker_candidate_endpoints(self) -> list[str]:
+        endpoints = []
+        docker_host = os.environ.get('DOCKER_HOST', '').strip()
+        if docker_host:
+            endpoints.append(docker_host)
+        for socket_path in (
+            os.environ.get('SATORI_DOCKER_SOCKET'),
+            '/var/run/docker.sock',
+            '/run/docker.sock',
+            f"/run/user/{os.getuid()}/docker.sock",
+            '/run/podman/podman.sock',
+        ):
+            if not socket_path:
+                continue
+            socket_path = str(socket_path).strip()
+            if not socket_path or not os.path.exists(socket_path):
+                continue
+            endpoints.append(f'unix://{socket_path}')
+        deduped = []
+        seen = set()
+        for endpoint in endpoints:
+            if endpoint in seen:
+                continue
+            seen.add(endpoint)
+            deduped.append(endpoint)
+        return deduped
+
+    @staticmethod
+    def _describe_endpoint(endpoint: str | None) -> str:
+        if not endpoint:
+            return 'unknown'
+        parsed = urlparse(endpoint)
+        if parsed.scheme == 'unix':
+            return parsed.path or endpoint
+        return endpoint
+
+    def _docker_client(self):
+        if docker is None:
+            raise DockerException('python docker package is not installed')
+        errors = []
+        for endpoint in self._docker_candidate_endpoints():
+            try:
+                client = docker.DockerClient(base_url=endpoint, version='auto')
+                client.ping()
+                self._docker_base_url = endpoint
+                return client
+            except Exception as exc:
+                errors.append(f'{self._describe_endpoint(endpoint)}: {exc}')
+        docker_host = os.environ.get('DOCKER_HOST', '').strip()
+        if docker_host:
+            message = (
+                'unable to connect to Docker using DOCKER_HOST '
+                f'{docker_host}: {" | ".join(errors) if errors else "connection failed"}'
+            )
+        else:
+            message = (
+                'unable to connect to Docker daemon; '
+                'set DOCKER_HOST or mount a supported socket '
+                '(/var/run/docker.sock, /run/docker.sock, '
+                f'/run/user/{os.getuid()}/docker.sock)'
+            )
+            if errors:
+                message += f' | checked: {" | ".join(errors)}'
+        raise DockerException(message)
+
     def docker_available(self) -> bool:
         if docker is None:
             self._last_error = 'python docker package is not installed'
             return False
-        if not os.path.exists('/var/run/docker.sock'):
-            self._last_error = 'docker socket /var/run/docker.sock is not mounted'
-            return False
         try:
-            client = docker.from_env()
-            client.ping()
+            client = self._docker_client()
+            client.close()
             return True
         except Exception as exc:
             self._last_error = str(exc)
@@ -161,6 +225,7 @@ class LocalRelayManager:
         status = {
             'docker_available': self.docker_available(),
             'docker_error': self._last_error,
+            'docker_endpoint': self._describe_endpoint(self._docker_base_url),
             'last_error': self._last_error,
             'last_status': self._last_status,
             'desired_mode': self.desired_mode(),
@@ -178,7 +243,7 @@ class LocalRelayManager:
         }
         if not status['docker_available']:
             return status
-        client = docker.from_env()
+        client = self._docker_client()
         public_running = self._mode_running(client, 'public')
         private_running = self._mode_running(client, 'private')
         if private_running:
@@ -209,7 +274,7 @@ class LocalRelayManager:
             raise RuntimeError('cannot start local relay without nostr pubkey')
         if not self.docker_available():
             raise RuntimeError(self._last_error or 'docker is not available')
-        client = docker.from_env()
+        client = self._docker_client()
         requested_port = self.public_port if mode == 'public' else self.private_port
         port_owner = self._port_owner(client, requested_port, self._names(mode).nginx)
         if port_owner:
@@ -238,7 +303,7 @@ class LocalRelayManager:
     def _stop_all_locked(self) -> dict[str, Any]:
         if not self.docker_available():
             return self.status()
-        client = docker.from_env()
+        client = self._docker_client()
         self._stop_mode_locked(client, 'public')
         self._stop_mode_locked(client, 'private')
         self._last_status = 'off'
@@ -460,7 +525,7 @@ class LocalRelayManager:
         if not image_tags:
             return None
         try:
-            client = docker.from_env()
+            client = self._docker_client()
             container = client.containers.get(
                 container_data.get('name') or image_tags[0]
             )

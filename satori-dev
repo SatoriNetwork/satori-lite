@@ -3,6 +3,42 @@
 CONTAINER_NAME="satori"
 PUBLIC_RELAY_PORT="${SATORI_RELAY_PUBLIC_PORT:-7777}"
 PRIVATE_RELAY_PORT="${SATORI_RELAY_PRIVATE_PORT:-7171}"
+RELAY_DOCKER_MOUNT_ARGS=""
+RELAY_DOCKER_ENV_ARGS=""
+
+detect_relay_docker_access() {
+    local candidates=()
+    if [ -n "${SATORI_DOCKER_SOCKET:-}" ]; then
+        candidates+=("${SATORI_DOCKER_SOCKET}")
+    fi
+    if [ -n "${DOCKER_HOST:-}" ]; then
+        if [[ "${DOCKER_HOST}" == unix://* ]]; then
+            local socket_path="${DOCKER_HOST#unix://}"
+            if [ -S "${socket_path}" ]; then
+                RELAY_DOCKER_MOUNT_ARGS="-v ${socket_path}:/var/run/docker.sock"
+                RELAY_DOCKER_ENV_ARGS="-e DOCKER_HOST=unix:///var/run/docker.sock"
+                return 0
+            fi
+        else
+            RELAY_DOCKER_ENV_ARGS="-e DOCKER_HOST=${DOCKER_HOST}"
+            return 0
+        fi
+    fi
+    candidates+=("/var/run/docker.sock" "/run/docker.sock")
+    if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        candidates+=("${XDG_RUNTIME_DIR}/docker.sock")
+    fi
+    for socket_path in "${candidates[@]}"; do
+        if [ -S "${socket_path}" ]; then
+            RELAY_DOCKER_MOUNT_ARGS="-v ${socket_path}:/var/run/docker.sock"
+            RELAY_DOCKER_ENV_ARGS="-e DOCKER_HOST=unix:///var/run/docker.sock"
+            return 0
+        fi
+    done
+    RELAY_DOCKER_MOUNT_ARGS=""
+    RELAY_DOCKER_ENV_ARGS=""
+    return 1
+}
 
 # Dev mode - always mount local code
 IMAGE_TAG="dev"
@@ -32,16 +68,19 @@ create_container() {
     # Create data directories
     create_data_dirs
 
+    detect_relay_docker_access >/dev/null 2>&1 || true
+
     # Dev mode: mount code + data (data stored within source directories)
     # Note: neuron-lite contains config, wallet, models subdirectories
     # Note: engine-lite contains db subdirectory
     docker run -d --name $CONTAINER_NAME \
         --restart unless-stopped \
         -p 5001:5001 \
-        -v /var/run/docker.sock:/var/run/docker.sock \
+        ${RELAY_DOCKER_MOUNT_ARGS} \
         -e SATORI_UI_PORT=5001 \
         -e SATORI_RELAY_PUBLIC_PORT=${PUBLIC_RELAY_PORT} \
         -e SATORI_RELAY_PRIVATE_PORT=${PRIVATE_RELAY_PORT} \
+        ${RELAY_DOCKER_ENV_ARGS} \
         -v "$(pwd)/../satorilib/src:/Satori/Lib" \
         -v "$(pwd)/neuron-lite:/Satori/Neuron" \
         -v "$(pwd)/engine-lite:/Satori/Engine" \
@@ -66,6 +105,10 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "Flags:"
     echo "  local       Connect to local central-lite (host.docker.internal:8000)"
     echo "              Without this flag, connects to remote central-lite"
+    echo ""
+    echo "Environment overrides:"
+    echo "  SATORI_DOCKER_SOCKET Override Docker socket path for relay sidecars"
+    echo "  DOCKER_HOST          Pass Docker endpoint through to the container relay manager"
     echo ""
     echo "Commands:"
     echo "  (none)      Enter interactive CLI"
