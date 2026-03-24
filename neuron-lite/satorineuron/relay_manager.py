@@ -85,6 +85,11 @@ class LocalRelayManager:
         docker_host = os.environ.get('DOCKER_HOST', '').strip()
         if docker_host:
             endpoints.append(docker_host)
+        docker_npipe = os.environ.get('SATORI_DOCKER_NPIPE', '').strip()
+        if docker_npipe:
+            endpoints.append(docker_npipe)
+        if os.name == 'nt':
+            endpoints.append('npipe:////./pipe/docker_engine')
         for socket_path in (
             os.environ.get('SATORI_DOCKER_SOCKET'),
             '/var/run/docker.sock',
@@ -114,6 +119,8 @@ class LocalRelayManager:
         parsed = urlparse(endpoint)
         if parsed.scheme == 'unix':
             return parsed.path or endpoint
+        if parsed.scheme == 'npipe':
+            return endpoint
         return endpoint
 
     def _docker_client(self):
@@ -139,11 +146,61 @@ class LocalRelayManager:
                 'unable to connect to Docker daemon; '
                 'set DOCKER_HOST or mount a supported socket '
                 '(/var/run/docker.sock, /run/docker.sock, '
-                f'/run/user/{os.getuid()}/docker.sock)'
+                f'/run/user/{os.getuid()}/docker.sock, npipe:////./pipe/docker_engine)'
             )
             if errors:
                 message += f' | checked: {" | ".join(errors)}'
         raise DockerException(message)
+
+    def _docker_help(self) -> dict[str, Any]:
+        docker_host = os.environ.get('DOCKER_HOST', '').strip()
+        socket_candidates = [
+            path for path in (
+                os.environ.get('SATORI_DOCKER_SOCKET'),
+                '/var/run/docker.sock',
+                '/run/docker.sock',
+                f"/run/user/{os.getuid()}/docker.sock",
+                '/run/podman/podman.sock',
+            )
+            if path
+        ]
+        visible_sockets = [path for path in socket_candidates if os.path.exists(path)]
+        guidance = {
+            'cause': None,
+            'summary': None,
+            'details': [],
+        }
+        if docker is None:
+            guidance['cause'] = 'missing_python_package'
+            guidance['summary'] = 'The Python Docker package is not installed inside the neuron image.'
+            guidance['details'] = [
+                'Rebuild the image with the docker Python package available.',
+            ]
+            return guidance
+        if docker_host:
+            guidance['cause'] = 'docker_host_unreachable'
+            guidance['summary'] = f'DOCKER_HOST is set but the neuron cannot reach that Docker endpoint: {docker_host}'
+            guidance['details'] = [
+                'Verify the DOCKER_HOST value and ensure the endpoint is reachable from inside the neuron container.',
+                'If you intended to use a local socket instead, remove DOCKER_HOST and mount the Docker socket into the container.',
+            ]
+            return guidance
+        if visible_sockets:
+            guidance['cause'] = 'socket_visible_but_unreachable'
+            guidance['summary'] = 'A Docker socket path is visible inside the neuron container, but the Docker daemon is not reachable through it.'
+            guidance['details'] = [
+                f'Visible sockets: {", ".join(visible_sockets)}',
+                'Check Docker daemon permissions and confirm the container can access the mounted socket.',
+            ]
+            return guidance
+        guidance['cause'] = 'missing_socket_mount'
+        guidance['summary'] = 'No supported Docker socket is visible inside the neuron container.'
+        guidance['details'] = [
+            'Recreate the neuron container with a Docker socket mount, for example:',
+            '-v /var/run/docker.sock:/var/run/docker.sock',
+            'or set DOCKER_HOST to a reachable TCP or named-pipe endpoint.',
+        ]
+        return guidance
 
     def docker_available(self) -> bool:
         if docker is None:
@@ -226,6 +283,7 @@ class LocalRelayManager:
             'docker_available': self.docker_available(),
             'docker_error': self._last_error,
             'docker_endpoint': self._describe_endpoint(self._docker_base_url),
+            'docker_help': self._docker_help(),
             'last_error': self._last_error,
             'last_status': self._last_status,
             'desired_mode': self.desired_mode(),

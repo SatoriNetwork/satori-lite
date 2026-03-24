@@ -34,6 +34,11 @@ class DummyStartup:
                 'docker_available': False,
                 'docker_error': 'not mounted in test',
                 'docker_endpoint': None,
+                'docker_help': {
+                    'cause': 'missing_socket_mount',
+                    'summary': 'No supported Docker socket is visible inside the neuron container.',
+                    'details': ['-v /var/run/docker.sock:/var/run/docker.sock'],
+                },
                 'desired_mode': 'off',
                 'running_mode': 'off',
                 'running': False,
@@ -93,6 +98,7 @@ def test_docker_candidate_endpoints_respect_env_and_common_paths():
     with patch.dict('os.environ', {
         'DOCKER_HOST': 'tcp://docker.example.internal:2375',
         'SATORI_DOCKER_SOCKET': '/custom/docker.sock',
+        'SATORI_DOCKER_NPIPE': 'npipe:////./pipe/docker_engine',
     }, clear=False), patch(
         'os.path.exists',
         side_effect=lambda path: path in {
@@ -102,6 +108,7 @@ def test_docker_candidate_endpoints_respect_env_and_common_paths():
     ):
         endpoints = manager._docker_candidate_endpoints()
     assert endpoints[0] == 'tcp://docker.example.internal:2375'
+    assert 'npipe:////./pipe/docker_engine' in endpoints
     assert 'unix:///custom/docker.sock' in endpoints
     assert 'unix:///var/run/docker.sock' in endpoints
 
@@ -128,5 +135,6 @@ def test_settings_page_renders_for_logged_in_session():
         assert b'Advertised Host / Domain' in resp.data
         assert b'Last Relay Event' in resp.data
         assert b'Last Health Check' in resp.data
+        assert b'relayDockerHelpBox' in resp.data
     finally:
         _session_vaults.pop('test-session', None)

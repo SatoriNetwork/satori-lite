@@ -125,6 +125,10 @@
                         Start one managed relay mode directly from Satori Lite. Only one relay mode can be active at a time.
                     </div>
                     <div class="alert alert-warning mb-4 d-none" id="relayWarningBox"></div>
+                    <div class="alert alert-danger mb-4 d-none" id="relayDockerHelpBox">
+                        <div class="fw-semibold mb-2" id="relayDockerHelpSummary"></div>
+                        <div id="relayDockerHelpDetails"></div>
+                    </div>
                     <div class="settings-grid mb-4">
                         <div class="settings-stat">
                             <div class="settings-stat-label">Nostr Pubkey</div>
@@ -318,6 +322,9 @@
         runningChip.className = `mode-chip ${chipState.className}`;
         updateModeCards(status.desired_mode || 'off');
         const warningBox = document.getElementById('relayWarningBox');
+        const dockerHelpBox = document.getElementById('relayDockerHelpBox');
+        const dockerHelpSummary = document.getElementById('relayDockerHelpSummary');
+        const dockerHelpDetails = document.getElementById('relayDockerHelpDetails');
         const warnings = [];
         if (status.last_error) {
             warnings.push(status.last_error);
@@ -346,6 +353,19 @@
         } else {
             warningBox.classList.add('d-none');
             warningBox.textContent = '';
+        }
+        const dockerHelp = status.docker_help || {};
+        if (!status.docker_available && (dockerHelp.summary || status.docker_error)) {
+            dockerHelpBox.classList.remove('d-none');
+            dockerHelpSummary.textContent = dockerHelp.summary || status.docker_error || 'Docker is unavailable';
+            const details = Array.isArray(dockerHelp.details) ? dockerHelp.details : [];
+            dockerHelpDetails.innerHTML = details.length > 0
+                ? `<ul class="mb-0">${details.map((item) => `<li>${item}</li>`).join('')}</ul>`
+                : '';
+        } else {
+            dockerHelpBox.classList.add('d-none');
+            dockerHelpSummary.textContent = '';
+            dockerHelpDetails.innerHTML = '';
         }
 
         const tbody = document.getElementById('relayStatusTableBody');

@@ -364,6 +364,11 @@ def register_routes(app):
                 'docker_available': False,
                 'docker_error': 'startup relay manager unavailable',
                 'docker_endpoint': None,
+                'docker_help': {
+                    'cause': 'startup_unavailable',
+                    'summary': 'Relay manager is not available in this runtime.',
+                    'details': [],
+                },
                 'desired_mode': 'off',
                 'running_mode': 'off',
                 'running': False,
