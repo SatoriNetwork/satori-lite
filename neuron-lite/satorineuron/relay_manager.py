@@ -302,23 +302,26 @@ class LocalRelayManager:
         if not status['docker_available']:
             return status
         client = self._docker_client()
-        public_running = self._mode_running(client, 'public')
-        private_running = self._mode_running(client, 'private')
-        if private_running:
-            status['running_mode'] = 'private'
-            status['running'] = True
-        elif public_running:
-            status['running_mode'] = 'public'
-            status['running'] = True
-        for mode in ('public', 'private'):
-            names = self._names(mode)
-            host_port = self.public_port if mode == 'public' else self.private_port
-            status['containers'][mode] = {
-                'strfry': self._container_status(client, names.strfry),
-                'nginx': self._container_status(client, names.nginx),
-            }
-            status['port_conflicts'][mode] = self._port_owner(
-                client, host_port, names.nginx)
+        try:
+            public_running = self._mode_running(client, 'public')
+            private_running = self._mode_running(client, 'private')
+            if private_running:
+                status['running_mode'] = 'private'
+                status['running'] = True
+            elif public_running:
+                status['running_mode'] = 'public'
+                status['running'] = True
+            for mode in ('public', 'private'):
+                names = self._names(mode)
+                host_port = self.public_port if mode == 'public' else self.private_port
+                status['containers'][mode] = {
+                    'strfry': self._container_status(client, names.strfry),
+                    'nginx': self._container_status(client, names.nginx),
+                }
+                status['port_conflicts'][mode] = self._port_owner(
+                    client, host_port, names.nginx)
+        finally:
+            client.close()
         status['last_event_at'] = self._last_event_time(status['containers'])
         status['last_health_check_at'] = self._last_healthcheck_time(status['containers'])
         return status
@@ -582,17 +585,18 @@ class LocalRelayManager:
         image_tags = container_data.get('image') or []
         if not image_tags:
             return None
+        client = None
         try:
             client = self._docker_client()
             container = client.containers.get(
                 container_data.get('name') or image_tags[0]
             )
-        except Exception:
-            return None
-        try:
             logs = container.logs(tail=200).decode('utf-8', errors='ignore').splitlines()
         except Exception:
             return None
+        finally:
+            if client is not None:
+                client.close()
         for line in reversed(logs):
             if 'Inserted event.' not in line and 'Deleting event (d-tag).' not in line:
                 continue

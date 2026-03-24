@@ -2135,8 +2135,7 @@ def register_routes(app):
                 private_port=private_port,
                 public_host=public_host,
                 private_host=private_host)
-            status = build_local_relay_status_payload()
-            startup.localRelay.ensure_state()
+            startup.localRelay.ensure_state_async()
             status = build_local_relay_status_payload()
             return jsonify({'success': True, 'status': status})
         except Exception as e:
