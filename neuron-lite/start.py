@@ -861,12 +861,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     f'Channel: PATH C claimed {p2sh_address} via Mundo '
                     f'({commitment.pay_amount_sats} sats) — txid={txid}',
                     color='green')
-        # ── Grant subscriber access before DB update (locked_sats is still ──
-        # ── the pre-claim value here, needed to compute total_paid). ────────
-        total_paid = channel['locked_sats'] - commitment.remainder_sats
+        # ── Grant access for exactly this payment, not cumulative total ───────
         await self._grantChannelAccess(
             sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
-            total_paid_sats=total_paid,
+            total_paid_sats=commitment.pay_amount_sats,
             stream_name=commitment.stream_name)
         # ── Post-broadcast: update DB ───────────────────────────────────────
         logging.info(
