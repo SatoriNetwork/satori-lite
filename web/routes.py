@@ -2614,6 +2614,13 @@ def register_routes(app):
         from satorineuron import VERSION
         return render_template('channels.html', version=VERSION)
 
+    @app.route('/competitions')
+    @login_required
+    def competitions_page():
+        """Prediction competitions page."""
+        from satorineuron import VERSION
+        return render_template('competitions.html', version=VERSION)
+
     @app.route('/api/channels')
     @login_required
     def api_channels_list():
