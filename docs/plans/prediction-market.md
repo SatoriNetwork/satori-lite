@@ -63,8 +63,8 @@ Two new kinds are needed:
   "stream_provider_pubkey": "hex...",
   "host_pubkey": "hex...",
   "pay_per_obs_sats": 100,
-  "max_paid_predictors": 3,
-  "max_competing_predictors": 5,
+  "paid_predictors": 3,
+  "competing_predictors": 5,
   "scoring_metric": "mae",
   "scoring_params": {},
   "horizon": 1,
@@ -75,12 +75,14 @@ Two new kinds are needed:
 
 Key fields:
 - `pay_per_obs_sats` — what each winning predictor earns per observation
-- `max_paid_predictors` — how many predictors get paid (e.g. top 3)
-- `max_competing_predictors` — cap on total predictors the host will open channels for
+- `paid_predictors` — intent: how many predictors the host plans to pay per observation (e.g. top 3)
+- `competing_predictors` — intent: how many channels the host plans to open; the host may score thousands of predictors but only maintain this many active channels
 - `scoring_metric` — baked-in scorer name (`"mae"`, `"rmse"`, `"directional_accuracy"`, etc.) or `"custom"`
 - `scoring_params` — optional extra parameters passed to the scorer
 - `horizon` — how many steps ahead the prediction covers
 - `active` — set to `false` (or publish empty content) to close the competition
+
+These fields are **intent metadata, not enforced constraints**. The host announces them as a social signal to the community — "here is what I plan to do." Nothing at the protocol level enforces them. A host who consistently misrepresents their intent becomes visible through payment records and loses predictors.
 
 ### KIND_PREDICTION Content (Encrypted DM to Host)
 
@@ -114,7 +116,7 @@ The host can implement any custom scorer — the scoring is entirely local and p
 
 ## Payment Flow
 
-Payments flow **from host to predictor** (opposite direction from the data stream market). The host opens payment channels to each qualifying predictor and sends a commitment after each observation is scored.
+Payments flow **from host to predictor** (opposite direction from the data stream market). The host opens payment channels to predictors and sends a commitment after each observation is scored.
 
 ```
 Predictor sends prediction (encrypted DM) →
@@ -125,14 +127,15 @@ Predictors claim via the same 3-path claimChannel logic already built
 
 Because commitments are published to Nostr (KIND_34604), **observers can tally payments** per channel and verify the host is honouring their announced `pay_per_obs_sats`. A host who stops paying becomes publicly visible.
 
-### Channel Opening Policy
+### Channel Opening
 
-The host controls when to open a channel to a predictor:
-- Could require a predictor to rank in the top N for a qualifying window (e.g. one month) before opening a channel
-- Could open immediately for any predictor who submits
-- Could require an on-chain stake or deposit
+The host decides when and whether to open a channel to a predictor — this is entirely up to the host and is not specified at the protocol level. The neuron implementation will open channels automatically as predictors appear, but the host is free to manage this however they like.
 
-This policy is announced in `scoring_params` or as free-form metadata on the competition announcement.
+Predictors may also open a channel to the host themselves, signalling their intent to participate. The host is not obligated to use it but may choose to.
+
+If a predictor stops predicting or a channel is drained, the host may open a new channel to a different predictor. None of this needs to be announced — it is visible through on-chain channel state and Nostr payment records.
+
+The social contract is simple: if the host is not paying, predictors stop predicting. No trial period or qualification window needs to exist at the protocol level — the economics enforce behaviour naturally.
 
 ---
 
@@ -187,7 +190,7 @@ Over time, predictors can build a trust reputation — known to keep private dat
 - Scoring engine: pluggable metric functions keyed by `scoring_metric` string
 - After each observation: score all predictions for that seq_num, rank predictors
 - Pay top N via existing `sendChannelPayment` (channels already built)
-- Channel opening policy logic (qualification window, stake requirements)
+- Neuron automatically opens channels to predictors as they appear; host can override
 
 ### Phase 4 — Accountability Tooling
 - Observer can subscribe to a host's KIND_34604 events and tally payments
