@@ -100,43 +100,36 @@ Sent via NIP-04 encrypted DM so only the host can read it. A stream is uniquely 
 
 ---
 
-## Scoring
+## Scoring and Payment Pipeline
 
-The host scores predictors locally after each observation arrives. Baked-in metrics:
-
-| Metric | Description |
-|--------|-------------|
-| `mae` | Mean absolute error — simple next-observation accuracy |
-| `rmse` | Root mean squared error — penalises large misses more |
-| `directional_accuracy` | Did you get the direction right (up/down)? |
-| `weighted_recent` | MAE but recent observations count more |
-
-The host can implement any custom scorer — the scoring is entirely local and private. Only the payment outcomes are visible to the network.
-
----
-
-## Payment Flow
-
-Payments flow **from host to predictor** (opposite direction from the data stream market). The host opens payment channels to predictors and sends a commitment after each observation is scored.
+This is the core framework. An observation on the primary stream is the trigger. The pipeline runs as follows:
 
 ```
-Predictor sends prediction (encrypted DM) →
-Host receives observation, scores all predictions →
-Host pays top N predictors via channel commitments (KIND_34604) →
-Predictors claim via the same 3-path claimChannel logic already built
+1. Predictions arrive from predictors → saved, indexed by (stream, predictor)
+2. Observation arrives on primary stream → TRIGGER
+3. Gather most recent predictions (according to lag, default = 1)
+4. Pass to scoring module:
+       - predictions
+       - the observation
+       - competition details (pay_per_obs_sats, paid_predictors, etc.)
+       - channel state (who has open channels, who does not)
+5. Scoring module returns: { predictor_pubkey → sats }
+6. Execute payments:
+       - predictor has a channel → send payment
+       - predictor has no channel → open one, send payment
 ```
 
-Because commitments are published to Nostr (KIND_34604), **observers can tally payments** per channel and verify the host is honouring their announced `pay_per_obs_sats`. A host who stops paying becomes publicly visible.
+The scoring module is a black box. The framework defines only what goes in and what comes out. It does not care how scoring, ranking, or splitting happens internally — that is entirely the module's concern. Specific scoring modules (MAE, RMSE, directional accuracy, etc.) are implementation details to be built later.
+
+Passing channel state to the scoring module allows it to make intelligent decisions — e.g. prefer predictors with existing channels, decide whether to onboard new ones — without the framework needing to know or enforce any policy.
+
+Because payment commitments (KIND_34604) are published to Nostr, **observers can tally payments** per channel and verify the host is honouring their announced `pay_per_obs_sats`. A host who stops paying becomes publicly visible.
 
 ### Channel Opening
 
-The host decides when and whether to open a channel to a predictor — this is entirely up to the host and is not specified at the protocol level. The neuron implementation will open channels automatically as predictors appear, but the host is free to manage this however they like.
+The neuron opens channels automatically when a scoring module instructs payment to a predictor without an existing channel. Predictors may also open a channel to the host themselves — the scoring module sees this in channel state and may factor it in.
 
-Predictors may also open a channel to the host themselves, signalling their intent to participate. The host is not obligated to use it but may choose to.
-
-If a predictor stops predicting or a channel is drained, the host may open a new channel to a different predictor. None of this needs to be announced — it is visible through on-chain channel state and Nostr payment records.
-
-The social contract is simple: if the host is not paying, predictors stop predicting. No trial period or qualification window needs to exist at the protocol level — the economics enforce behaviour naturally.
+The social contract is simple: if the host is not paying, predictors stop predicting. No trial period or qualification window exists at the protocol level — the economics enforce behaviour naturally.
 
 ---
 
