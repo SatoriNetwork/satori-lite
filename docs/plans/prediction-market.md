@@ -74,7 +74,7 @@ Two new kinds are needed:
 ```
 
 Key fields:
-- `pay_per_obs_sats` — the total sats the host promises to pay out per observation, distributed across predictors however the host chooses; this is the host's public commitment to the community — observers can verify this total is leaving the host on every tick
+- `pay_per_obs_sats` — the total sats the host promises to pay out per observation; distribution across predictors is entirely the host's choice and visible in public channel commitments (KIND_34604), but the community's accountability check is simply: does the sum of payments per observation match this number?
 - `paid_predictors` — intent: how many predictors the host plans to pay per observation (e.g. top 3)
 - `competing_predictors` — intent: how many channels the host plans to open; the host may score thousands of predictors but only maintain this many active channels
 - `scoring_metric` — baked-in scorer name (`"mae"`, `"rmse"`, `"directional_accuracy"`, etc.) or `"custom"`
