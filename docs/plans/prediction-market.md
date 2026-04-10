@@ -216,15 +216,24 @@ The existing `KIND_DATASTREAM_ANNOUNCE` (34600) is already parameterized replace
 
 ## Stretch Goal: Authorized Predictors with Encrypted Data
 
-For hosts who want to keep their data stream private (e.g. a company's internal metrics):
+For hosts who want to keep their data stream private (e.g. a company's internal metrics). There is no public competition announcement — the entire relationship is private.
 
-1. Host publishes the competition with `encrypted: true`
-2. Host maintains an explicit whitelist of authorized predictor pubkeys
-3. Host encrypts the data stream key and sends it to each authorized predictor via NIP-04 DM
-4. Host rotates the key periodically and re-sends to all authorized predictors
-5. Only authorized predictors can decrypt and therefore predict the stream
+**How it works:**
 
-Over time, predictors can build a trust reputation — known to keep private data private, always submit predictions on time, never leak keys — making them desirable partners for encrypted competitions. This maps naturally onto the existing neuron credentialing work.
+1. Host maintains a local whitelist of authorized predictor pubkeys — never published
+2. Host encrypts the stream key and sends it to each authorized predictor via NIP-04 DM — this DM is the invitation; no separate request or acknowledgement is needed
+3. Predictors who receive the key can decrypt the stream and begin predicting; those who don't receive it cannot
+4. To revoke a predictor: host rotates the key and sends the new key to everyone on the whitelist except the revoked predictor — they simply stop being able to decrypt
+5. Key rotation for any reason (scheduled or revocation) follows the same flow: generate new key, DM to current whitelist
+
+**What is never published:**
+- The competition itself (no Nostr announcement)
+- The whitelist
+- The key
+
+**What is public** (same as any competition): payment channel commitments (KIND_34604) — observers can see the host is paying someone, but not what the stream contains or who the predictors are beyond their pubkeys.
+
+Over time predictors can build trust reputation — known to keep private data private, never leak keys — making them desirable partners. This maps naturally onto future neuron credentialing work.
 
 ---
 
@@ -258,10 +267,11 @@ Over time, predictors can build a trust reputation — known to keep private dat
 - UI: host reputation score based on payment consistency against announced `pay_per_obs_sats`
 
 ### Phase 5 (Stretch) — Encrypted Streams + Authorized Predictors
-- Host whitelist management
-- Encrypted data stream key distribution via NIP-04 DM
-- Key rotation flow
-- Predictor trust/credential system
+- Host whitelist management (local only, never published)
+- Invitation: encrypt stream key, send to each whitelisted predictor via NIP-04 DM
+- Revocation: rotate key, send to whitelist minus revoked predictor
+- No public competition announcement — relationship is entirely private
+- Predictor trust/credential system (future)
 
 ---
 
