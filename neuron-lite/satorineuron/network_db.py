@@ -198,6 +198,23 @@ class NetworkDB:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN sender_nostr_pubkey TEXT")
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS competition_predictions (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                predictor_pubkey        TEXT NOT NULL,
+                host_pubkey             TEXT NOT NULL,
+                seq_num                 INTEGER NOT NULL,
+                predicted_value         TEXT NOT NULL,
+                received_at             INTEGER NOT NULL,
+                UNIQUE(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_comp_pred_seq
+            ON competition_predictions(stream_name, stream_provider_pubkey, seq_num)
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS competitions (
                 id                      INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_name             TEXT NOT NULL,
@@ -872,3 +889,45 @@ class NetworkDB:
             WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
         """, (stream_name, stream_provider_pubkey, host_pubkey))
         conn.commit()
+
+    # ── Competition Predictions ────────────────────────────────────
+
+    def save_competition_prediction(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        predictor_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: str,
+        received_at: int,
+    ) -> None:
+        """Save a received prediction, replacing any earlier one for this predictor+seq."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO competition_predictions (
+                stream_name, stream_provider_pubkey, predictor_pubkey,
+                host_pubkey, seq_num, predicted_value, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
+            DO UPDATE SET
+                predicted_value = excluded.predicted_value,
+                received_at     = excluded.received_at
+            WHERE excluded.received_at > competition_predictions.received_at
+        """, (stream_name, stream_provider_pubkey, predictor_pubkey,
+              host_pubkey, seq_num, predicted_value, received_at))
+        conn.commit()
+
+    def get_competition_predictions(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        seq_num: int,
+    ) -> list[dict]:
+        """Return all predictions received for a given stream+seq_num."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM competition_predictions
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND seq_num = ?
+        """, (stream_name, stream_provider_pubkey, seq_num)).fetchall()
+        return [dict(r) for r in rows]

@@ -78,6 +78,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
+        self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
@@ -210,6 +211,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelOpenListeners.clear()
         self._channelSettlementListeners.clear()
         self._channelTombstoneListeners.clear()
+        self._predictionListeners.clear()
         self._settledChannels.clear()
         self._networkSubscribed.clear()
         self._networkFirstRun = True
@@ -295,6 +297,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         ttask = self._channelTombstoneListeners.pop(relay_url, None)
         if ttask and not ttask.done():
             ttask.cancel()
+        ptask = self._predictionListeners.pop(relay_url, None)
+        if ptask and not ptask.done():
+            ptask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -493,6 +498,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsureChannelOpenListener(relay_url)
         self._networkEnsureSettlementListener(relay_url)
         self._networkEnsureTombstoneListener(relay_url)
+        self._networkEnsurePredictionListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -570,6 +576,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         self._channelTombstoneListeners[relay_url] = asyncio.ensure_future(
             self._channelTombstoneListen(relay_url))
+
+    def _networkEnsurePredictionListener(self, relay_url: str):
+        """Start an incoming-predictions listener for a relay if one isn't running."""
+        task = self._predictionListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._predictionListeners[relay_url] = asyncio.ensure_future(
+            self._incomingPredictionsLoop(client, relay_url))
 
     async def _channelTombstoneListen(self, relay_url: str):
         """Listen for commitment tombstones as a fallback reset (sender side).
@@ -2108,6 +2125,74 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return future.result(timeout=15)
         except Exception:
             return self.networkDB.get_all_competitions(active_only=active_only)
+
+    async def _incomingPredictionsLoop(self, client, relay_url: str):
+        """Consume incoming prediction submissions from a relay client (host side).
+
+        Runs as a background async task. Stores each received prediction in the
+        DB keyed by (stream_name, stream_provider_pubkey, predictor_pubkey, seq_num).
+        The scoring pipeline reads from the DB when an observation arrives.
+        """
+        import time as _time
+        logging.info(f'Competition: listening for predictions on {relay_url}')
+        async for inbound in client.incoming_predictions():
+            try:
+                p = inbound.prediction
+                await asyncio.to_thread(
+                    self.networkDB.save_competition_prediction,
+                    stream_name=p.stream_name,
+                    stream_provider_pubkey=p.stream_provider_pubkey,
+                    predictor_pubkey=p.predictor_pubkey,
+                    host_pubkey=self.nostrPubkey,
+                    seq_num=p.seq_num,
+                    predicted_value=str(p.predicted_value),
+                    received_at=p.timestamp,
+                )
+                logging.info(
+                    f'Competition: received prediction from '
+                    f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
+                    f'seq={p.seq_num}')
+            except Exception as e:
+                logging.warning(f'Competition: failed to save prediction: {e}')
+
+    async def submitPrediction(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: float,
+    ) -> None:
+        """Submit a prediction to a competition host on all connected relays (predictor side)."""
+        for client in self._networkClients.values():
+            try:
+                await client.submit_prediction(
+                    stream_name=stream_name,
+                    stream_provider_pubkey=stream_provider_pubkey,
+                    host_pubkey=host_pubkey,
+                    seq_num=seq_num,
+                    predicted_value=predicted_value,
+                )
+            except Exception as e:
+                logging.warning(f'Competition: submit prediction failed: {e}')
+
+    def submitPredictionSync(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: float,
+    ) -> None:
+        """Submit a prediction from a sync context (e.g. prediction engine callback)."""
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed() or not self._networkClients:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self.submitPrediction(
+                stream_name, stream_provider_pubkey,
+                host_pubkey, seq_num, predicted_value),
+            loop)
 
     def triggerNetworkDiscover(self):
         """Trigger on-demand discovery from a sync context (e.g. Flask route)."""
