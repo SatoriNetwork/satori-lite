@@ -2743,3 +2743,89 @@ def register_routes(app):
             return jsonify({'txid': txid})
         except Exception as e:
             return jsonify({'error': str(e)})
+
+    # ── Competition routes ────────────────────────────────────────────────────
+
+    @app.route('/api/competition', methods=['POST'])
+    @login_required
+    def api_competition_create():
+        """Create and announce a prediction competition."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        required = ['stream_name', 'stream_provider_pubkey',
+                    'pay_per_obs_sats', 'paid_predictors',
+                    'competing_predictors', 'scoring_metric']
+        for field in required:
+            if field not in data:
+                return jsonify({'error': f'missing {field}'}), 400
+        try:
+            pay = int(data['pay_per_obs_sats'])
+            paid = int(data['paid_predictors'])
+            competing = int(data['competing_predictors'])
+        except (ValueError, TypeError):
+            return jsonify({'error': 'invalid number fields'}), 400
+        import json as _json
+        startup.networkDB.add_competition(
+            stream_name=data['stream_name'],
+            stream_provider_pubkey=data['stream_provider_pubkey'],
+            host_pubkey=startup.nostrPubkey,
+            pay_per_obs_sats=pay,
+            paid_predictors=paid,
+            competing_predictors=competing,
+            scoring_metric=data['scoring_metric'],
+            scoring_params=_json.dumps(data.get('scoring_params', {})),
+            horizon=int(data.get('horizon', 1)),
+            active=1,
+            timestamp=int(time.time()),
+        )
+        startup.announceCompetitionSync(data)
+        return jsonify({'success': True})
+
+    @app.route('/api/competition/close', methods=['POST'])
+    @login_required
+    def api_competition_close():
+        """Close an active competition."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        provider_pubkey = data.get('stream_provider_pubkey', '').strip()
+        if not stream_name or not provider_pubkey:
+            return jsonify({'error': 'missing fields'}), 400
+        startup.networkDB.close_competition(
+            stream_name, provider_pubkey, startup.nostrPubkey)
+        startup.closeCompetitionSync(stream_name, provider_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/competitions/mine', methods=['GET'])
+    @login_required
+    def api_competitions_mine():
+        """Return competitions hosted by this neuron."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        rows = startup.networkDB.get_competitions_hosted_by(startup.nostrPubkey)
+        return jsonify({'competitions': rows})
+
+    @app.route('/api/competitions', methods=['GET'])
+    @login_required
+    def api_competitions_all():
+        """Return all known competitions. Pass ?active=0 to include closed."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        active_only = request.args.get('active', '1') == '1'
+        rows = startup.networkDB.get_all_competitions(active_only=active_only)
+        return jsonify({'competitions': rows})
+
+    @app.route('/api/competitions/discover', methods=['GET'])
+    @login_required
+    def api_competitions_discover():
+        """Discover competitions from connected relays."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        return jsonify({'competitions': startup.discoverCompetitionsSync()})

@@ -2018,6 +2018,97 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         subs = self.networkDB.get_active()
         return {s['relay_url'] for s in subs}
 
+    # ── Competition sync wrappers ──────────────────────────────────
+
+    def announceCompetitionSync(self, competition_data: dict) -> None:
+        """Announce a competition on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import CompetitionAnnouncement
+        if not hasattr(self, '_networkSecretHex') or not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        import json as _json
+        competition = CompetitionAnnouncement(
+            stream_name=competition_data['stream_name'],
+            stream_provider_pubkey=competition_data['stream_provider_pubkey'],
+            host_pubkey=self.nostrPubkey,
+            pay_per_obs_sats=int(competition_data['pay_per_obs_sats']),
+            paid_predictors=int(competition_data['paid_predictors']),
+            competing_predictors=int(competition_data['competing_predictors']),
+            scoring_metric=competition_data['scoring_metric'],
+            scoring_params=competition_data.get('scoring_params', {}),
+            horizon=int(competition_data.get('horizon', 1)),
+            active=True,
+            timestamp=int(time.time()),
+        )
+        async def _announce():
+            for client in self._networkClients.values():
+                try:
+                    await client.announce_competition(competition)
+                except Exception as e:
+                    logging.warning(f'Competition: announce failed: {e}')
+        asyncio.run_coroutine_threadsafe(_announce(), loop)
+
+    def closeCompetitionSync(
+        self, stream_name: str, stream_provider_pubkey: str
+    ) -> None:
+        """Close a competition on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import CompetitionAnnouncement
+        if not hasattr(self, '_networkSecretHex') or not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        row = self.networkDB.get_competition(
+            stream_name, stream_provider_pubkey, self.nostrPubkey)
+        if not row:
+            return
+        import json as _json
+        competition = CompetitionAnnouncement(
+            stream_name=row['stream_name'],
+            stream_provider_pubkey=row['stream_provider_pubkey'],
+            host_pubkey=row['host_pubkey'],
+            pay_per_obs_sats=row['pay_per_obs_sats'],
+            paid_predictors=row['paid_predictors'],
+            competing_predictors=row['competing_predictors'],
+            scoring_metric=row['scoring_metric'],
+            scoring_params=_json.loads(row.get('scoring_params', '{}')),
+            horizon=row.get('horizon', 1),
+            active=False,
+            timestamp=int(time.time()),
+        )
+        async def _close():
+            for client in self._networkClients.values():
+                try:
+                    await client.close_competition(competition)
+                except Exception as e:
+                    logging.warning(f'Competition: close failed: {e}')
+        asyncio.run_coroutine_threadsafe(_close(), loop)
+
+    def discoverCompetitionsSync(self, active_only: bool = True) -> list:
+        """Discover competitions from connected relays (sync context)."""
+        if not self._networkClients:
+            return self.networkDB.get_all_competitions(active_only=active_only)
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return self.networkDB.get_all_competitions(active_only=active_only)
+        async def _discover():
+            results = []
+            for client in self._networkClients.values():
+                try:
+                    comps = await client.discover_competitions(
+                        active_only=active_only)
+                    results.extend(c.to_dict() for c in comps)
+                except Exception as e:
+                    logging.warning(f'Competition: discover failed: {e}')
+            return results
+        future = asyncio.run_coroutine_threadsafe(_discover(), loop)
+        try:
+            return future.result(timeout=15)
+        except Exception:
+            return self.networkDB.get_all_competitions(active_only=active_only)
+
     def triggerNetworkDiscover(self):
         """Trigger on-demand discovery from a sync context (e.g. Flask route)."""
         from satorilib.satori_nostr import SatoriNostrConfig
