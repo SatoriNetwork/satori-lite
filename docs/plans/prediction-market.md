@@ -89,13 +89,14 @@ These fields are **intent metadata, not enforced constraints**. The host announc
 ```json
 {
   "stream_name": "btc-price-usd",
+  "stream_provider_pubkey": "hex...",
   "seq_num": 1042,
   "predicted_value": 67450.25,
   "timestamp": 1711234560
 }
 ```
 
-Sent via NIP-04 encrypted DM so only the host can read it. `seq_num` refers to the upcoming observation the prediction is for.
+Sent via NIP-04 encrypted DM so only the host can read it. A stream is uniquely identified by `(stream_name, stream_provider_pubkey)` together — name alone is not unique across producers. `seq_num` refers to the upcoming observation the prediction is for.
 
 ---
 
