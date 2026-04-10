@@ -172,7 +172,7 @@ def score(payload: dict) -> dict:
 
 The `scoring_metric` field in the competition announcement is the filename (without `.py`). The neuron loads it with `importlib` at competition setup time and calls `score(payload)` on each observation.
 
-Built-in modules live in `neuron-lite/scoring/builtin/` and are loaded the same way. A minimal template for custom modules:
+Built-in modules ship in `neuron-lite/scoring/` alongside any custom ones. The loader makes no distinction — it just looks up the filename. A minimal template:
 
 ```python
 # neuron-lite/scoring/my_scorer.py
