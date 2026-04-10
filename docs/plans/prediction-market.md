@@ -74,7 +74,7 @@ Two new kinds are needed:
 ```
 
 Key fields:
-- `pay_per_obs_sats` — what each winning predictor earns per observation
+- `pay_per_obs_sats` — the total sats the host promises to pay out per observation, distributed across predictors however the host chooses; this is the host's public commitment to the community — observers can verify this total is leaving the host on every tick
 - `paid_predictors` — intent: how many predictors the host plans to pay per observation (e.g. top 3)
 - `competing_predictors` — intent: how many channels the host plans to open; the host may score thousands of predictors but only maintain this many active channels
 - `scoring_metric` — baked-in scorer name (`"mae"`, `"rmse"`, `"directional_accuracy"`, etc.) or `"custom"`
