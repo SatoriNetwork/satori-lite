@@ -108,26 +108,89 @@ This is the core framework. An observation on the primary stream is the trigger.
 1. Predictions arrive from predictors → saved, indexed by (stream, predictor)
 2. Observation arrives on primary stream → TRIGGER
 3. Gather most recent predictions (according to lag, default = 1)
-4. Pass to scoring module:
-       - predictions
-       - the observation
-       - competition details (pay_per_obs_sats, paid_predictors, etc.)
-       - channel state (who has open channels, who does not)
-5. Scoring module returns: { predictor_pubkey → sats }
-6. Execute payments:
+4. Load scoring module by name (built-in or custom)
+5. Pass payload to scoring module:
+       - predictions (predictor_pubkey, predicted_value, timestamp, has_channel)
+       - observation (the actual value that triggered this)
+       - competition details (pay_per_obs_sats, paid_predictors, competing_predictors, etc.)
+6. Scoring module returns: { predictor_pubkey → sats }
+7. Execute payments:
        - predictor has a channel → send payment
        - predictor has no channel → open one, send payment
 ```
 
-The scoring module is a black box. The framework defines only what goes in and what comes out. It does not care how scoring, ranking, or splitting happens internally — that is entirely the module's concern. Specific scoring modules (MAE, RMSE, directional accuracy, etc.) are implementation details to be built later.
+The scoring module is a black box. The framework defines only what goes in and what comes out — it does not care how scoring, ranking, or splitting happens internally.
 
-Passing channel state to the scoring module allows it to make intelligent decisions — e.g. prefer predictors with existing channels, decide whether to onboard new ones — without the framework needing to know or enforce any policy.
+### Scoring Module API
 
-Because payment commitments (KIND_34604) are published to Nostr, **observers can tally payments** per channel and verify the host is honouring their announced `pay_per_obs_sats`. A host who stops paying becomes publicly visible.
+**Input payload** (dict passed to the entry point):
+
+```python
+{
+    'predictions': [
+        {
+            'predictor_pubkey': 'hex...',
+            'predicted_value': 67450.25,
+            'timestamp': 1711234560,
+            'has_channel': True,
+        },
+        ...
+    ],
+    'observation': 67500.00,
+    'competition': {
+        'stream_name': 'btc-price-usd',
+        'stream_provider_pubkey': 'hex...',
+        'pay_per_obs_sats': 300,
+        'paid_predictors': 3,
+        'competing_predictors': 5,
+        'scoring_params': {},
+        'horizon': 1,
+    },
+}
+```
+
+**Output** (dict returned by the entry point):
+
+```python
+{
+    'hex_pubkey_of_predictor': 150,  # sats to pay this predictor
+    'hex_pubkey_of_another':   100,
+    'hex_pubkey_of_another':    50,
+}
+```
+
+The sum of values should equal `pay_per_obs_sats`. The framework does not enforce this — it is the module's responsibility and the host's promise to the community.
+
+### Custom Scoring Modules
+
+Users drop a Python file into `neuron-lite/scoring/` — that is the entire installation process. The file must expose a single entry point function:
+
+```python
+def score(payload: dict) -> dict:
+    ...
+```
+
+The `scoring_metric` field in the competition announcement is the filename (without `.py`). The neuron loads it with `importlib` at competition setup time and calls `score(payload)` on each observation.
+
+Built-in modules live in `neuron-lite/scoring/builtin/` and are loaded the same way. A minimal template for custom modules:
+
+```python
+# neuron-lite/scoring/my_scorer.py
+
+def score(payload: dict) -> dict:
+    predictions = payload['predictions']
+    observation = payload['observation']
+    competition = payload['competition']
+    total = competition['pay_per_obs_sats']
+
+    # your logic here — rank predictors, decide splits
+    # return { predictor_pubkey: sats_to_pay }
+    return {}
+```
 
 ### Channel Opening
 
-The neuron opens channels automatically when a scoring module instructs payment to a predictor without an existing channel. Predictors may also open a channel to the host themselves — the scoring module sees this in channel state and may factor it in.
+The neuron opens channels automatically when a scoring module returns payment for a predictor without an existing channel. Predictors may also open a channel to the host themselves — `has_channel` in the payload reflects this so the module can factor it in.
 
 The social contract is simple: if the host is not paying, predictors stop predicting. No trial period or qualification window exists at the protocol level — the economics enforce behaviour naturally.
 
