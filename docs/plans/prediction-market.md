@@ -230,29 +230,32 @@ Over time, predictors can build a trust reputation — known to keep private dat
 
 ## Implementation Phases
 
-### Phase 1 — Competition Announcement
+### Phase 1 — Competition Announcement + Discovery
 - Add `KIND_COMPETITION_ANNOUNCE` (34607) to `models.py`
 - `announce_competition` and `close_competition` methods on `SatoriNostr`
-- `discover_competitions` query method
+- `discover_competitions` query method (subscribes to KIND_34607 on relays)
 - DB table: `competitions` in `network_db.py`
-- UI: competition announcement page
+- UI (host): competition announcement page — create, update, close a competition
+- UI (predictor): competition browser — list available competitions from Nostr, show details (stream, pay_per_obs_sats, paid_predictors, competing_predictors, scoring_metric), join button that tells the neuron to start predicting for that competition
+- UI (host): my competitions page — list competitions this neuron is hosting, status of each
 
 ### Phase 2 — Prediction Submission
 - Add `KIND_PREDICTION` (34608) encrypted DM to `SatoriNostr`
-- Predictor side: `submit_prediction(stream_name, host_pubkey, seq_num, value)`
+- Predictor side: `submit_prediction(stream_name, stream_provider_pubkey, host_pubkey, seq_num, value)`
 - Host side: `_handle_prediction_event` queues incoming predictions
 - DB table: `predictions` (host stores all received predictions per seq_num)
 
 ### Phase 3 — Scoring and Payment
-- Scoring engine: pluggable metric functions keyed by `scoring_metric` string
-- After each observation: score all predictions for that seq_num, rank predictors
-- Pay top N via existing `sendChannelPayment` (channels already built)
-- Neuron automatically opens channels to predictors as they appear; host can override
+- Observation trigger wired to scoring pipeline
+- Load scoring module from `neuron-lite/scoring/` by `scoring_metric` name via `importlib`
+- Pass payload (predictions, observation, competition details) → receive `{pubkey: sats}`
+- Execute payments: existing channel → send; no channel → open then send
+- UI (host): per-competition predictor list — who is predicting, channel status, total paid, payment history per observation
 
 ### Phase 4 — Accountability Tooling
 - Observer can subscribe to a host's KIND_34604 events and tally payments
-- UI: competition leaderboard (payment totals per predictor, publicly derivable)
-- UI: host reputation score based on payment consistency
+- UI: competition leaderboard (payment totals per predictor, publicly derivable from Nostr)
+- UI: host reputation score based on payment consistency against announced `pay_per_obs_sats`
 
 ### Phase 5 (Stretch) — Encrypted Streams + Authorized Predictors
 - Host whitelist management
