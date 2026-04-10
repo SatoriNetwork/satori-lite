@@ -197,6 +197,23 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN sender_nostr_pubkey TEXT")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS competitions (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                host_pubkey             TEXT NOT NULL,
+                pay_per_obs_sats        INTEGER NOT NULL,
+                paid_predictors         INTEGER NOT NULL,
+                competing_predictors    INTEGER NOT NULL,
+                scoring_metric          TEXT NOT NULL,
+                scoring_params          TEXT NOT NULL DEFAULT '{}',
+                horizon                 INTEGER NOT NULL DEFAULT 1,
+                active                  INTEGER NOT NULL DEFAULT 1,
+                timestamp               INTEGER NOT NULL,
+                UNIQUE(stream_name, stream_provider_pubkey, host_pubkey)
+            )
+        """)
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -773,4 +790,85 @@ class NetworkDB:
         conn = self._get_conn()
         conn.execute(
             "DELETE FROM channels WHERE p2sh_address = ?", (p2sh_address,))
+        conn.commit()
+
+    # ── Competitions ───────────────────────────────────────────────
+
+    def add_competition(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        pay_per_obs_sats: int,
+        paid_predictors: int,
+        competing_predictors: int,
+        scoring_metric: str,
+        scoring_params: str = '{}',
+        horizon: int = 1,
+        active: int = 1,
+        timestamp: int = 0,
+    ) -> None:
+        """Insert or replace a competition announcement."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO competitions (
+                stream_name, stream_provider_pubkey, host_pubkey,
+                pay_per_obs_sats, paid_predictors, competing_predictors,
+                scoring_metric, scoring_params, horizon, active, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stream_name, stream_provider_pubkey, host_pubkey)
+            DO UPDATE SET
+                pay_per_obs_sats     = excluded.pay_per_obs_sats,
+                paid_predictors      = excluded.paid_predictors,
+                competing_predictors = excluded.competing_predictors,
+                scoring_metric       = excluded.scoring_metric,
+                scoring_params       = excluded.scoring_params,
+                horizon              = excluded.horizon,
+                active               = excluded.active,
+                timestamp            = excluded.timestamp
+        """, (stream_name, stream_provider_pubkey, host_pubkey,
+              pay_per_obs_sats, paid_predictors, competing_predictors,
+              scoring_metric, scoring_params, horizon, active, timestamp))
+        conn.commit()
+
+    def get_competition(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> dict | None:
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT * FROM competitions
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey)).fetchone()
+        return dict(row) if row else None
+
+    def get_all_competitions(self, active_only: bool = False) -> list[dict]:
+        conn = self._get_conn()
+        if active_only:
+            rows = conn.execute(
+                "SELECT * FROM competitions WHERE active = 1").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM competitions").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_competitions_hosted_by(self, host_pubkey: str) -> list[dict]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM competitions WHERE host_pubkey = ?",
+            (host_pubkey,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def close_competition(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> None:
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE competitions SET active = 0
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey))
         conn.commit()
