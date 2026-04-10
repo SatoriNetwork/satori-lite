@@ -357,6 +357,31 @@ def login_required(f):
 
 
 def register_routes(app):
+    def build_local_relay_status_payload():
+        startup = get_startup()
+        if startup is None or not hasattr(startup, 'localRelay'):
+            return {
+                'docker_available': False,
+                'docker_error': 'startup relay manager unavailable',
+                'docker_endpoint': None,
+                'docker_help': {
+                    'cause': 'startup_unavailable',
+                    'summary': 'Relay manager is not available in this runtime.',
+                    'details': [],
+                },
+                'desired_mode': 'off',
+                'running_mode': 'off',
+                'running': False,
+            }
+        status = startup.localRelay.status()
+        request_host = request.host.split(':', 1)[0]
+        public_host = status.get('public_host') or request_host
+        private_host = status.get('private_host') or request_host
+        status['public_url_hint'] = f'ws://{public_host}:{status["public_port"]}'
+        status['private_url_hint'] = f'ws://{private_host}:{status["private_port"]}'
+        status['nostr_pubkey'] = startup.nostrPubkey
+        return status
+
     """Register all routes with the Flask app."""
 
     @app.route('/')
@@ -607,6 +632,16 @@ def register_routes(app):
             nostr_pubkey=nostr_pubkey,
             relay_url=relay_url,
             page_mode='p2p')
+
+    @app.route('/settings')
+    @login_required
+    def relay_settings():
+        """Settings page for local relay management."""
+        from satorineuron import VERSION
+        return render_template(
+            'settings.html',
+            version=VERSION,
+            relay_status=build_local_relay_status_payload())
 
     @app.route('/stake')
     @login_required
@@ -2071,6 +2106,42 @@ def register_routes(app):
         except Exception as e:
             logger.error(f"Relay registration error: {e}")
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/settings/relay/status', methods=['GET'])
+    @login_required
+    def api_settings_relay_status():
+        """Return status for the locally managed relay sidecars."""
+        return jsonify(build_local_relay_status_payload())
+
+    @app.route('/api/settings/relay/mode', methods=['POST'])
+    @login_required
+    def api_settings_relay_mode():
+        """Persist and apply the desired local relay mode."""
+        startup = get_startup()
+        if startup is None or not hasattr(startup, 'localRelay'):
+            return jsonify({'error': 'Relay manager unavailable'}), 500
+        data = request.get_json(silent=True) or {}
+        mode = str(data.get('mode', 'off')).strip().lower()
+        public_port = data.get('public_port')
+        private_port = data.get('private_port')
+        public_host = data.get('public_host')
+        private_host = data.get('private_host')
+        if mode not in {'off', 'public', 'private'}:
+            return jsonify({'error': 'mode must be one of: off, public, private'}), 400
+        try:
+            startup.localRelay.persist_mode(
+                mode,
+                public_port=public_port,
+                private_port=private_port,
+                public_host=public_host,
+                private_host=private_host)
+            startup.localRelay.ensure_state_async()
+            status = build_local_relay_status_payload()
+            return jsonify({'success': True, 'status': status})
+        except Exception as e:
+            logger.error(f'Failed to apply relay mode {mode}: {e}')
+            status = build_local_relay_status_payload()
+            return jsonify({'error': str(e), 'status': status}), 500
 
     @app.route('/api/network/streams', methods=['GET'])
     @login_required
