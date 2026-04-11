@@ -4,6 +4,7 @@ import os
 import sqlite3
 import threading
 import time
+from typing import Optional
 
 
 class NetworkDB:
@@ -203,6 +204,7 @@ class NetworkDB:
                 stream_name             TEXT NOT NULL,
                 stream_provider_pubkey  TEXT NOT NULL,
                 predictor_pubkey        TEXT NOT NULL,
+                predictor_wallet_pubkey TEXT,
                 host_pubkey             TEXT NOT NULL,
                 seq_num                 INTEGER NOT NULL,
                 predicted_value         TEXT NOT NULL,
@@ -210,6 +212,14 @@ class NetworkDB:
                 UNIQUE(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
             )
         """)
+        # Migration: add predictor_wallet_pubkey if missing (existing DBs)
+        try:
+            conn.execute(
+                "SELECT predictor_wallet_pubkey FROM competition_predictions LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE competition_predictions "
+                "ADD COLUMN predictor_wallet_pubkey TEXT")
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_comp_pred_seq
             ON competition_predictions(stream_name, stream_provider_pubkey, seq_num)
@@ -245,6 +255,19 @@ class NetworkDB:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_comp_pay_stream
             ON competition_payments(stream_name, stream_provider_pubkey)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS joined_competitions (
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                host_pubkey             TEXT NOT NULL,
+                joined_at               INTEGER NOT NULL,
+                PRIMARY KEY (stream_name, stream_provider_pubkey, host_pubkey)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_joined_comp_stream
+            ON joined_competitions(stream_name, stream_provider_pubkey)
         """)
         conn.commit()
 
@@ -405,6 +428,16 @@ class NetworkDB:
             ORDER BY received_at DESC LIMIT ?
         """, (stream_name, provider_pubkey, limit)).fetchall()
         return [dict(r) for r in rows]
+
+    def get_observation_by_seq(self, stream_name: str, provider_pubkey: str,
+                               seq_num: int) -> Optional[dict]:
+        """Return a single observation row by (stream, provider, seq_num), or None."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT * FROM observations
+            WHERE stream_name = ? AND provider_pubkey = ? AND seq_num = ?
+        """, (stream_name, provider_pubkey, seq_num)).fetchone()
+        return dict(row) if row else None
 
     def last_observation_time(self, stream_name: str,
                               provider_pubkey: str) -> int | None:
@@ -905,6 +938,61 @@ class NetworkDB:
         """, (stream_name, stream_provider_pubkey, host_pubkey))
         conn.commit()
 
+    # ── Joined Competitions (predictor side) ───────────────────────
+
+    def join_competition(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> None:
+        """Record that this neuron has joined a competition as a predictor.
+
+        The (stream, host) pair is what the engine uses to know where to
+        send its prediction DMs when it predicts for a given stream.
+        Idempotent — re-joining the same competition does nothing.
+        """
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT OR IGNORE INTO joined_competitions
+                (stream_name, stream_provider_pubkey, host_pubkey, joined_at)
+            VALUES (?, ?, ?, ?)
+        """, (stream_name, stream_provider_pubkey, host_pubkey, int(time.time())))
+        conn.commit()
+
+    def leave_competition(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> None:
+        conn = self._get_conn()
+        conn.execute("""
+            DELETE FROM joined_competitions
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey))
+        conn.commit()
+
+    def get_joined_competitions_for_stream(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+    ) -> list[dict]:
+        """Return joined competitions for a stream — one row per host."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM joined_competitions
+            WHERE stream_name = ? AND stream_provider_pubkey = ?
+        """, (stream_name, stream_provider_pubkey)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_joined_competitions(self) -> list[dict]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM joined_competitions ORDER BY joined_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # ── Competition Predictions ────────────────────────────────────
 
     def save_competition_prediction(
@@ -916,21 +1004,31 @@ class NetworkDB:
         seq_num: int,
         predicted_value: str,
         received_at: int,
+        predictor_wallet_pubkey: Optional[str] = None,
     ) -> None:
-        """Save a received prediction, replacing any earlier one for this predictor+seq."""
+        """Save a received prediction, replacing any earlier one for this predictor+seq.
+
+        predictor_wallet_pubkey is recorded so the host can open a payment
+        channel to pay the predictor without needing a separate lookup.
+        """
         conn = self._get_conn()
         conn.execute("""
             INSERT INTO competition_predictions (
                 stream_name, stream_provider_pubkey, predictor_pubkey,
-                host_pubkey, seq_num, predicted_value, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                predictor_wallet_pubkey, host_pubkey, seq_num,
+                predicted_value, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
             DO UPDATE SET
-                predicted_value = excluded.predicted_value,
-                received_at     = excluded.received_at
+                predicted_value         = excluded.predicted_value,
+                predictor_wallet_pubkey = COALESCE(
+                    excluded.predictor_wallet_pubkey,
+                    competition_predictions.predictor_wallet_pubkey),
+                received_at             = excluded.received_at
             WHERE excluded.received_at > competition_predictions.received_at
         """, (stream_name, stream_provider_pubkey, predictor_pubkey,
-              host_pubkey, seq_num, predicted_value, received_at))
+              predictor_wallet_pubkey, host_pubkey, seq_num,
+              predicted_value, received_at))
         conn.commit()
 
     def get_competition_predictions(

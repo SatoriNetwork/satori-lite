@@ -90,6 +90,8 @@ These fields are **intent metadata, not enforced constraints**. The host announc
 {
   "stream_name": "btc-price-usd",
   "stream_provider_pubkey": "hex...",
+  "predictor_pubkey": "hex...",
+  "predictor_wallet_pubkey": "hex...",
   "seq_num": 1042,
   "predicted_value": 67450.25,
   "timestamp": 1711234560
@@ -97,6 +99,8 @@ These fields are **intent metadata, not enforced constraints**. The host announc
 ```
 
 Sent via NIP-04 encrypted DM so only the host can read it. A stream is uniquely identified by `(stream_name, stream_provider_pubkey)` together — name alone is not unique across producers. `seq_num` refers to the upcoming observation the prediction is for.
+
+`predictor_wallet_pubkey` is the predictor's EVRmore wallet pubkey, carried in the DM so the host can open a payment channel and pay the predictor without a separate directory lookup. It is only visible to the host because the DM is encrypted.
 
 ---
 

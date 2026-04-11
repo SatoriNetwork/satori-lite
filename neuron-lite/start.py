@@ -344,7 +344,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 stream_name=obs.stream_name,
                 provider_pubkey=obs.nostr_pubkey,
                 seq_num=obs.observation.seq_num,
-                observed_value=float(obs.observation.value),
+                raw_value=obs.observation.value,
             )
 
     async def _competitionScoreAndPay(
@@ -352,19 +352,31 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         stream_name: str,
         provider_pubkey: str,
         seq_num: int,
-        observed_value: float,
+        raw_value,
     ) -> None:
         """Score predictions and pay winners when an observation arrives (host side).
 
         Only runs if this node is the host of an active competition for the stream.
         Delegates scoring logic to competition_scoring.compute_payouts(), then
         calls _competitionPayPredictor for each non-zero payout.
+
+        raw_value is the observation value as-is; the cast to float happens
+        only after the competition-host gate, so non-numeric streams do not
+        crash the observation pipeline.
         """
         try:
             competition = await asyncio.to_thread(
                 self.networkDB.get_competition,
                 stream_name, provider_pubkey, self.nostrPubkey)
             if not competition or not competition.get('active'):
+                return
+
+            try:
+                observed_value = float(raw_value)
+            except (TypeError, ValueError):
+                logging.warning(
+                    f'Competition: skipping score for {stream_name} seq={seq_num} '
+                    f'— non-numeric observation value')
                 return
 
             predictions = await asyncio.to_thread(
@@ -377,15 +389,65 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             payouts = await asyncio.to_thread(
                 compute_payouts, competition, predictions, observed_value)
 
+            # Index predictions by pubkey so we can look up wallet pubkey
+            preds_by_pubkey = {
+                row['predictor_pubkey']: row for row in predictions}
+
             for pubkey, sats in payouts.items():
+                row = preds_by_pubkey.get(pubkey)
+                wallet_pubkey = (row or {}).get('predictor_wallet_pubkey')
                 await self._competitionPayPredictor(
-                    pubkey, sats, stream_name, provider_pubkey, seq_num)
+                    pubkey, wallet_pubkey, sats,
+                    stream_name, provider_pubkey, seq_num)
         except Exception as e:
             logging.warning(f'Competition: score-and-pay failed: {e}')
+
+    async def _competitionScoreLateArrival(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+    ) -> None:
+        """Re-run scoring when a prediction arrives after its observation.
+
+        No-op if the observation hasn't been received yet (the normal
+        _networkProcessObservation path will score once it arrives) or
+        if this node isn't hosting the competition.
+        """
+        try:
+            observation = await asyncio.to_thread(
+                self.networkDB.get_observation_by_seq,
+                stream_name, provider_pubkey, seq_num)
+        except Exception:
+            return
+        if not observation:
+            return
+        raw = observation.get('value')
+        if raw is None:
+            return
+        # Observations are stored as the JSON-serialised payload; try to
+        # extract the numeric value whether the row was saved as raw or JSON.
+        candidate = raw
+        try:
+            import json as _json
+            parsed = _json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict) and 'value' in parsed:
+                candidate = parsed['value']
+            else:
+                candidate = parsed
+        except (ValueError, TypeError):
+            pass
+        await self._competitionScoreAndPay(
+            stream_name=stream_name,
+            provider_pubkey=provider_pubkey,
+            seq_num=seq_num,
+            raw_value=candidate,
+        )
 
     async def _competitionPayPredictor(
         self,
         predictor_nostr_pubkey: str,
+        predictor_wallet_pubkey: Optional[str],
         sats: int,
         stream_name: str,
         provider_pubkey: str,
@@ -393,18 +455,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Send a payment to a predictor via an existing or new channel (host side).
 
-        Looks up predictor's wallet pubkey from the DB (via their nostr pubkey).
-        Opens a channel if none exists with sufficient funds, then sends payment.
+        The predictor's wallet pubkey comes from the prediction DM itself —
+        attached by the predictor at submission time and stored in the
+        competition_predictions table. Opens a channel if none exists with
+        sufficient funds, then sends payment.
         """
         try:
-            # Resolve predictor's wallet pubkey from subscriptions/known nodes
-            # The predictor's nostr pubkey is used to look up their wallet pubkey
-            conn_rows = await asyncio.to_thread(self.networkDB.get_active)
-            predictor_wallet_pubkey = None
-            for row in conn_rows:
-                if row.get('provider_pubkey') == predictor_nostr_pubkey:
-                    predictor_wallet_pubkey = row.get('provider_wallet_pubkey')
-                    break
             if not predictor_wallet_pubkey:
                 logging.warning(
                     f'Competition: no wallet pubkey for predictor '
@@ -607,6 +663,32 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self.networkDB.mark_prediction_published, pred_id)
         except Exception as e:
             logging.warning(f'Network: prediction failed: {e}')
+
+        # Submit this prediction privately (encrypted DM) to every competition
+        # host we've joined for this stream. The engine's prediction is public
+        # via {stream}_pred above; competition DMs are in addition to that,
+        # private to each host.
+        try:
+            joined = await asyncio.to_thread(
+                self.networkDB.get_joined_competitions_for_stream,
+                stream_name, provider_pubkey)
+            if joined:
+                try:
+                    predicted_float = float(value_str)
+                except (TypeError, ValueError):
+                    predicted_float = None
+                if predicted_float is not None:
+                    for j in joined:
+                        await self.submitPrediction(
+                            stream_name=stream_name,
+                            stream_provider_pubkey=provider_pubkey,
+                            host_pubkey=j['host_pubkey'],
+                            seq_num=observation.seq_num,
+                            predicted_value=predicted_float,
+                        )
+        except Exception as e:
+            logging.warning(
+                f'Network: competition DM submit failed for {stream_name}: {e}')
 
     def _networkEnsureListener(self, relay_url: str):
         """Start an observation listener for a relay if one isn't running."""
@@ -2253,6 +2335,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Runs as a background async task. Stores each received prediction in the
         DB keyed by (stream_name, stream_provider_pubkey, predictor_pubkey, seq_num).
         The scoring pipeline reads from the DB when an observation arrives.
+
+        When a prediction arrives after its target observation is already
+        in hand, it is scored immediately (late-arrival recovery).
         """
         logging.info(f'Competition: listening for predictions on {relay_url}')
         try:
@@ -2268,11 +2353,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         seq_num=p.seq_num,
                         predicted_value=str(p.predicted_value),
                         received_at=p.timestamp,
+                        predictor_wallet_pubkey=getattr(
+                            p, 'predictor_wallet_pubkey', None),
                     )
                     logging.info(
                         f'Competition: received prediction from '
                         f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
                         f'seq={p.seq_num}')
+                    # Late-arrival: if we already have the observation this
+                    # prediction was meant to predict, score it now.
+                    await self._competitionScoreLateArrival(
+                        stream_name=p.stream_name,
+                        provider_pubkey=p.stream_provider_pubkey,
+                        seq_num=p.seq_num,
+                    )
                 except Exception as e:
                     logging.warning(f'Competition: failed to save prediction: {e}')
         except asyncio.CancelledError:
@@ -2289,7 +2383,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         seq_num: int,
         predicted_value: float,
     ) -> None:
-        """Submit a prediction to a competition host on all connected relays (predictor side)."""
+        """Submit a prediction to a competition host on all connected relays (predictor side).
+
+        The predictor's own wallet pubkey is attached so the host can open a
+        payment channel back without needing a separate directory lookup.
+        """
+        wallet_pubkey = getattr(
+            getattr(self, 'wallet', None), 'pubkey', None) or ''
         for client in self._networkClients.values():
             try:
                 await client.submit_prediction(
@@ -2298,6 +2398,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     host_pubkey=host_pubkey,
                     seq_num=seq_num,
                     predicted_value=predicted_value,
+                    predictor_wallet_pubkey=wallet_pubkey,
                 )
             except Exception as e:
                 logging.warning(f'Competition: submit prediction failed: {e}')

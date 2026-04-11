@@ -2186,7 +2186,13 @@ def register_routes(app):
     @app.route('/api/network/subscribe', methods=['POST'])
     @login_required
     def api_network_subscribe():
-        """Subscribe to a datastream."""
+        """Subscribe to a datastream.
+
+        When a `competition_host_pubkey` field is present, this is also a
+        "join competition" action — we persist the join, register the
+        corresponding prediction publication, and the engine starts DM'ing
+        predictions to that host on each observation.
+        """
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
@@ -2195,6 +2201,31 @@ def register_routes(app):
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
+
+        competition_host_pubkey = data.get('competition_host_pubkey')
+        if competition_host_pubkey:
+            stream_name = data['stream_name']
+            provider_pubkey = data['nostr_pubkey']
+            # Persist the (stream, host) join so the engine knows where to
+            # DM predictions when it predicts this stream.
+            startup.networkDB.join_competition(
+                stream_name=stream_name,
+                stream_provider_pubkey=provider_pubkey,
+                host_pubkey=competition_host_pubkey)
+            # Mirror the /api/network/predict behaviour: register a _pred
+            # publication so the prediction engine fires on new observations.
+            pred_name = stream_name + '_pred'
+            subs = startup.networkDB.get_active()
+            sub = next((s for s in subs
+                         if s['stream_name'] == stream_name
+                         and s['provider_pubkey'] == provider_pubkey), None)
+            startup.networkDB.add_publication(
+                stream_name=pred_name,
+                name=(f"Predictions for {sub.get('name') or stream_name}"
+                      if sub else f"Predictions for {stream_name}"),
+                cadence_seconds=sub.get('cadence_seconds') if sub else None,
+                source_stream_name=stream_name,
+                source_provider_pubkey=provider_pubkey)
         return jsonify({'success': True})
 
     @app.route('/api/network/unsubscribe', methods=['POST'])
