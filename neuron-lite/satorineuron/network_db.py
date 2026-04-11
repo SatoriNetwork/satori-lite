@@ -231,6 +231,21 @@ class NetworkDB:
                 UNIQUE(stream_name, stream_provider_pubkey, host_pubkey)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS competition_payments (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                predictor_pubkey        TEXT NOT NULL,
+                seq_num                 INTEGER NOT NULL,
+                sats_paid               INTEGER NOT NULL,
+                paid_at                 INTEGER NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_comp_pay_stream
+            ON competition_payments(stream_name, stream_provider_pubkey)
+        """)
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -931,3 +946,95 @@ class NetworkDB:
             WHERE stream_name = ? AND stream_provider_pubkey = ? AND seq_num = ?
         """, (stream_name, stream_provider_pubkey, seq_num)).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Competition Payments (accountability) ──────────────────────
+
+    def record_competition_payment(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        predictor_pubkey: str,
+        seq_num: int,
+        sats_paid: int,
+        paid_at: int,
+    ) -> None:
+        """Record a successful payment to a predictor after scoring."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO competition_payments
+                (stream_name, stream_provider_pubkey, predictor_pubkey,
+                 seq_num, sats_paid, paid_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (stream_name, stream_provider_pubkey, predictor_pubkey,
+              seq_num, sats_paid, paid_at))
+        conn.commit()
+
+    def get_competition_payments(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+    ) -> list[dict]:
+        """Return all payment records for a stream competition."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM competition_payments
+            WHERE stream_name = ? AND stream_provider_pubkey = ?
+            ORDER BY paid_at DESC
+        """, (stream_name, stream_provider_pubkey)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_competition_leaderboard(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+    ) -> list[dict]:
+        """Return per-predictor payment totals, sorted by total_sats descending."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT
+                predictor_pubkey,
+                SUM(sats_paid)  AS total_sats,
+                COUNT(*)        AS prediction_count
+            FROM competition_payments
+            WHERE stream_name = ? AND stream_provider_pubkey = ?
+            GROUP BY predictor_pubkey
+            ORDER BY total_sats DESC
+        """, (stream_name, stream_provider_pubkey)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_host_payment_stats(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> dict | None:
+        """Return payment consistency stats for a hosted competition.
+
+        Returns None if no competition exists for this host.
+        scored_observations counts distinct seq_nums that received payments.
+        """
+        conn = self._get_conn()
+        comp = conn.execute("""
+            SELECT pay_per_obs_sats FROM competitions
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey)).fetchone()
+        if not comp:
+            return None
+        row = conn.execute("""
+            SELECT
+                COALESCE(SUM(obs_total), 0)   AS total_paid_sats,
+                COUNT(*)                       AS scored_observations,
+                COALESCE(AVG(obs_total), 0.0)  AS avg_paid_per_obs
+            FROM (
+                SELECT seq_num, SUM(sats_paid) AS obs_total
+                FROM competition_payments
+                WHERE stream_name = ? AND stream_provider_pubkey = ?
+                GROUP BY seq_num
+            )
+        """, (stream_name, stream_provider_pubkey)).fetchone()
+        return {
+            'total_paid_sats': row['total_paid_sats'],
+            'scored_observations': row['scored_observations'],
+            'avg_paid_per_obs': row['avg_paid_per_obs'],
+            'announced_per_obs': comp['pay_per_obs_sats'],
+        }

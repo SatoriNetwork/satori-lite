@@ -379,7 +379,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
             for pubkey, sats in payouts.items():
                 await self._competitionPayPredictor(
-                    pubkey, sats, stream_name, seq_num)
+                    pubkey, sats, stream_name, provider_pubkey, seq_num)
         except Exception as e:
             logging.warning(f'Competition: score-and-pay failed: {e}')
 
@@ -388,6 +388,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         predictor_nostr_pubkey: str,
         sats: int,
         stream_name: str,
+        provider_pubkey: str,
         seq_num: int,
     ) -> None:
         """Send a payment to a predictor via an existing or new channel (host side).
@@ -441,6 +442,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     return
 
             await self.sendChannelPayment(channel['p2sh_address'], sats, stream_name)
+            import time as _time
+            await asyncio.to_thread(
+                self.networkDB.record_competition_payment,
+                stream_name,
+                provider_pubkey,
+                predictor_nostr_pubkey,
+                seq_num,
+                sats,
+                int(_time.time()),
+            )
             logging.info(
                 f'Competition: paid {sats} sats to '
                 f'{predictor_nostr_pubkey[:12]}… for seq={seq_num}',

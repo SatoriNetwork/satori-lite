@@ -31,6 +31,12 @@
         My Competitions
       </button>
     </li>
+    <li class="nav-item">
+      <button class="nav-link" id="leaderboardTab" onclick="showTab('leaderboard')">
+        <i class="material-icons align-middle" style="font-size:16px;">leaderboard</i>
+        Leaderboard
+      </button>
+    </li>
   </ul>
 
   <!-- ── Browse Tab ───────────────────────────────────────────── -->
@@ -58,6 +64,48 @@
             </thead>
             <tbody id="browseTable">
               <tr><td colspan="7" class="text-muted text-center py-4">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Leaderboard Tab ────────────────────────────────────── -->
+  <div id="leaderboardPanel" style="display:none;">
+    <div class="card mb-3">
+      <div class="card-header">
+        <span class="fw-600">Leaderboard</span>
+        <span class="text-muted small ms-2" id="leaderboardSubtitle"></span>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col">
+            <input type="text" class="form-control form-control-sm" id="lb_stream" placeholder="Stream name">
+          </div>
+          <div class="col">
+            <input type="text" class="form-control form-control-sm font-monospace" id="lb_provider" placeholder="Provider pubkey">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-sm btn-primary" onclick="loadLeaderboard()">Load</button>
+          </div>
+        </div>
+        <!-- Stats summary -->
+        <div id="lb_stats" style="display:none;" class="alert alert-secondary py-2 small mb-3">
+          <span id="lb_stats_text"></span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Predictor</th>
+                <th class="text-end">Predictions</th>
+                <th class="text-end">Total Earned (sats)</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboardTable">
+              <tr><td colspan="4" class="text-muted text-center py-4">Enter a stream name and provider pubkey above.</td></tr>
             </tbody>
           </table>
         </div>
@@ -162,10 +210,12 @@
 <script>
 // ── Tab switching ─────────────────────────────────────────────
 function showTab(tab) {
-  document.getElementById('browsePanel').style.display = tab === 'browse' ? '' : 'none';
-  document.getElementById('minePanel').style.display   = tab === 'mine'   ? '' : 'none';
+  document.getElementById('browsePanel').style.display      = tab === 'browse'      ? '' : 'none';
+  document.getElementById('minePanel').style.display        = tab === 'mine'        ? '' : 'none';
+  document.getElementById('leaderboardPanel').style.display = tab === 'leaderboard' ? '' : 'none';
   document.getElementById('browseTab').classList.toggle('active', tab === 'browse');
   document.getElementById('mineTab').classList.toggle('active', tab === 'mine');
+  document.getElementById('leaderboardTab').classList.toggle('active', tab === 'leaderboard');
   if (tab === 'browse') loadBrowse();
   if (tab === 'mine')   loadMine();
 }
@@ -284,7 +334,11 @@ function renderMine(comps) {
           ? '<span class="badge bg-success">Active</span>'
           : '<span class="badge bg-secondary">Closed</span>'}
       </td>
-      <td class="text-end">
+      <td class="text-end d-flex gap-1 justify-content-end">
+        <button class="btn btn-outline-secondary btn-sm"
+          onclick="viewLeaderboard('${c.stream_name}', '${c.stream_provider_pubkey}')">
+          <i class="material-icons align-middle" style="font-size:14px;">leaderboard</i>
+        </button>
         ${c.active ? `
           <button class="btn btn-outline-danger btn-sm"
             onclick="closeCompetition('${c.stream_name}', '${c.stream_provider_pubkey}')">
@@ -345,6 +399,62 @@ async function createCompetition() {
     loadMine();
   } catch(e) {
     modalAlert('Failed: ' + e);
+  }
+}
+
+// ── Leaderboard ───────────────────────────────────────────────
+function viewLeaderboard(streamName, providerPubkey) {
+  document.getElementById('lb_stream').value = streamName;
+  document.getElementById('lb_provider').value = providerPubkey;
+  showTab('leaderboard');
+  loadLeaderboard();
+}
+
+async function loadLeaderboard() {
+  const stream = document.getElementById('lb_stream').value.trim();
+  const provider = document.getElementById('lb_provider').value.trim();
+  if (!stream || !provider) {
+    showAlert('Enter a stream name and provider pubkey.'); return;
+  }
+  const tbody = document.getElementById('leaderboardTable');
+  tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">Loading…</td></tr>';
+  document.getElementById('lb_stats').style.display = 'none';
+  try {
+    const [boardResp, statsResp] = await Promise.all([
+      fetch(`/api/competition/leaderboard?stream_name=${encodeURIComponent(stream)}&provider_pubkey=${encodeURIComponent(provider)}`),
+      fetch(`/api/competition/stats?stream_name=${encodeURIComponent(stream)}&provider_pubkey=${encodeURIComponent(provider)}&host_pubkey=self`),
+    ]);
+    const board = await boardResp.json();
+    document.getElementById('leaderboardSubtitle').textContent = stream;
+    if (!board.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-4">No payments recorded yet.</td></tr>';
+    } else {
+      tbody.innerHTML = board.map((r, i) => `
+        <tr>
+          <td><span class="badge bg-secondary">#${i+1}</span></td>
+          <td class="font-monospace small">${shortKey(r.predictor_pubkey)}</td>
+          <td class="text-end">${r.prediction_count}</td>
+          <td class="text-end fw-500">${r.total_sats.toLocaleString()} sats</td>
+        </tr>
+      `).join('');
+    }
+    if (statsResp.ok) {
+      const stats = await statsResp.json();
+      if (!stats.error) {
+        const ratio = stats.announced_per_obs > 0
+          ? (stats.avg_paid_per_obs / stats.announced_per_obs * 100).toFixed(1)
+          : '—';
+        document.getElementById('lb_stats_text').innerHTML =
+          `<strong>Host stats:</strong> ` +
+          `${stats.scored_observations} observations scored · ` +
+          `${stats.total_paid_sats.toLocaleString()} sats total paid · ` +
+          `avg ${Math.round(stats.avg_paid_per_obs).toLocaleString()} / ` +
+          `${stats.announced_per_obs.toLocaleString()} announced (${ratio}% follow-through)`;
+        document.getElementById('lb_stats').style.display = '';
+      }
+    }
+  } catch(e) {
+    showAlert('Failed to load leaderboard: ' + e);
   }
 }
 

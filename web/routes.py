@@ -2836,3 +2836,37 @@ def register_routes(app):
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
         return jsonify({'competitions': startup.discoverCompetitionsSync()})
+
+    @app.route('/api/competition/leaderboard', methods=['GET'])
+    @login_required
+    def api_competition_leaderboard():
+        """Return per-predictor payment totals for a competition."""
+        stream_name = request.args.get('stream_name')
+        provider_pubkey = request.args.get('provider_pubkey')
+        if not stream_name or not provider_pubkey:
+            return jsonify({'error': 'stream_name and provider_pubkey required'}), 400
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        board = startup.networkDB.get_competition_leaderboard(
+            stream_name, provider_pubkey)
+        return jsonify(board)
+
+    @app.route('/api/competition/stats', methods=['GET'])
+    @login_required
+    def api_competition_stats():
+        """Return payment consistency stats for a hosted competition."""
+        stream_name = request.args.get('stream_name')
+        provider_pubkey = request.args.get('provider_pubkey')
+        host_pubkey = request.args.get('host_pubkey')
+        if not stream_name or not provider_pubkey or not host_pubkey:
+            return jsonify(
+                {'error': 'stream_name, provider_pubkey and host_pubkey required'}), 400
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        stats = startup.networkDB.get_host_payment_stats(
+            stream_name, provider_pubkey, host_pubkey)
+        if stats is None:
+            return jsonify({'error': 'Competition not found'}), 404
+        return jsonify(stats)
