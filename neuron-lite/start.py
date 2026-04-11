@@ -339,6 +339,116 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # an open channel to this provider
             await self._channelPayForObservation(
                 obs.stream_name, obs.nostr_pubkey, obs.observation.seq_num)
+            # Score competition predictions and pay predictors if we host one
+            await self._competitionScoreAndPay(
+                stream_name=obs.stream_name,
+                provider_pubkey=obs.nostr_pubkey,
+                seq_num=obs.observation.seq_num,
+                observed_value=float(obs.observation.value),
+            )
+
+    async def _competitionScoreAndPay(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+        observed_value: float,
+    ) -> None:
+        """Score predictions and pay winners when an observation arrives (host side).
+
+        Only runs if this node is the host of an active competition for the stream.
+        Delegates scoring logic to competition_scoring.compute_payouts(), then
+        calls _competitionPayPredictor for each non-zero payout.
+        """
+        try:
+            competition = await asyncio.to_thread(
+                self.networkDB.get_competition,
+                stream_name, provider_pubkey, self.nostrPubkey)
+            if not competition or not competition.get('active'):
+                return
+
+            predictions = await asyncio.to_thread(
+                self.networkDB.get_competition_predictions,
+                stream_name, provider_pubkey, seq_num)
+            if not predictions:
+                return
+
+            from satorineuron.competition_scoring import compute_payouts
+            payouts = await asyncio.to_thread(
+                compute_payouts, competition, predictions, observed_value)
+
+            for pubkey, sats in payouts.items():
+                await self._competitionPayPredictor(
+                    pubkey, sats, stream_name, seq_num)
+        except Exception as e:
+            logging.warning(f'Competition: score-and-pay failed: {e}')
+
+    async def _competitionPayPredictor(
+        self,
+        predictor_nostr_pubkey: str,
+        sats: int,
+        stream_name: str,
+        seq_num: int,
+    ) -> None:
+        """Send a payment to a predictor via an existing or new channel (host side).
+
+        Looks up predictor's wallet pubkey from the DB (via their nostr pubkey).
+        Opens a channel if none exists with sufficient funds, then sends payment.
+        """
+        try:
+            # Resolve predictor's wallet pubkey from subscriptions/known nodes
+            # The predictor's nostr pubkey is used to look up their wallet pubkey
+            conn_rows = await asyncio.to_thread(self.networkDB.get_active)
+            predictor_wallet_pubkey = None
+            for row in conn_rows:
+                if row.get('provider_pubkey') == predictor_nostr_pubkey:
+                    predictor_wallet_pubkey = row.get('provider_wallet_pubkey')
+                    break
+            if not predictor_wallet_pubkey:
+                logging.warning(
+                    f'Competition: no wallet pubkey for predictor '
+                    f'{predictor_nostr_pubkey[:12]}…, skipping payment')
+                return
+
+            # Find an open sender channel with enough remainder
+            channels = await asyncio.to_thread(
+                self.networkDB.get_channels_as_sender)
+            channel = next(
+                (c for c in channels
+                 if c['receiver_pubkey'] == predictor_wallet_pubkey
+                 and c['remainder_sats'] >= sats),
+                None)
+            if not channel:
+                fund_sats = self._channelFundSats()
+                timeout_minutes = self._channelTimeoutMinutes()
+                logging.info(
+                    f'Competition: opening channel to predictor '
+                    f'{predictor_wallet_pubkey[:16]}… '
+                    f'fund={fund_sats} sats',
+                    color='cyan')
+                p2sh = await self.openChannel(
+                    receiver_pubkey=predictor_wallet_pubkey,
+                    amount_sats=fund_sats,
+                    minutes=timeout_minutes,
+                    receiver_nostr_pubkey=predictor_nostr_pubkey,
+                )
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, p2sh)
+                if not channel or channel['remainder_sats'] < sats:
+                    logging.warning(
+                        f'Competition: newly opened channel insufficient for '
+                        f'{sats} sats payment to {predictor_wallet_pubkey[:16]}…')
+                    return
+
+            await self.sendChannelPayment(channel['p2sh_address'], sats, stream_name)
+            logging.info(
+                f'Competition: paid {sats} sats to '
+                f'{predictor_nostr_pubkey[:12]}… for seq={seq_num}',
+                color='green')
+        except Exception as e:
+            logging.warning(
+                f'Competition: pay-predictor failed for '
+                f'{predictor_nostr_pubkey[:12]}…: {e}')
 
     async def _channelPayForObservation(
         self,
@@ -2133,27 +2243,32 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         DB keyed by (stream_name, stream_provider_pubkey, predictor_pubkey, seq_num).
         The scoring pipeline reads from the DB when an observation arrives.
         """
-        import time as _time
         logging.info(f'Competition: listening for predictions on {relay_url}')
-        async for inbound in client.incoming_predictions():
-            try:
-                p = inbound.prediction
-                await asyncio.to_thread(
-                    self.networkDB.save_competition_prediction,
-                    stream_name=p.stream_name,
-                    stream_provider_pubkey=p.stream_provider_pubkey,
-                    predictor_pubkey=p.predictor_pubkey,
-                    host_pubkey=self.nostrPubkey,
-                    seq_num=p.seq_num,
-                    predicted_value=str(p.predicted_value),
-                    received_at=p.timestamp,
-                )
-                logging.info(
-                    f'Competition: received prediction from '
-                    f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
-                    f'seq={p.seq_num}')
-            except Exception as e:
-                logging.warning(f'Competition: failed to save prediction: {e}')
+        try:
+            async for inbound in client.incoming_predictions():
+                try:
+                    p = inbound.prediction
+                    await asyncio.to_thread(
+                        self.networkDB.save_competition_prediction,
+                        stream_name=p.stream_name,
+                        stream_provider_pubkey=p.stream_provider_pubkey,
+                        predictor_pubkey=p.predictor_pubkey,
+                        host_pubkey=self.nostrPubkey,
+                        seq_num=p.seq_num,
+                        predicted_value=str(p.predicted_value),
+                        received_at=p.timestamp,
+                    )
+                    logging.info(
+                        f'Competition: received prediction from '
+                        f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
+                        f'seq={p.seq_num}')
+                except Exception as e:
+                    logging.warning(f'Competition: failed to save prediction: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'Competition: prediction listener stopped on {relay_url}: {e}')
 
     async def submitPrediction(
         self,
