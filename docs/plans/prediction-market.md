@@ -272,22 +272,18 @@ Over time predictors can build trust reputation — known to keep private data p
 - Limitation: only the host node has this data; observers and predictors see nothing
 
 **What is deferred (Phase 4b — public verifiability):**
-- The intended design is for any node to subscribe to a host's KIND_34604 channel
-  commitment events and tally payments from those public Nostr events
-- Problem: KIND_34604 is parameterized replaceable — the relay keeps only the latest
-  commitment per channel, so you cannot reconstruct per-observation payment history
-  from the relay alone; you only see cumulative channel drawdown
-- Problem: wallet pubkeys in KIND_34604 don't map back to Nostr/predictor pubkeys
-  without a separate lookup table
-- Problem: a node offline during payments misses them permanently under this model
-- The correct solution requires a **distributed payment log**: the host publishes a
-  public Nostr event per scoring round with the full payout breakdown
-  `{stream_name, seq_num, payouts: [{predictor_pubkey, sats}]}`, and observers
-  subscribe to those events. This is queryable, catchup-friendly, and fully verifiable.
-- Implementing this properly requires sharding and peer-to-peer distributed database
-  infrastructure so that no single node needs to subscribe to every competition's
-  payment stream. This is a non-trivial architecture effort and is deferred until
-  the broader P2P data layer is designed.
+- Any node can subscribe to a host's KIND_34604 channel commitment events on the
+  relay and tally payments while online — this is the intended accountability model
+- KIND_34604 is public; `sender_pubkey`, `receiver_pubkey`, `pay_amount_sats`, and
+  `stream_name` are all visible, so observers can verify the host is paying who they
+  said they would pay at roughly the rate they announced
+- Nodes that are offline miss payments made during that time — this is accepted
+  best-effort behaviour, not a fatal flaw
+- The infrastructure challenge: we don't want every neuron subscribing to every
+  competition's payment stream. Doing this properly requires sharding and
+  peer-to-peer distributed database infrastructure so nodes selectively sync only
+  the competitions they care about. That architecture is deferred until the broader
+  P2P data layer is designed.
 
 ### Phase 5 (Stretch) — Encrypted Streams + Authorized Predictors
 - Host whitelist management (local only, never published)
