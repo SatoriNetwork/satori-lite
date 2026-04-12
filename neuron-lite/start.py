@@ -79,6 +79,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
+        self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
+        self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -343,11 +345,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Pay for an observation via a channel (sender/buyer side).
 
-        Looks up the subscription for price and provider wallet pubkey.
-        If a channel exists but is exhausted, refunds it. If no channel
-        exists at all, opens a new one. Channels are persistent and never
-        deleted.
-        Silently skips if the stream is free or no wallet pubkey is known.
+        Rate-limited: never pays more than once per cadence/2 seconds.
+        If an observation arrives during the cooldown, schedules exactly one
+        deferred payment at cooldown end. The deferred payment signals the
+        seller that the buyer is still subscribed. Streams with no cadence
+        (null/0) are not rate-limited.
         """
         try:
             sub = await asyncio.to_thread(
@@ -363,50 +365,110 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not subscription or subscription.get('price_per_obs', 0) == 0:
                 return  # free stream
             price_sats = subscription['price_per_obs']
-            provider_wallet_pubkey = subscription.get('provider_wallet_pubkey')
-            if not provider_wallet_pubkey:
-                return  # can't pay without knowing receiver's Satori wallet pubkey
-            # Find an existing sender channel to this provider
-            channels = await asyncio.to_thread(
-                self.networkDB.get_channels_as_sender)
-            channel = next(
-                (c for c in channels
-                 if c['receiver_pubkey'] == provider_wallet_pubkey),
-                None)
-            if channel and channel['remainder_sats'] < price_sats:
-                # Existing channel is exhausted — refund it
-                fund_sats = self._channelFundSats()
-                logging.info(
-                    f'Channel: refunding {channel["p2sh_address"]} '
-                    f'(remainder={channel["remainder_sats"]}) '
-                    f'with {fund_sats} sats',
-                    color='cyan')
-                await self.refundChannel(channel['p2sh_address'], fund_sats)
-                channel = await asyncio.to_thread(
-                    self.networkDB.get_channel, channel['p2sh_address'])
-                if not channel or channel['remainder_sats'] < price_sats:
-                    return
-            elif not channel:
-                # No channel exists at all — open a fresh one
-                fund_sats = self._channelFundSats()
-                timeout_minutes = self._channelTimeoutMinutes()
-                logging.info(
-                    f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
-                    f'fund={fund_sats} sats timeout={timeout_minutes} min',
-                    color='cyan')
-                p2sh = await self.openChannel(
-                    receiver_pubkey=provider_wallet_pubkey,
-                    amount_sats=fund_sats,
-                    minutes=timeout_minutes,
-                    receiver_nostr_pubkey=provider_pubkey,
-                )
-                channel = await asyncio.to_thread(
-                    self.networkDB.get_channel, p2sh)
-                if not channel or channel['remainder_sats'] < price_sats:
-                    return
-            await self.sendChannelPayment(channel['p2sh_address'], price_sats, stream_name)
+            cadence = subscription.get('cadence_seconds') or 0
+            cooldown = cadence / 2 if cadence > 0 else 0
+            key = (stream_name, provider_pubkey)
+            now = time.time()
+            last_paid = self._paymentCooldowns.get(key, 0)
+            if cooldown > 0 and (now - last_paid) < cooldown:
+                # Inside cooldown — schedule one deferred payment at cooldown end
+                if key not in self._paymentDeferred:
+                    delay = cooldown - (now - last_paid)
+                    loop = asyncio.get_event_loop()
+                    self._paymentDeferred[key] = loop.call_later(
+                        delay,
+                        lambda k=key, s=stream_name, p=provider_pubkey:
+                            asyncio.ensure_future(
+                                self._channelPayDeferred(s, p)))
+                    logging.debug(
+                        f'Channel: deferred payment for {stream_name} '
+                        f'in {delay:.1f}s (cooldown)')
+                return
+            await self._channelPayNow(stream_name, provider_pubkey, price_sats)
         except Exception as e:
             logging.warning(f'Channel: pay-for-observation failed: {e}')
+
+    async def _channelPayDeferred(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+    ) -> None:
+        """Execute a deferred payment scheduled during cooldown."""
+        key = (stream_name, provider_pubkey)
+        self._paymentDeferred.pop(key, None)
+        try:
+            conn_rows = await asyncio.to_thread(self.networkDB.get_active)
+            subscription = next(
+                (s for s in conn_rows
+                 if s['stream_name'] == stream_name
+                 and s['provider_pubkey'] == provider_pubkey),
+                None)
+            if not subscription or subscription.get('price_per_obs', 0) == 0:
+                return
+            price_sats = subscription['price_per_obs']
+            await self._channelPayNow(stream_name, provider_pubkey, price_sats)
+        except Exception as e:
+            logging.warning(f'Channel: deferred payment failed: {e}')
+
+    async def _channelPayNow(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        price_sats: int,
+    ) -> None:
+        """Send a channel payment immediately and reset the cooldown timer.
+
+        Handles channel lookup, refund if exhausted, and open if none exists.
+        """
+        conn_rows = await asyncio.to_thread(self.networkDB.get_active)
+        subscription = next(
+            (s for s in conn_rows
+             if s['stream_name'] == stream_name
+             and s['provider_pubkey'] == provider_pubkey),
+            None)
+        provider_wallet_pubkey = (
+            subscription.get('provider_wallet_pubkey') if subscription else None)
+        if not provider_wallet_pubkey:
+            return
+        channels = await asyncio.to_thread(
+            self.networkDB.get_channels_as_sender)
+        channel = next(
+            (c for c in channels
+             if c['receiver_pubkey'] == provider_wallet_pubkey),
+            None)
+        if channel and channel['remainder_sats'] < price_sats:
+            fund_sats = self._channelFundSats()
+            logging.info(
+                f'Channel: refunding {channel["p2sh_address"]} '
+                f'(remainder={channel["remainder_sats"]}) '
+                f'with {fund_sats} sats',
+                color='cyan')
+            await self.refundChannel(channel['p2sh_address'], fund_sats)
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, channel['p2sh_address'])
+            if not channel or channel['remainder_sats'] < price_sats:
+                return
+        elif not channel:
+            fund_sats = self._channelFundSats()
+            timeout_minutes = self._channelTimeoutMinutes()
+            logging.info(
+                f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
+                f'fund={fund_sats} sats timeout={timeout_minutes} min',
+                color='cyan')
+            p2sh = await self.openChannel(
+                receiver_pubkey=provider_wallet_pubkey,
+                amount_sats=fund_sats,
+                minutes=timeout_minutes,
+                receiver_nostr_pubkey=provider_pubkey,
+            )
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, p2sh)
+            if not channel or channel['remainder_sats'] < price_sats:
+                return
+        await self.sendChannelPayment(
+            channel['p2sh_address'], price_sats, stream_name)
+        key = (stream_name, provider_pubkey)
+        self._paymentCooldowns[key] = time.time()
 
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
