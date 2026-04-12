@@ -658,6 +658,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             co.blocks,
             co.minutes,
             sender_nostr_pubkey=co.sender_nostr_pubkey,
+            receiver_nostr_pubkey=self.nostrPubkey or '',
         )
         logging.info(
             f'Channel: registered inbound channel {co.p2sh_address} '
@@ -1234,6 +1235,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             blocks,
             minutes,
             sender_nostr_pubkey=self.nostrPubkey or '',
+            receiver_nostr_pubkey=receiver_nostr_pubkey or '',
         )
         logging.info(
             f'Channel: opened {p2sh_address} '
@@ -1298,6 +1300,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         locked_sats = channel['locked_sats']
         cumulative_sats = (
             locked_sats - channel['remainder_sats'] + pay_amount_sats)
+        # The channel stores the receiver's 33-byte EVR wallet pubkey, but the
+        # partial tx output needs a P2PKH address string.
+        receiver_address = EvrmoreWallet.generateAddress(
+            channel['receiver_pubkey'])
         # Build partial tx with ONLY the P2SH input and SATORI outputs.
         # No EVR inputs are included — the receiver resolves the fee via
         # 3-path logic so the sender doesn't need EVR to send micropayments.
@@ -1310,7 +1316,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 gatheredSatoriSats=locked_sats,
                 changeAddress=channel['p2sh_address'])
             return self.wallet._compileClaimOnP2SHMultiSigStart(
-                toAddress=channel['receiver_pubkey'],
+                toAddress=receiver_address,
                 satoriSats=sat_sats,
                 feeOverride=None,
                 fundingTxIds=[channel['funding_txid']],
@@ -1338,9 +1344,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             timestamp=int(time.time()),
             stream_name=stream_name,
         )
+        # The Nostr `p` tag must be a 32-byte x-only Nostr pubkey — that is a
+        # different value from the 33-byte EVR wallet pubkey stored in
+        # channel['receiver_pubkey'], so we thread the persisted nostr pubkey
+        # from the channel row into the library call.
+        receiver_nostr_pubkey = channel.get('receiver_nostr_pubkey') or ''
         for client in self._networkClients.values():
             try:
-                await client.publish_commitment(commitment)
+                await client.publish_commitment(
+                    commitment, receiver_nostr_pubkey)
             except Exception as e:
                 logging.warning(f'Channel: failed to publish commitment: {e}')
         # Update sender's remainder so cumulative tracking is correct

@@ -169,20 +169,21 @@ class NetworkDB:
                 "ALTER TABLE observations ADD COLUMN observed_at INTEGER")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS channels (
-                p2sh_address        TEXT PRIMARY KEY,
-                sender_pubkey       TEXT NOT NULL,
-                receiver_pubkey     TEXT NOT NULL,
-                redeem_script       TEXT NOT NULL,
-                funding_txid        TEXT NOT NULL,
-                funding_vout        INTEGER NOT NULL,
-                locked_sats         INTEGER NOT NULL,
-                remainder_sats      INTEGER NOT NULL,
-                blocks              INTEGER,
-                minutes             REAL,
-                is_sender           INTEGER NOT NULL,
-                sender_nostr_pubkey TEXT,
-                created_at          INTEGER NOT NULL,
-                pending_commitment  TEXT
+                p2sh_address          TEXT PRIMARY KEY,
+                sender_pubkey         TEXT NOT NULL,
+                receiver_pubkey       TEXT NOT NULL,
+                redeem_script         TEXT NOT NULL,
+                funding_txid          TEXT NOT NULL,
+                funding_vout          INTEGER NOT NULL,
+                locked_sats           INTEGER NOT NULL,
+                remainder_sats        INTEGER NOT NULL,
+                blocks                INTEGER,
+                minutes               REAL,
+                is_sender             INTEGER NOT NULL,
+                sender_nostr_pubkey   TEXT,
+                receiver_nostr_pubkey TEXT,
+                created_at            INTEGER NOT NULL,
+                pending_commitment    TEXT
             )
         """)
         # Migration: add pending_commitment to existing DBs
@@ -197,6 +198,15 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN sender_nostr_pubkey TEXT")
+        # Migration: add receiver_nostr_pubkey if missing (existing DBs).
+        # The sender needs this to tag commitment events with the receiver's
+        # 32-byte Nostr pubkey (separate from the 33-byte EVR wallet pubkey
+        # stored in receiver_pubkey).
+        try:
+            conn.execute("SELECT receiver_nostr_pubkey FROM channels LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE channels ADD COLUMN receiver_nostr_pubkey TEXT")
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -643,6 +653,7 @@ class NetworkDB:
         blocks: int = None,
         minutes: float = None,
         sender_nostr_pubkey: str = None,
+        receiver_nostr_pubkey: str = None,
     ) -> None:
         """Persist a payment channel. Upserts on p2sh_address."""
         conn = self._get_conn()
@@ -650,21 +661,26 @@ class NetworkDB:
             INSERT INTO channels
                 (p2sh_address, sender_pubkey, receiver_pubkey, redeem_script,
                  funding_txid, funding_vout, locked_sats, remainder_sats,
-                 blocks, minutes, is_sender, sender_nostr_pubkey, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 blocks, minutes, is_sender, sender_nostr_pubkey,
+                 receiver_nostr_pubkey, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(p2sh_address) DO UPDATE SET
-                redeem_script  = excluded.redeem_script,
-                funding_txid   = excluded.funding_txid,
-                funding_vout   = excluded.funding_vout,
-                locked_sats    = excluded.locked_sats,
-                remainder_sats = excluded.remainder_sats,
-                blocks         = excluded.blocks,
-                minutes        = excluded.minutes
+                redeem_script         = excluded.redeem_script,
+                funding_txid          = excluded.funding_txid,
+                funding_vout          = excluded.funding_vout,
+                locked_sats           = excluded.locked_sats,
+                remainder_sats        = excluded.remainder_sats,
+                blocks                = excluded.blocks,
+                minutes               = excluded.minutes,
+                sender_nostr_pubkey   = COALESCE(excluded.sender_nostr_pubkey,
+                                                  sender_nostr_pubkey),
+                receiver_nostr_pubkey = COALESCE(excluded.receiver_nostr_pubkey,
+                                                  receiver_nostr_pubkey)
         """, (
             p2sh_address, sender_pubkey, receiver_pubkey, redeem_script,
             funding_txid, funding_vout, locked_sats, remainder_sats,
             blocks, minutes, 1 if is_sender else 0, sender_nostr_pubkey,
-            int(time.time()),
+            receiver_nostr_pubkey, int(time.time()),
         ))
         conn.commit()
 
