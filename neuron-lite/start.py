@@ -1363,6 +1363,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             raise ValueError(f'Unknown channel: {p2sh_address}')
         amount_sats = amount_sats or self._channelFundSats()
         amount_satori = amount_sats / 1e8
+        # Refresh wallet UTXOs so _gatherSatoriUnspents sees current state
+        await asyncio.to_thread(self.wallet.getReadyToSend)
         from evrmore.core.script import CScript
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
         script_payload = {
