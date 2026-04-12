@@ -784,9 +784,3 @@ class NetworkDB:
         """, (funding_txid, funding_vout, locked_sats, locked_sats, p2sh_address))
         conn.commit()
 
-    def delete_channel(self, p2sh_address: str) -> None:
-        """Remove a channel record (after reclaim or channel close)."""
-        conn = self._get_conn()
-        conn.execute(
-            "DELETE FROM channels WHERE p2sh_address = ?", (p2sh_address,))
-        conn.commit()

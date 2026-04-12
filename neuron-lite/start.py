@@ -344,8 +344,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """Pay for an observation via a channel (sender/buyer side).
 
         Looks up the subscription for price and provider wallet pubkey.
-        If no channel is open, or the current one is exhausted, auto-opens
-        a new channel using the configured fund amount.
+        If a channel exists but is exhausted, refunds it. If no channel
+        exists at all, opens a new one. Channels are persistent and never
+        deleted.
         Silently skips if the stream is free or no wallet pubkey is known.
         """
         try:
@@ -365,16 +366,28 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             provider_wallet_pubkey = subscription.get('provider_wallet_pubkey')
             if not provider_wallet_pubkey:
                 return  # can't pay without knowing receiver's Satori wallet pubkey
-            # Find an open sender channel with sufficient remainder
+            # Find an existing sender channel to this provider
             channels = await asyncio.to_thread(
                 self.networkDB.get_channels_as_sender)
             channel = next(
                 (c for c in channels
-                 if c['receiver_pubkey'] == provider_wallet_pubkey
-                 and c['remainder_sats'] >= price_sats),
+                 if c['receiver_pubkey'] == provider_wallet_pubkey),
                 None)
-            if not channel:
-                # Auto-open a fresh channel to this provider
+            if channel and channel['remainder_sats'] < price_sats:
+                # Existing channel is exhausted — refund it
+                fund_sats = self._channelFundSats()
+                logging.info(
+                    f'Channel: refunding {channel["p2sh_address"]} '
+                    f'(remainder={channel["remainder_sats"]}) '
+                    f'with {fund_sats} sats',
+                    color='cyan')
+                await self.refundChannel(channel['p2sh_address'], fund_sats)
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, channel['p2sh_address'])
+                if not channel or channel['remainder_sats'] < price_sats:
+                    return
+            elif not channel:
+                # No channel exists at all — open a fresh one
                 fund_sats = self._channelFundSats()
                 timeout_minutes = self._channelTimeoutMinutes()
                 logging.info(
@@ -544,10 +557,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Mark as settled so the tombstone fallback doesn't double-reset
         self._settledChannels.add(s.p2sh_address)
         if s.new_funding_vout == -1 or s.new_locked_sats == 0:
-            # Channel fully drained — delete it; next observation auto-opens a new one
-            await asyncio.to_thread(self.networkDB.delete_channel, s.p2sh_address)
+            # Channel fully drained — remainder is already 0 from sender's
+            # micropayment tracking; next observation will trigger refund.
             logging.info(
-                f'Channel: {s.p2sh_address} fully drained, deleted',
+                f'Channel: {s.p2sh_address} fully drained, awaiting refund',
                 color='yellow')
         else:
             # Update to new UTXO; cumulative tracking resets to 0
@@ -591,13 +604,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Channel: tombstone listener stopped on {relay_url}: {e}')
 
     async def _channelHandleTombstone(self, p2sh_address: str):
-        """Fallback reset: delete a sender channel when its tombstone arrives.
+        """Fallback reset for sender when a tombstone arrives.
 
         If KIND_CHANNEL_SETTLED was already received and processed, the channel
-        is in _settledChannels and we skip deletion — the settlement already
-        handled the proper Option A UTXO update. If the settlement was NOT
-        received, this is the safety net: delete the stale channel so the next
-        observation auto-opens a fresh one.
+        is in _settledChannels and we skip. Otherwise this is the safety net:
+        Alice claimed (spending the UTXO) but we missed the settlement, so
+        our funding_txid is stale. Zero remainder_sats so the next observation
+        triggers a refund instead of building txs against a spent UTXO.
         """
         if p2sh_address in self._settledChannels:
             self._settledChannels.discard(p2sh_address)
@@ -606,10 +619,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.networkDB.get_channel, p2sh_address)
         if not channel or not channel.get('is_sender'):
             return
-        await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+        await asyncio.to_thread(
+            self.networkDB.update_channel_remainder, p2sh_address, 0)
         logging.info(
-            f'Channel: {p2sh_address} tombstone fallback reset — '
-            f'deleted, next observation will re-open',
+            f'Channel: {p2sh_address} tombstone fallback — '
+            f'remainder zeroed, next observation will refund',
             color='yellow')
 
     async def _channelOpenListen(self, relay_url: str):
@@ -898,10 +912,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{txid[:12]}…:{change_vout} ({change_sats} sats)',
                 color='cyan')
         else:
-            # No change output — channel fully drained
-            await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+            # No change output — channel fully drained on receiver side
             logging.info(
-                f'Channel: {p2sh_address} fully drained, deleted',
+                f'Channel: {p2sh_address} fully drained, awaiting refund',
                 color='yellow')
         await asyncio.to_thread(
             self.networkDB.clear_pending_commitment, p2sh_address)
@@ -1266,6 +1279,52 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         f'Channel: failed to announce open: {e}')
         return p2sh_address
 
+    async def refundChannel(
+        self,
+        p2sh_address: str,
+        amount_sats: int = None,
+    ) -> None:
+        """Send new SATORI to an existing channel's P2SH address (sender side).
+
+        Channels are persistent — when drained, they are refunded rather than
+        deleted and reopened.  Uses the stored redeem_script to call
+        producePaymentChannelFromScript, then updates the DB with the new
+        funding UTXO.
+
+        Args:
+            p2sh_address: The channel to refund
+            amount_sats: Amount to send (defaults to _channelFundSats())
+        """
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, p2sh_address)
+        if not channel:
+            raise ValueError(f'Unknown channel: {p2sh_address}')
+        amount_sats = amount_sats or self._channelFundSats()
+        amount_satori = amount_sats / 1e8
+        from evrmore.core.script import CScript
+        redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
+        script_payload = {
+            'redeem_script': str(redeem_script),
+            'redeem_script_hex': channel['redeem_script'],
+            'redeem_script_size': len(redeem_script),
+            'p2sh_address': p2sh_address,
+            'amount': amount_satori,
+        }
+        _txhex, txid, result = await asyncio.to_thread(
+            self.wallet.producePaymentChannelFromScript,
+            redeemScript=redeem_script,
+            scriptPayload=script_payload,
+            broadcast=True,
+        )
+        funding_vout = result.get('funding_vout') or 0
+        await asyncio.to_thread(
+            self.networkDB.update_channel_funding,
+            p2sh_address, txid, funding_vout, amount_sats)
+        logging.info(
+            f'Channel: refunded {p2sh_address} '
+            f'amount={amount_sats} sats txid={txid}',
+            color='green')
+
     async def sendChannelPayment(
         self,
         p2sh_address: str,
@@ -1453,7 +1512,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 csv_value=csv_value,
                 sat_sats=sat_sats)
 
-        await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+        # Zero the remainder so no payments are attempted against the spent UTXO.
+        # The rest of the channel row (keys, redeem_script, etc.) stays intact.
+        await asyncio.to_thread(
+            self.networkDB.update_channel_remainder, p2sh_address, 0)
         logging.info(
             f'Channel: reclaimed {p2sh_address} — txid={txid}',
             color='yellow')
