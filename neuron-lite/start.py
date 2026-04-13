@@ -1495,8 +1495,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(f'Channel: expiry check failed: {e}')
 
     def _channelFundSats(self) -> int:
-        """Return the configured channel funding amount in sats (default 1 SATORI)."""
-        return int(config.get().get('channel_fund_sats', 100_000_000))
+        """Return the configured channel funding amount in sats (default 10,000)."""
+        return int(config.get().get('channel_fund_sats', 10_000))
 
     def _channelTimeoutMinutes(self) -> int:
         """Return the configured channel lifetime in minutes (default 90 days)."""
