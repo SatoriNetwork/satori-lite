@@ -50,6 +50,7 @@ Last updated: 2026-04-12 (session 2)
 | 7 | `refundChannel` fails: "not enough satori to send" | `wallet.divisibility` is 0 after restart because `getStats()` never ran; `roundSatsDownToDivisibility(10000, 0)` → 0 | Added `await asyncio.to_thread(self.wallet.getReadyToSend)` before building tx | neuron |
 | 8 | `claimChannel` crashes: `Object is immutable` | `CMutableTransaction.deserialize()` creates immutable `CTxIn`/`CTxOut` sub-objects; `_compileClaimOnP2SHMultiSigEnd` can't set `scriptSig` | Convert vin/vout to `CMutableTxIn`/`CMutableTxOut` after deserialize | neuron |
 | 9 | `sendChannelPayment` builds partial tx paying receiver 0 | `wallet.divisibility` defaults to 0 after restart; `roundSatsDownToDivisibility(300, 0)` → 0; receiver output omitted, ALL SATORI goes to P2SH change | Changed default `self.divisibility = 8` in wallet.py (SATORI is div=8 on-chain); also added `getReadyToSend` guard as belt-and-suspenders | satorilib + neuron |
+| 10 | PATH C Mundo: `claim mismatch, _verifyClaimAddress` | `_claimChannelViaMundo` put SATORI fee BEFORE change; Mundo checks `vout[-2]` for fee address but found Alice's change address | Swapped output order: SATORI change → SATORI fee → EVR change (matches `satoriOnlyPartialSimple` convention) | neuron |
 
 ## Not Yet Tested
 
@@ -57,7 +58,7 @@ Last updated: 2026-04-12 (session 2)
 - [x] Alice signs the partial tx, broadcasts it, UTXO gets spent on-chain (txid: 6b01c97b...)
 - [ ] `claimChannel` PATH A (Alice has EVR for fees) — not tested (partial tx has fee=0, so always goes to PATH B)
 - [x] `claimChannel` PATH B (Alice has EVR, adds EVR input for fee) — verified working
-- [ ] `claimChannel` PATH C (Mundo pays the fee) — Mundo returns `claim mismatch, _verifyClaimAddress` (400). Tx shape may not match Mundo's expected format. Needs server-side investigation.
+- [x] `claimChannel` PATH C (Mundo pays the fee) — verified working (txid: 4b57bad5...). Output order fix: change→fee→EVR change so vout[-2]=fee matches `_verifyClaimAddress`. Second claim blocked by stale Mundo EVR UTXO (server-side cache issue).
 
 ### Post-Claim Channel Reset Cycle
 - [x] After Alice claims, Bob's channel updates with new funding UTXO (manually; settlement event not yet tested)
@@ -143,6 +144,18 @@ Last updated: 2026-04-12 (session 2)
 - [x] Post-claim payment on new UTXO works (Bob: remainder 9400→9300, 2 outputs)
 - [x] Full cycle verified: pay → accumulate → claim → reset → pay again
 
+## Verified Working (session 3)
+
+### PATH C: Claim via Mundo (receiver has no EVR)
+- [x] Bug #10 fixed: output order swapped so `vout[-2]`=Mundo fee, matching `_verifyClaimAddress` expectation
+- [x] Mundo accepts tx (returns 200, signs its EVR input)
+- [x] First claim broadcast on-chain (txid: 4b57bad5..., 9400 SATORI to P2SH, 1M fee to Mundo, 1M change to Alice)
+- [x] Second claim blocked by stale Mundo EVR UTXO cache (server-side issue, not a code bug)
+
+### Divisibility Fix Verified in Running Neuron
+- [x] After restart with div=8 default, `sendChannelPayment` correctly builds 2-output partial tx (receiver + P2SH change)
+- [x] Confirmed: 100 sats to receiver, 9300 sats to P2SH change (was previously all 9400 to P2SH with div=0)
+
 ## Known Issues
 
 ### Manual test scripts must use correct event format
@@ -152,6 +165,6 @@ Last updated: 2026-04-12 (session 2)
 
 ## Next Priority
 
-1. **Post-claim payment resumption** — verify Bob can send new payments on the claimed UTXO (6b01c97b...:0).
-2. **Payment rate limiting** — verify flood protection caps payments at 2 per cadence, deferred payment keeps relationship alive.
-3. **Channel reclaim by sender** — test CSV timeout reclaim path.
+1. **Payment rate limiting** — verify flood protection caps payments at 2 per cadence, deferred payment keeps relationship alive.
+2. **Channel reclaim by sender** — test CSV timeout reclaim path.
+3. **Free stream** — verify no-payment observation delivery.

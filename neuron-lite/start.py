@@ -1099,19 +1099,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         satori_vin_idx = len(new_vins)
         new_vins.append(satori_txin)
 
-        # Add SATORI fee output to Mundo
+        # Add SATORI change output to receiver (if any) — must come BEFORE
+        # Mundo fee so that vout[-2]=fee matches _verifyClaimAddress expectation
         from evrmore.core.script import OP_EVR_ASSET, OP_DROP
-        fee_script = CScript([
-            *CEvrmoreAddress(mundo_satori_fee_addr).to_scriptPubKey(),
-            OP_EVR_ASSET,
-            bytes.fromhex(
-                AssetTransaction.satoriHex(self.wallet.symbol) +
-                TxUtils.padHexStringTo8Bytes(
-                    TxUtils.intToLittleEndianHex(mundo_satori_fee))),
-            OP_DROP])
-        new_vouts.append(CMutableTxOut(0, fee_script))
-
-        # Add SATORI change output to receiver (if any)
         satori_change = satori_value - mundo_satori_fee
         if satori_change > 0:
             change_script = CScript([
@@ -1123,6 +1113,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         TxUtils.intToLittleEndianHex(satori_change))),
                 OP_DROP])
             new_vouts.append(CMutableTxOut(0, change_script))
+
+        # Add SATORI fee output to Mundo (vout[-2] position)
+        fee_script = CScript([
+            *CEvrmoreAddress(mundo_satori_fee_addr).to_scriptPubKey(),
+            OP_EVR_ASSET,
+            bytes.fromhex(
+                AssetTransaction.satoriHex(self.wallet.symbol) +
+                TxUtils.padHexStringTo8Bytes(
+                    TxUtils.intToLittleEndianHex(mundo_satori_fee))),
+            OP_DROP])
+        new_vouts.append(CMutableTxOut(0, fee_script))
 
         # Add EVR change output for Mundo
         if mundo_evr_change_addr and mundo_evr_change_amt > 0:
