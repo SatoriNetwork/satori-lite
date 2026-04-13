@@ -478,32 +478,37 @@ async function closeCompetition(streamName, providerPubkey) {
   }
 }
 
-// ── Populate stream dropdown from subscriptions ───────────────
-async function loadSubscribedStreams() {
+// ── Populate stream dropdown from own publications ────────────
+async function loadPublishedStreams() {
   const sel = document.getElementById('nc_stream_select');
   sel.innerHTML = '<option value="">— loading… —</option>';
   try {
-    const resp = await fetch('/api/network/subscriptions');
-    const data = await resp.json();
-    const streams = (data.subscriptions || []).filter(
+    const [pubResp, statusResp] = await Promise.all([
+      fetch('/api/network/publications'),
+      fetch('/api/settings/relay/status'),
+    ]);
+    const pubData = await pubResp.json();
+    const statusData = await statusResp.json();
+    const myPubkey = statusData.nostr_pubkey || '';
+    const streams = (pubData.publications || []).filter(
       s => !s.stream_name.endsWith('_pred')
     );
     sel.innerHTML = '<option value="">— select a stream —</option>';
     streams.forEach(s => {
       const opt = document.createElement('option');
-      opt.value = JSON.stringify({stream_name: s.stream_name, provider_pubkey: s.provider_pubkey});
+      opt.value = JSON.stringify({stream_name: s.stream_name, provider_pubkey: myPubkey});
       opt.textContent = s.stream_name;
       sel.appendChild(opt);
     });
     if (streams.length === 0) {
-      sel.innerHTML = '<option value="">— no subscribed streams found —</option>';
+      sel.innerHTML = '<option value="">— no published streams found —</option>';
     }
   } catch(e) {
     sel.innerHTML = '<option value="">— failed to load streams —</option>';
   }
 }
 
-document.getElementById('newCompetitionModal').addEventListener('show.bs.modal', loadSubscribedStreams);
+document.getElementById('newCompetitionModal').addEventListener('show.bs.modal', loadPublishedStreams);
 
 // ── Create competition ────────────────────────────────────────
 async function createCompetition() {

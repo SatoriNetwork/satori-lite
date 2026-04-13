@@ -2074,6 +2074,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.warning(
                     f'Network: publish failed on {relay_url}: {e}')
+        # Score competition predictions for this observation (host side).
+        # The host publishes observations but doesn't subscribe to its own
+        # stream, so _networkProcessObservation never fires for its own data.
+        await self._competitionScoreAndPay(
+            stream_name=stream_name,
+            provider_pubkey=self.nostrPubkey,
+            seq_num=seq_num,
+            raw_value=value,
+        )
 
     def publishObservation(self, stream_name: str, value):
         """Publish an observation from a sync context (e.g. Flask route, engine).

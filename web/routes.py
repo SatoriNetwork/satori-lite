@@ -2906,6 +2906,8 @@ def register_routes(app):
         startup = get_startup()
         if not startup or not hasattr(startup, 'networkDB'):
             return jsonify({'error': 'Not ready'}), 503
+        if host_pubkey == 'self':
+            host_pubkey = startup.nostrPubkey
         stats = startup.networkDB.get_host_payment_stats(
             stream_name, provider_pubkey, host_pubkey)
         if stats is None:

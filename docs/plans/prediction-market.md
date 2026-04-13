@@ -218,26 +218,39 @@ The existing `KIND_DATASTREAM_ANNOUNCE` (34600) is already parameterized replace
 
 ---
 
-## Stretch Goal: Authorized Predictors with Encrypted Data
+## Stretch Goal: Private Streams with Approval-Gated Access
 
-For hosts who want to keep their data stream private (e.g. a company's internal metrics). There is no public competition announcement — the entire relationship is private.
+For data producers who want to control who can see their stream — e.g. a company publishing proprietary metrics that they want predicted but not broadcast publicly. This is a general capability of any data stream, not specific to competitions, though competitions on private streams are the motivating use case.
+
+**Key insight:** The existing per-subscriber NIP-04 encryption already handles privacy. The producer only encrypts for subscribers on their list — if you're not on the list, you never see the data. No symmetric keys, key rotation, or new crypto is needed. The only missing piece is an **approval gate** between "I want to subscribe" and "I receive data."
 
 **How it works:**
 
-1. Host maintains a local whitelist of authorized predictor pubkeys — never published
-2. Host encrypts the stream key and sends it to each authorized predictor via NIP-04 DM — this DM is the invitation; no separate request or acknowledgement is needed
-3. Predictors who receive the key can decrypt the stream and begin predicting; those who don't receive it cannot
-4. To revoke a predictor: host rotates the key and sends the new key to everyone on the whitelist except the revoked predictor — they simply stop being able to decrypt
-5. Key rotation for any reason (scheduled or revocation) follows the same flow: generate new key, DM to current whitelist
+1. Producer announces their stream with `approval_required: true` in the stream announcement (KIND_DATASTREAM_ANNOUNCE). The stream can be free or paid — approval and pricing are independent.
+2. A potential subscriber sees the stream and sends an **access request** as a NIP-04 encrypted DM (KIND_ACCESS_REQUEST) to the producer. The request is private — no one else sees it.
+3. The producer sees pending requests in their UI and approves or ignores each one.
+4. Approval means the producer adds the requester to their subscriber list. From that point, the producer encrypts observations for them (same as any paid subscriber today). If the stream has a price, the subscriber still pays per observation — approval is about access, not payment.
+5. To revoke: the producer removes the subscriber from their list. The producer simply stops encrypting for them. No key rotation needed — each subscriber's data is already individually encrypted via NIP-04.
 
-**What is never published:**
-- The competition itself (no Nostr announcement)
-- The whitelist
-- The key
+**What changes from the normal (public) flow:**
+- Stream announcement gains an `approval_required` flag
+- New Nostr event kind: `KIND_ACCESS_REQUEST` (encrypted DM from subscriber to producer)
+- Producer side: pending requests queue, approve/reject actions, approved subscribers list
+- Subscriber side: UI shows "Request Access" instead of "Subscribe" for approval-gated streams
+- Everything else — encryption, delivery, payment, channels — works exactly as it does today
 
-**What is public** (same as any competition): payment channel commitments (KIND_34604) — observers can see the host is paying someone, but not what the stream contains or who the predictors are beyond their pubkeys.
+**What is private:**
+- The access request (NIP-04 DM, only producer sees it)
+- The approved subscribers list (local to the producer, never published)
+- The observation data (NIP-04 encrypted per subscriber, as today)
 
-Over time predictors can build trust reputation — known to keep private data private, never leak keys — making them desirable partners. This maps naturally onto future neuron credentialing work.
+**What is public:**
+- The stream announcement (everyone knows the stream exists, but not who has access)
+- Payment channel commitments (KIND_34604) — observers can see payment activity but not stream contents
+
+**Competition integration:** For the private competition use case (Scenario A — host is also the producer), the host announces both the stream (with `approval_required: true`) and the competition. Predictors request access to the stream, the host approves them, and the rest of the competition flow (predictions, scoring, payment) works unchanged. The host controls exactly who can predict by controlling who can see the data.
+
+Over time predictors can build trust reputation — known to keep private data private, reliable prediction partners. This maps naturally onto future neuron credentialing work.
 
 ---
 
@@ -289,11 +302,14 @@ Over time predictors can build trust reputation — known to keep private data p
   the competitions they care about. That architecture is deferred until the broader
   P2P data layer is designed.
 
-### Phase 5 (Stretch) — Encrypted Streams + Authorized Predictors
-- Host whitelist management (local only, never published)
-- Invitation: encrypt stream key, send to each whitelisted predictor via NIP-04 DM
-- Revocation: rotate key, send to whitelist minus revoked predictor
-- No public competition announcement — relationship is entirely private
+### Phase 5 (Stretch) — Private Streams with Approval-Gated Access
+- `approval_required` flag on `KIND_DATASTREAM_ANNOUNCE` (34600)
+- New event kind: `KIND_ACCESS_REQUEST` (34609) — NIP-04 encrypted DM from subscriber to producer
+- Producer side: `_handle_access_request_event`, pending requests queue, approve/reject DB + UI
+- `approved_subscribers` table in `network_db.py` (producer-local, never published)
+- Subscriber side: "Request Access" UI flow for approval-gated streams
+- Revocation: producer removes subscriber from approved list, stops encrypting for them
+- No new crypto — uses existing per-subscriber NIP-04 encryption
 - Predictor trust/credential system (future)
 
 ---
