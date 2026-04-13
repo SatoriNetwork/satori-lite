@@ -279,6 +279,43 @@ class NetworkDB:
             CREATE INDEX IF NOT EXISTS idx_joined_comp_stream
             ON joined_competitions(stream_name, stream_provider_pubkey)
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS access_requests (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name         TEXT NOT NULL,
+                requester_pubkey    TEXT NOT NULL,
+                message             TEXT DEFAULT '',
+                status              TEXT NOT NULL DEFAULT 'pending',
+                requested_at        INTEGER NOT NULL,
+                resolved_at         INTEGER,
+                UNIQUE(stream_name, requester_pubkey)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_access_req_stream
+            ON access_requests(stream_name, status)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS approved_subscribers (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name         TEXT NOT NULL,
+                subscriber_pubkey   TEXT NOT NULL,
+                approved_at         INTEGER NOT NULL,
+                UNIQUE(stream_name, subscriber_pubkey)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_approved_sub_stream
+            ON approved_subscribers(stream_name)
+        """)
+        # Migration: add approval_required to publications if missing
+        try:
+            conn.execute(
+                "SELECT approval_required FROM publications LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE publications "
+                "ADD COLUMN approval_required INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -1145,3 +1182,139 @@ class NetworkDB:
             'avg_paid_per_obs': row['avg_paid_per_obs'],
             'announced_per_obs': comp['pay_per_obs_sats'],
         }
+
+    # ── Access Requests (producer side) ───────────────────────────
+
+    def add_access_request(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+        message: str = '',
+        requested_at: int = 0,
+    ) -> None:
+        """Record an incoming access request. Re-requesting resets to pending."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO access_requests
+                (stream_name, requester_pubkey, message, status, requested_at)
+            VALUES (?, ?, ?, 'pending', ?)
+            ON CONFLICT(stream_name, requester_pubkey) DO UPDATE SET
+                message      = excluded.message,
+                status       = 'pending',
+                requested_at = excluded.requested_at,
+                resolved_at  = NULL
+        """, (stream_name, requester_pubkey, message,
+              requested_at or int(time.time())))
+        conn.commit()
+
+    def get_access_requests(
+        self,
+        stream_name: str,
+        status: str | None = None,
+    ) -> list[dict]:
+        """Return access requests for a stream, optionally filtered by status."""
+        conn = self._get_conn()
+        if status:
+            rows = conn.execute("""
+                SELECT * FROM access_requests
+                WHERE stream_name = ? AND status = ?
+                ORDER BY requested_at DESC
+            """, (stream_name, status)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT * FROM access_requests
+                WHERE stream_name = ?
+                ORDER BY requested_at DESC
+            """, (stream_name,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_pending_access_requests(self) -> list[dict]:
+        """Return all pending access requests across all streams."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM access_requests
+            WHERE status = 'pending'
+            ORDER BY requested_at DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+    def approve_access_request(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Approve a request and add to approved subscribers list."""
+        conn = self._get_conn()
+        now = int(time.time())
+        conn.execute("""
+            UPDATE access_requests SET status = 'approved', resolved_at = ?
+            WHERE stream_name = ? AND requester_pubkey = ?
+        """, (now, stream_name, requester_pubkey))
+        conn.execute("""
+            INSERT OR IGNORE INTO approved_subscribers
+                (stream_name, subscriber_pubkey, approved_at)
+            VALUES (?, ?, ?)
+        """, (stream_name, requester_pubkey, now))
+        conn.commit()
+
+    def reject_access_request(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Reject an access request."""
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE access_requests SET status = 'rejected', resolved_at = ?
+            WHERE stream_name = ? AND requester_pubkey = ?
+        """, (int(time.time()), stream_name, requester_pubkey))
+        conn.commit()
+
+    def revoke_subscriber(
+        self,
+        stream_name: str,
+        subscriber_pubkey: str,
+    ) -> None:
+        """Revoke a previously approved subscriber's access."""
+        conn = self._get_conn()
+        conn.execute("""
+            DELETE FROM approved_subscribers
+            WHERE stream_name = ? AND subscriber_pubkey = ?
+        """, (stream_name, subscriber_pubkey))
+        conn.execute("""
+            UPDATE access_requests SET status = 'revoked', resolved_at = ?
+            WHERE stream_name = ? AND requester_pubkey = ?
+        """, (int(time.time()), stream_name, subscriber_pubkey))
+        conn.commit()
+
+    def is_subscriber_approved(
+        self,
+        stream_name: str,
+        subscriber_pubkey: str,
+    ) -> bool:
+        """Check if a subscriber is on the approved list for a stream."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT 1 FROM approved_subscribers
+            WHERE stream_name = ? AND subscriber_pubkey = ?
+        """, (stream_name, subscriber_pubkey)).fetchone()
+        return row is not None
+
+    def get_approved_subscribers(self, stream_name: str) -> list[dict]:
+        """Return all approved subscribers for a stream."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM approved_subscribers
+            WHERE stream_name = ?
+            ORDER BY approved_at DESC
+        """, (stream_name,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def is_stream_approval_required(self, stream_name: str) -> bool:
+        """Check if a published stream requires approval for access."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT approval_required FROM publications
+            WHERE stream_name = ? AND active = 1
+        """, (stream_name,)).fetchone()
+        return bool(row and row['approval_required'])

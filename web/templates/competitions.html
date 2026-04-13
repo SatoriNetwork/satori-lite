@@ -37,6 +37,13 @@
         Leaderboard
       </button>
     </li>
+    <li class="nav-item">
+      <button class="nav-link" id="accessTab" onclick="showTab('access')">
+        <i class="material-icons align-middle" style="font-size:16px;">lock_open</i>
+        Access Requests
+        <span class="badge bg-warning text-dark ms-1" id="pendingBadge" style="display:none;">0</span>
+      </button>
+    </li>
   </ul>
 
   <!-- ── Browse Tab ───────────────────────────────────────────── -->
@@ -151,6 +158,99 @@
     </div>
   </div>
 
+  <!-- ── Access Requests Tab ──────────────────────────────────── -->
+  <div id="accessPanel" style="display:none;">
+
+    <!-- Pending requests (producer side) -->
+    <div class="card mb-4">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span class="fw-600">Pending Access Requests <span class="badge bg-warning text-dark ms-1" id="pendingCount">0</span></span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadPendingRequests()">
+          <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Stream</th>
+                <th>Requester</th>
+                <th>Message</th>
+                <th>Requested</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="pendingTable">
+              <tr><td colspan="5" class="text-muted text-center py-4">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Approved subscribers (producer side) -->
+    <div class="card mb-4">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span class="fw-600">Approved Subscribers</span>
+        <div class="d-flex gap-2 align-items-center">
+          <select class="form-select form-select-sm" id="approvedStreamSelect" style="width:auto;" onchange="loadApproved()">
+            <option value="">— select stream —</option>
+          </select>
+          <button class="btn btn-outline-secondary btn-sm" onclick="loadApproved()">
+            <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Subscriber</th>
+                <th>Approved</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="approvedTable">
+              <tr><td colspan="3" class="text-muted text-center py-4">Select a stream above.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Request access (subscriber side) -->
+    <div class="card">
+      <div class="card-header">
+        <span class="fw-600">Request Access to a Private Stream</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col">
+            <input type="text" class="form-control form-control-sm" id="ra_stream" placeholder="Stream name">
+          </div>
+          <div class="col">
+            <input type="text" class="form-control form-control-sm font-monospace" id="ra_producer" placeholder="Producer pubkey (hex)">
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col">
+            <input type="text" class="form-control form-control-sm" id="ra_message" placeholder="Optional message to the producer">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-sm btn-primary" onclick="requestAccess()">
+              <i class="material-icons align-middle" style="font-size:14px;">lock_open</i>
+              Request Access
+            </button>
+          </div>
+        </div>
+        <div id="ra_alert"></div>
+      </div>
+    </div>
+
+  </div>
+
 </div>
 
 <!-- ── New Competition Modal ──────────────────────────────────── -->
@@ -213,11 +313,14 @@ function showTab(tab) {
   document.getElementById('browsePanel').style.display      = tab === 'browse'      ? '' : 'none';
   document.getElementById('minePanel').style.display        = tab === 'mine'        ? '' : 'none';
   document.getElementById('leaderboardPanel').style.display = tab === 'leaderboard' ? '' : 'none';
+  document.getElementById('accessPanel').style.display      = tab === 'access'      ? '' : 'none';
   document.getElementById('browseTab').classList.toggle('active', tab === 'browse');
   document.getElementById('mineTab').classList.toggle('active', tab === 'mine');
   document.getElementById('leaderboardTab').classList.toggle('active', tab === 'leaderboard');
+  document.getElementById('accessTab').classList.toggle('active', tab === 'access');
   if (tab === 'browse') loadBrowse();
   if (tab === 'mine')   loadMine();
+  if (tab === 'access') { loadPendingRequests(); loadApprovedStreamList(); }
 }
 
 // ── Alert ─────────────────────────────────────────────────────
@@ -496,7 +599,200 @@ async function loadLeaderboard() {
   }
 }
 
+// ── Access Requests ──────────────────────────────────────────
+function formatTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+async function loadPendingRequests() {
+  const tbody = document.getElementById('pendingTable');
+  try {
+    const resp = await fetch('/api/access/requests/pending');
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    const reqs = data.requests || [];
+    document.getElementById('pendingCount').textContent = reqs.length;
+    const badge = document.getElementById('pendingBadge');
+    if (reqs.length > 0) {
+      badge.textContent = reqs.length;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+    if (!reqs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4">No pending requests.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = reqs.map(r => `
+      <tr>
+        <td class="fw-500">${r.stream_name}</td>
+        <td class="font-monospace small">${shortKey(r.requester_pubkey)}</td>
+        <td class="small">${r.message || '—'}</td>
+        <td class="small text-muted">${formatTime(r.requested_at)}</td>
+        <td class="text-end d-flex gap-1 justify-content-end">
+          <button class="btn btn-outline-success btn-sm"
+            onclick="approveRequest('${r.stream_name}', '${r.requester_pubkey}')">Approve</button>
+          <button class="btn btn-outline-danger btn-sm"
+            onclick="rejectRequest('${r.stream_name}', '${r.requester_pubkey}')">Reject</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    showAlert('Failed to load pending requests: ' + e);
+  }
+}
+
+async function approveRequest(streamName, requesterPubkey) {
+  try {
+    const resp = await fetch('/api/access/approve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stream_name: streamName, requester_pubkey: requesterPubkey }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Access approved.', 'success');
+    loadPendingRequests();
+  } catch(e) {
+    showAlert('Failed to approve: ' + e);
+  }
+}
+
+async function rejectRequest(streamName, requesterPubkey) {
+  try {
+    const resp = await fetch('/api/access/reject', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stream_name: streamName, requester_pubkey: requesterPubkey }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Access rejected.', 'success');
+    loadPendingRequests();
+  } catch(e) {
+    showAlert('Failed to reject: ' + e);
+  }
+}
+
+async function loadApprovedStreamList() {
+  // Populate the stream dropdown from published streams
+  const sel = document.getElementById('approvedStreamSelect');
+  try {
+    const resp = await fetch('/api/network/publications');
+    const data = await resp.json();
+    const pubs = data.publications || [];
+    sel.innerHTML = '<option value="">— select stream —</option>';
+    pubs.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.stream_name;
+      opt.textContent = p.stream_name;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    sel.innerHTML = '<option value="">— failed to load —</option>';
+  }
+}
+
+async function loadApproved() {
+  const streamName = document.getElementById('approvedStreamSelect').value;
+  const tbody = document.getElementById('approvedTable');
+  if (!streamName) {
+    tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-4">Select a stream above.</td></tr>';
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/access/approved?stream_name=${encodeURIComponent(streamName)}`);
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    const subs = data.subscribers || [];
+    if (!subs.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-4">No approved subscribers.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = subs.map(s => `
+      <tr>
+        <td class="font-monospace small">${shortKey(s.subscriber_pubkey)}</td>
+        <td class="small text-muted">${formatTime(s.approved_at)}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-danger btn-sm"
+            onclick="revokeSubscriber('${streamName}', '${s.subscriber_pubkey}')">Revoke</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    showAlert('Failed to load approved subscribers: ' + e);
+  }
+}
+
+async function revokeSubscriber(streamName, subscriberPubkey) {
+  if (!confirm(`Revoke access for ${shortKey(subscriberPubkey)}?`)) return;
+  try {
+    const resp = await fetch('/api/access/revoke', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stream_name: streamName, subscriber_pubkey: subscriberPubkey }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Access revoked.', 'success');
+    loadApproved();
+  } catch(e) {
+    showAlert('Failed to revoke: ' + e);
+  }
+}
+
+async function requestAccess() {
+  const streamName = document.getElementById('ra_stream').value.trim();
+  const producerPubkey = document.getElementById('ra_producer').value.trim();
+  const message = document.getElementById('ra_message').value.trim();
+  const alertEl = document.getElementById('ra_alert');
+  if (!streamName || !producerPubkey) {
+    alertEl.innerHTML = '<div class="alert alert-danger py-2 small">Stream name and producer pubkey are required.</div>';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/access/request', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        stream_name: streamName,
+        producer_pubkey: producerPubkey,
+        message: message,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alertEl.innerHTML = `<div class="alert alert-danger py-2 small">${data.error}</div>`;
+      return;
+    }
+    alertEl.innerHTML = '<div class="alert alert-success py-2 small">Access request sent. The producer will review your request.</div>';
+    document.getElementById('ra_stream').value = '';
+    document.getElementById('ra_producer').value = '';
+    document.getElementById('ra_message').value = '';
+  } catch(e) {
+    alertEl.innerHTML = `<div class="alert alert-danger py-2 small">Failed: ${e}</div>`;
+  }
+}
+
+// Check for pending requests on page load (badge update)
+async function checkPendingBadge() {
+  try {
+    const resp = await fetch('/api/access/requests/pending');
+    const data = await resp.json();
+    const count = (data.requests || []).length;
+    const badge = document.getElementById('pendingBadge');
+    if (count > 0) {
+      badge.textContent = count;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
 // ── Init ──────────────────────────────────────────────────────
 loadBrowse();
+checkPendingBadge();
 </script>
 {% endblock %}

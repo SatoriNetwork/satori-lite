@@ -79,6 +79,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
         self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
+        self._accessRequestListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
@@ -214,6 +215,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelSettlementListeners.clear()
         self._channelTombstoneListeners.clear()
         self._predictionListeners.clear()
+        self._accessRequestListeners.clear()
         self._settledChannels.clear()
         self._networkSubscribed.clear()
         self._networkFirstRun = True
@@ -302,6 +304,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         ptask = self._predictionListeners.pop(relay_url, None)
         if ptask and not ptask.done():
             ptask.cancel()
+        artask = self._accessRequestListeners.pop(relay_url, None)
+        if artask and not artask.done():
+            artask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -777,6 +782,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsureSettlementListener(relay_url)
         self._networkEnsureTombstoneListener(relay_url)
         self._networkEnsurePredictionListener(relay_url)
+        self._networkEnsureAccessRequestListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -865,6 +871,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         self._predictionListeners[relay_url] = asyncio.ensure_future(
             self._incomingPredictionsLoop(client, relay_url))
+
+    def _networkEnsureAccessRequestListener(self, relay_url: str):
+        """Start an incoming-access-requests listener for a relay if one isn't running."""
+        task = self._accessRequestListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._accessRequestListeners[relay_url] = asyncio.ensure_future(
+            self._incomingAccessRequestsLoop(client, relay_url))
 
     async def _channelTombstoneListen(self, relay_url: str):
         """Listen for commitment tombstones as a fallback reset (sender side).
@@ -2569,6 +2586,98 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 stream_name, stream_provider_pubkey,
                 host_pubkey, seq_num, predicted_value),
             loop)
+
+    # ── Access Request handling (producer side) ─────────────────────────────
+
+    async def _incomingAccessRequestsLoop(self, client, relay_url: str):
+        """Consume incoming access requests from a relay client (producer side).
+
+        Runs as a background async task. Stores each request in the DB as
+        pending. The producer approves or rejects via the UI/API.
+        """
+        logging.info(f'AccessGate: listening for access requests on {relay_url}')
+        try:
+            async for inbound in client.incoming_access_requests():
+                try:
+                    req = inbound.access_request
+                    await asyncio.to_thread(
+                        self.networkDB.add_access_request,
+                        stream_name=req.stream_name,
+                        requester_pubkey=req.requester_pubkey,
+                        message=req.message,
+                        requested_at=req.timestamp,
+                    )
+                    logging.info(
+                        f'AccessGate: received request from '
+                        f'{req.requester_pubkey[:12]}… for {req.stream_name}')
+                except Exception as e:
+                    logging.warning(f'AccessGate: failed to save request: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'AccessGate: request listener stopped on {relay_url}: {e}')
+
+    def approveAccessRequestSync(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Approve an access request (sync context, e.g. Flask route).
+
+        Adds the requester to the approved_subscribers table and records
+        them in the in-memory subscriber list so they start receiving
+        encrypted observations immediately.
+        """
+        self.networkDB.approve_access_request(stream_name, requester_pubkey)
+        # Also register in the in-memory subscriber list on all clients
+        for client in self._networkClients.values():
+            client.record_subscription(stream_name, requester_pubkey)
+
+    def rejectAccessRequestSync(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Reject an access request (sync context)."""
+        self.networkDB.reject_access_request(stream_name, requester_pubkey)
+
+    def revokeSubscriberSync(
+        self,
+        stream_name: str,
+        subscriber_pubkey: str,
+    ) -> None:
+        """Revoke a previously approved subscriber (sync context).
+
+        Removes from the approved_subscribers table. The producer simply
+        stops encrypting for them on the next observation — no key
+        rotation needed since NIP-04 encrypts individually per subscriber.
+        """
+        self.networkDB.revoke_subscriber(stream_name, subscriber_pubkey)
+
+    def requestAccessSync(
+        self,
+        stream_name: str,
+        producer_pubkey: str,
+        message: str = '',
+    ) -> None:
+        """Request access to an approval-gated stream (subscriber, sync context)."""
+        if not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        async def _request():
+            for client in self._networkClients.values():
+                try:
+                    await client.request_access(
+                        stream_name=stream_name,
+                        producer_pubkey=producer_pubkey,
+                        message=message,
+                    )
+                except Exception as e:
+                    logging.warning(f'AccessGate: request failed: {e}')
+        asyncio.run_coroutine_threadsafe(_request(), loop)
 
     def triggerNetworkDiscover(self):
         """Trigger on-demand discovery from a sync context (e.g. Flask route)."""

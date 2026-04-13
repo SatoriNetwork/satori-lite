@@ -2911,3 +2911,113 @@ def register_routes(app):
         if stats is None:
             return jsonify({'error': 'Competition not found'}), 404
         return jsonify(stats)
+
+    # ── Access request routes (approval-gated streams) ───────────────────────
+
+    @app.route('/api/access/request', methods=['POST'])
+    @login_required
+    def api_access_request():
+        """Request access to an approval-gated stream (subscriber side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        producer_pubkey = data.get('producer_pubkey', '').strip()
+        message = data.get('message', '')
+        if not stream_name or not producer_pubkey:
+            return jsonify({'error': 'stream_name and producer_pubkey required'}), 400
+        startup.requestAccessSync(
+            stream_name=stream_name,
+            producer_pubkey=producer_pubkey,
+            message=message,
+        )
+        return jsonify({'success': True})
+
+    @app.route('/api/access/requests', methods=['GET'])
+    @login_required
+    def api_access_requests():
+        """Return access requests for a stream (producer side).
+
+        Query params: stream_name (required), status (optional: pending/approved/rejected/revoked)
+        """
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        stream_name = request.args.get('stream_name', '').strip()
+        if not stream_name:
+            return jsonify({'error': 'stream_name required'}), 400
+        status = request.args.get('status')
+        rows = startup.networkDB.get_access_requests(stream_name, status=status)
+        return jsonify({'requests': rows})
+
+    @app.route('/api/access/requests/pending', methods=['GET'])
+    @login_required
+    def api_access_requests_all_pending():
+        """Return all pending access requests across all streams (producer side)."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        rows = startup.networkDB.get_all_pending_access_requests()
+        return jsonify({'requests': rows})
+
+    @app.route('/api/access/approve', methods=['POST'])
+    @login_required
+    def api_access_approve():
+        """Approve an access request (producer side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        requester_pubkey = data.get('requester_pubkey', '').strip()
+        if not stream_name or not requester_pubkey:
+            return jsonify(
+                {'error': 'stream_name and requester_pubkey required'}), 400
+        startup.approveAccessRequestSync(stream_name, requester_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/access/reject', methods=['POST'])
+    @login_required
+    def api_access_reject():
+        """Reject an access request (producer side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        requester_pubkey = data.get('requester_pubkey', '').strip()
+        if not stream_name or not requester_pubkey:
+            return jsonify(
+                {'error': 'stream_name and requester_pubkey required'}), 400
+        startup.rejectAccessRequestSync(stream_name, requester_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/access/revoke', methods=['POST'])
+    @login_required
+    def api_access_revoke():
+        """Revoke a previously approved subscriber (producer side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        subscriber_pubkey = data.get('subscriber_pubkey', '').strip()
+        if not stream_name or not subscriber_pubkey:
+            return jsonify(
+                {'error': 'stream_name and subscriber_pubkey required'}), 400
+        startup.revokeSubscriberSync(stream_name, subscriber_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/access/approved', methods=['GET'])
+    @login_required
+    def api_access_approved():
+        """Return approved subscribers for a stream (producer side)."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        stream_name = request.args.get('stream_name', '').strip()
+        if not stream_name:
+            return jsonify({'error': 'stream_name required'}), 400
+        rows = startup.networkDB.get_approved_subscribers(stream_name)
+        return jsonify({'subscribers': rows})
