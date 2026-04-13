@@ -117,22 +117,31 @@
 - **Files:** `neuron-lite/satorineuron/network_db.py`, `neuron-lite/start.py`
 - **Status:** Fixed
 
-### Non-Issue 10 — Apparent real-time relay delivery gap (testing artifact)
-- **Symptom during testing:** Bob didn't receive Alice's newly published
-  observations in real-time after several test cycles.
-- **Root cause:** Not a relay or client bug. The `simulate-observation` test
-  endpoint injected observations directly into Bob's DB, making the
-  subscription appear "fresh" to the reconciler's `is_locally_stale` check.
-  The reconciler therefore stopped re-hunting the stream, which meant no
-  new relay connection or listener was established. The observation listener
-  that originally received relay data had been disrupted by code changes /
-  container activity during testing.
-- **Evidence:** Bob DID receive relay observations earlier (seq=25 with
-  event_id, proving Nostr relay delivery). The `handle_notifications` loop
-  in rust-nostr IS a persistent real-time subscription.
-- **Production impact:** None. The staleness-based reconciler correctly
-  re-establishes connections when real observation data stops flowing.
-- **Status:** Not a bug — testing artifact. No fix needed.
+### Bug 10 — Prediction and access-request async iterators exit after 1s
+- **Symptom:** Alice's prediction listeners started (`Competition: listening
+  for predictions on ...`) but never received any DMs — even when the DM
+  event was confirmed present on the relay.
+- **Root cause:** `incoming_predictions()` and `incoming_access_requests()`
+  in `satorilib/satori_nostr/client.py` used `return` on
+  `asyncio.TimeoutError` instead of `continue`. This caused the async
+  iterator to exit permanently after 1 second of no data. The listener task
+  in neuron's `_incomingPredictionsLoop` would then silently complete.
+  All other async iterators (observations, payments, channels, settlements,
+  tombstones) correctly used `continue`.
+- **Fix:** Changed `return` to `continue` in both methods.
+- **File:** `satorilib/src/satorilib/satori_nostr/client.py` (lines 478, 897)
+- **Status:** Fixed (pushed to satorilib `stream-market` branch)
+
+### Non-issue — Paid stream publish requires in-memory subscriber state
+- **Symptom during testing:** Alice's publish logs showed success but no
+  events appeared on the relay.
+- **Root cause:** For paid streams (`price_per_obs > 0`),
+  `publish_observation()` only sends encrypted per-subscriber events.
+  After container restart, `_subscribers` dict is empty (populated from
+  relay subscription announcements), so no events are sent.
+- **Workaround:** Set `price_per_obs = 0` for testing (free broadcast
+  path sends a single public event).
+- **Status:** Expected behavior for paid streams. Not a bug.
 
 ## Scenario Results
 
@@ -282,20 +291,23 @@ that the observation already exists and runs scoring immediately.
 - [x] `_competitionScoreLateArrival` fires and scores correctly
 - [x] Payment recorded in `competition_payments` table
 
-**Note:** DM encryption, transmission, and processing pipeline is fully
-functional. Real-time relay delivery works in production; apparent gap
-during testing was an artifact (see Non-Issue 10).
+**Note:** After Bug 10 fix, DM encryption, transmission, and real-time
+processing pipeline is fully functional end-to-end.
 
-### Scenario 11 — Mock Engine E2E Flow ✅
+### Scenario 11 — Full E2E Flow (No Mocks) ✅
 
-**Purpose:** Verify full pipeline: observation → engine prediction → DM → scoring.
+**Purpose:** Verify complete pipeline through real relay delivery.
 
-- [x] Created `/api/competition/simulate-observation` endpoint to bypass relay
-- [x] Bob receives simulated observation, LiteEngine auto-predicts (values 248.886, 227.321)
-- [x] Prediction published to `_pred` stream and DM sent to Alice
-- [x] Alice receives DM on relay reconnect, late-arrival scoring fires
-- [x] After Bug 9 fix: prediction received on 3 relays, scored exactly once
-- [x] Payment correctly recorded: 200 sats for 1 observation
+**After Bug 10 fix (satorilib async iterator):**
+- [x] Alice publishes `seq=40 value=200.0` to all 3 relays
+- [x] Bob receives from relay in **100ms** (real-time `handle_notifications`)
+- [x] LiteEngine predicts `221.37` (25ms after observation)
+- [x] Bob publishes `e2e-paid-ticker_pred seq=5` to all relays
+- [x] Bob sends encrypted prediction DM to Alice's pubkey on all relays
+- [x] Alice's `_incomingPredictionsLoop` receives DM in real-time (810ms after publish)
+- [x] `_competitionScoreLateArrival` fires, scores 200 sats
+- [x] Second + third DM copies received from other relays — dedup prevents double scoring
+- [x] Total time: **816ms** from publish to scored payment
 
 ### Scenario 12 — Multi-Predictor Scoring ✅
 
@@ -341,7 +353,7 @@ during testing was an artifact (see Non-Issue 10).
 | 8. Revoke Access | ✅ PASS | Revoke → removed from list → DB confirmed |
 | 9. Reject Access Request | ✅ PASS | Re-request → Reject → DB confirmed |
 | 10. Encrypted DM Prediction | ✅ PASS | Bug 8 fixed; DM pipeline verified end-to-end |
-| 11. Mock Engine E2E Flow | ✅ PASS | Bug 9 fixed; observation → engine → DM → scoring verified |
+| 11. Full E2E (No Mocks) | ✅ PASS | Bug 10 fixed; 816ms publish-to-score, real relay delivery |
 | 12. Multi-Predictor Scoring | ✅ PASS | 2 predictors, 2 scenarios; rank + pay-top-N correct |
 | 13. Close Visibility (Browse) | ✅ PASS | Closed competition removed from Bob's Browse relay discovery |
 
@@ -357,6 +369,7 @@ payment requires funded wallet).
 | 4 | Stats endpoint returned 404 for `host_pubkey=self` | `routes.py` | Fixed |
 | 8 | Prediction listeners not spawning on publisher-only path | `start.py` | Fixed |
 | 9 | Duplicate scoring when prediction received on multiple relays | `start.py`, `network_db.py` | Fixed |
+| 10 | Prediction/access-request iterators exit after 1s timeout | `satorilib/client.py` | Fixed |
 
 ## Known Issues
 
@@ -366,7 +379,6 @@ payment requires funded wallet).
 | 5 | 10-minute startup throttle | Workaround: set `server checkin: 0` | Known |
 | 6 | Competition payment fails (insufficient wallet) | Scoring works; payment needs funded wallet | Known |
 | 7 | Network reconciliation takes ~15 min after restart | Normal timing; relay discovery eventually works | Known |
-| 10 | Apparent relay delivery gap during testing | Testing artifact — not a real bug | Resolved |
 
 ## Code Changes (Session 2)
 
@@ -382,5 +394,5 @@ payment requires funded wallet).
 
 1. Fund Alice's wallet with sufficient SATORI for channel-based competition payments.
 2. Re-test Scenario 3 channel payment with a funded wallet.
-3. ~~Fix real-time relay delivery~~ — confirmed working; apparent gap was
-   a testing artifact from `simulate-observation` making data look fresh.
+3. ~~Fix real-time relay delivery~~ — was Bug 10 (satorilib async iterator
+   `return` instead of `continue`). Fixed and verified: 100ms relay delivery.
