@@ -934,7 +934,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         wallet pubkey. Silently ignores announcements intended for others.
         """
         co = inbound.channel_open
-        if co.receiver_pubkey != self.vault.pubkey:
+        if co.receiver_pubkey != self.wallet.pubkey:
             return
         existing = await asyncio.to_thread(
             self.networkDB.get_channel, co.p2sh_address)
@@ -1079,13 +1079,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if deficit <= 0:
             # ── PATH A: fee already embedded ────────────────────────────────
             our_sig = await asyncio.to_thread(
-                self.vault.paymentChannelMultisigTransactionMiddle,
+                self.wallet.paymentChannelMultisigTransactionMiddle,
                 tx, redeem_script, 0, SIGHASH_ALL)
             await asyncio.to_thread(
-                self.vault._compileClaimOnP2SHMultiSigEnd,
+                self.wallet._compileClaimOnP2SHMultiSigEnd,
                 tx, redeem_script, _make_redeem_params(our_sig), 1, None)
             tx_hex = tx.serialize().hex()
-            txid = await asyncio.to_thread(self.vault.broadcast, tx_hex)
+            txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
             logging.info(
                 f'Channel: PATH A claimed {p2sh_address} '
                 f'({commitment.pay_amount_sats} sats) — txid={txid}',
@@ -1098,7 +1098,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # fall back to the largest available.
             evr_utxo = None
             for u in sorted(
-                (self.vault.unspentCurrency or []),
+                (self.wallet.unspentCurrency or []),
                 key=lambda x: x.get('value', 0)
             ):
                 if u.get('value', 0) >= required_fee_b:
@@ -1106,7 +1106,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     break
             if evr_utxo is None:
                 for u in sorted(
-                    (self.vault.unspentCurrency or []),
+                    (self.wallet.unspentCurrency or []),
                     key=lambda x: -x.get('value', 0)
                 ):
                     if u.get('value', 0) > 0:
@@ -1129,23 +1129,23 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if evr_change >= 546:
                     tx.vout.append(CMutableTxOut(
                         evr_change,
-                        CEvrmoreAddress(self.vault.address).to_scriptPubKey()))
+                        CEvrmoreAddress(self.wallet.address).to_scriptPubKey()))
                 # Receiver signs P2SH vin[0] with SIGHASH_ALL
                 our_sig = await asyncio.to_thread(
-                    self.vault.paymentChannelMultisigTransactionMiddle,
+                    self.wallet.paymentChannelMultisigTransactionMiddle,
                     tx, redeem_script, 0, SIGHASH_ALL)
                 # Standard P2PKH scriptPubKey for the EVR input
                 evr_script = CScript([
                     OP_DUP, OP_HASH160,
-                    Hash160(bytes.fromhex(self.vault.pubkey)),
+                    Hash160(bytes.fromhex(self.wallet.pubkey)),
                     OP_EQUALVERIFY, OP_CHECKSIG])
                 # Compile: sets P2SH scriptSig (vin[0]) and signs EVR (vin[1])
                 await asyncio.to_thread(
-                    self.vault._compileClaimOnP2SHMultiSigEnd,
+                    self.wallet._compileClaimOnP2SHMultiSigEnd,
                     tx, redeem_script, _make_redeem_params(our_sig), 1,
                     [evr_script])
                 tx_hex = tx.serialize().hex()
-                txid = await asyncio.to_thread(self.vault.broadcast, tx_hex)
+                txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
                 logging.info(
                     f'Channel: PATH B claimed {p2sh_address} '
                     f'({commitment.pay_amount_sats} sats, EVR fee {required_fee_b}) '
@@ -1265,7 +1265,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Step 1: find receiver's SATORI UTXO
         satori_utxo = None
         for u in sorted(
-            [u for u in (self.vault.unspentAssets or [])
+            [u for u in (self.wallet.unspentAssets or [])
              if u.get('name', u.get('asset')) == 'SATORI'
              and u.get('value', 0) > 0],
             key=lambda x: x.get('value', 0)
@@ -1325,10 +1325,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         satori_change = satori_value - mundo_satori_fee
         if satori_change > 0:
             change_script = CScript([
-                *CEvrmoreAddress(self.vault.address).to_scriptPubKey(),
+                *CEvrmoreAddress(self.wallet.address).to_scriptPubKey(),
                 OP_EVR_ASSET,
                 bytes.fromhex(
-                    AssetTransaction.satoriHex(self.vault.symbol) +
+                    AssetTransaction.satoriHex(self.wallet.symbol) +
                     TxUtils.padHexStringTo8Bytes(
                         TxUtils.intToLittleEndianHex(satori_change))),
                 OP_DROP])
@@ -1339,7 +1339,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             *CEvrmoreAddress(mundo_satori_fee_addr).to_scriptPubKey(),
             OP_EVR_ASSET,
             bytes.fromhex(
-                AssetTransaction.satoriHex(self.vault.symbol) +
+                AssetTransaction.satoriHex(self.wallet.symbol) +
                 TxUtils.padHexStringTo8Bytes(
                     TxUtils.intToLittleEndianHex(mundo_satori_fee))),
             OP_DROP])
@@ -1357,7 +1357,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # This locks all outputs but still allows Mundo to add its EVR input.
         mundo_sighash = SIGHASH_ALL | SIGHASH_ANYONECANPAY  # 0x81
         our_sig = await asyncio.to_thread(
-            self.vault.paymentChannelMultisigTransactionMiddle,
+            self.wallet.paymentChannelMultisigTransactionMiddle,
             new_tx, redeem_script, 0, mundo_sighash)
         redeemParams = funcpartial(
             unlock.paymentChannel,
@@ -1368,13 +1368,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Sign receiver's SATORI input with 0x81
         # _compileInputs returns (txins, txinScripts); we need the script
         _, satori_scripts = await asyncio.to_thread(
-            self.vault._compileInputs,
+            self.wallet._compileInputs,
             [],              # gatheredCurrencyUnspents (positional)
             [satori_utxo],  # gatheredSatoriUnspents (positional)
         )
         satori_script = satori_scripts[0]
         await asyncio.to_thread(
-            self.vault._signInput,
+            self.wallet._signInput,
             new_tx, satori_vin_idx, satori_txin, satori_script, mundo_sighash)
 
         # Step 5: serialize and POST to Mundo (signOnly=true)
@@ -1394,7 +1394,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
 
         # Step 6: broadcast the fully-signed tx and return txid
-        txid = await asyncio.to_thread(self.vault.broadcast, signed_hex)
+        txid = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
         return txid
 
     async def _grantChannelAccess(
@@ -1512,7 +1512,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """
         amount_satori = amount_sats / 1e8
         txid, script_payload = await asyncio.to_thread(
-            self.vault.producePaymentChannel,
+            self.wallet.producePaymentChannel,
             receiver_pubkey,
             None,       # sender defaults to our own pubkey
             blocks,
@@ -1525,7 +1525,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         await asyncio.to_thread(
             self.networkDB.save_channel,
             p2sh_address,
-            self.vault.pubkey,
+            self.wallet.pubkey,
             receiver_pubkey,
             script_payload['redeem_script_hex'],
             script_payload['funding_txid'],
@@ -1547,7 +1547,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             from satorilib.satori_nostr.models import ChannelOpen
             channel_open = ChannelOpen(
                 p2sh_address=p2sh_address,
-                sender_pubkey=self.vault.pubkey,
+                sender_pubkey=self.wallet.pubkey,
                 receiver_pubkey=receiver_pubkey,
                 redeem_script=script_payload['redeem_script_hex'],
                 funding_txid=script_payload['funding_txid'],
@@ -1590,7 +1590,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         amount_sats = amount_sats or self._channelFundSats()
         amount_satori = amount_sats / 1e8
         # Refresh wallet UTXOs so _gatherSatoriUnspents sees current state
-        await asyncio.to_thread(self.vault.getReadyToSend)
+        await asyncio.to_thread(self.wallet.getReadyToSend)
         from evrmore.core.script import CScript
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
         script_payload = {
@@ -1601,7 +1601,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             'amount': amount_satori,
         }
         _txhex, txid, result = await asyncio.to_thread(
-            self.vault.producePaymentChannelFromScript,
+            self.wallet.producePaymentChannelFromScript,
             redeemScript=redeem_script,
             scriptPayload=script_payload,
             broadcast=True,
@@ -1656,17 +1656,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Build partial tx with ONLY the P2SH input and SATORI outputs.
         # No EVR inputs are included — the receiver resolves the fee via
         # 3-path logic so the sender doesn't need EVR to send micropayments.
-        if self.vault.divisibility == 0:
-            await asyncio.to_thread(self.vault.getReadyToSend)
+        if self.wallet.divisibility == 0:
+            await asyncio.to_thread(self.wallet.getReadyToSend)
         def _build_partial_tx():
             sat_sats = TxUtils.roundSatsDownToDivisibility(
                 sats=cumulative_sats,
-                divisibility=self.vault.divisibility)
-            change_out = self.vault._compileSatoriChangeOutput(
+                divisibility=self.wallet.divisibility)
+            change_out = self.wallet._compileSatoriChangeOutput(
                 satoriSats=sat_sats,
                 gatheredSatoriSats=locked_sats,
                 changeAddress=channel['p2sh_address'])
-            return self.vault._compileClaimOnP2SHMultiSigStart(
+            return self.wallet._compileClaimOnP2SHMultiSigStart(
                 toAddress=receiver_address,
                 satoriSats=sat_sats,
                 feeOverride=None,
@@ -1676,7 +1676,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 extraVouts=[change_out] if change_out else [])
         tx = await asyncio.to_thread(_build_partial_tx)
         sig = await asyncio.to_thread(
-            self.vault.paymentChannelMultisigTransactionMiddle,
+            self.wallet.paymentChannelMultisigTransactionMiddle,
             tx,
             redeem_script,
             0,    # vinIndex
@@ -1685,7 +1685,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         remainder = channel['remainder_sats'] - pay_amount_sats
         commitment = ChannelCommitment(
             p2sh_address=p2sh_address,
-            sender_pubkey=self.vault.pubkey,
+            sender_pubkey=self.wallet.pubkey,
             receiver_pubkey=channel['receiver_pubkey'],
             partial_tx_hex=tx.serialize().hex(),
             sender_sigs=[sig.hex()],
@@ -1758,23 +1758,23 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         sat_sats = TxUtils.roundSatsDownToDivisibility(
             sats=channel['locked_sats'],
-            divisibility=self.vault.divisibility)
+            divisibility=self.wallet.divisibility)
 
         def _build_standard_reclaim():
             """PATH A: gather EVR, build csv reclaim tx, sign, broadcast."""
             from evrmore.core.script import CScript, OP_FALSE, SIGHASH_ALL
             fee = TxUtils.defaultFee
             # raises TransactionFailure if not enough EVR
-            gathered_utxos, gathered_sats = self.vault._gatherCurrencyUnspents(
+            gathered_utxos, gathered_sats = self.wallet._gatherCurrencyUnspents(
                 feeOverride=fee)
-            txins_evr, txin_scripts_evr = self.vault._compileInputs(
+            txins_evr, txin_scripts_evr = self.wallet._compileInputs(
                 gatheredCurrencyUnspents=gathered_utxos)
-            evr_change_out = self.vault._compileCurrencyChangeOutput(
+            evr_change_out = self.wallet._compileCurrencyChangeOutput(
                 gatheredCurrencySats=gathered_sats,
                 fee=fee)
             # Build bare tx: P2SH vin + EVR vins, SATORI output + EVR change
-            tx = self.vault._compileClaimOnP2SHMultiSigStart(
-                toAddress=self.vault.address,
+            tx = self.wallet._compileClaimOnP2SHMultiSigStart(
+                toAddress=self.wallet.address,
                 satoriSats=sat_sats,
                 fundingTxIds=[channel['funding_txid']],
                 fundingVouts=[channel['funding_vout']],
@@ -1784,15 +1784,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             tx.nVersion = 2
             tx.vin[0].nSequence = csv_value
             # Sign P2SH vin[0] with SIGHASH_ALL (single-sig CSV path)
-            sig = self.vault._compileClaimOnP2SHMultiSigMiddle(
+            sig = self.wallet._compileClaimOnP2SHMultiSigMiddle(
                 tx, redeem_script, 0, SIGHASH_ALL)
             # redeemParams() must return just the unlock prefix (no sig arg)
             def redeem_params_csv():
                 return CScript([sig, OP_FALSE])
             # Set P2SH scriptSig and sign EVR vins
-            self.vault._compileClaimOnP2SHMultiSigEnd(
+            self.wallet._compileClaimOnP2SHMultiSigEnd(
                 tx, redeem_script, redeem_params_csv, 1, txin_scripts_evr)
-            return self.vault.broadcast(self.vault._txToHex(tx))
+            return self.wallet.broadcast(self.wallet._txToHex(tx))
 
         try:
             txid = await asyncio.to_thread(_build_standard_reclaim)
@@ -1848,7 +1848,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Step 1: find sender's SATORI UTXO
         satori_utxo = None
         for u in sorted(
-            [u for u in (self.vault.unspentAssets or [])
+            [u for u in (self.wallet.unspentAssets or [])
              if u.get('name', u.get('asset')) == 'SATORI'
              and u.get('value', 0) > 0],
             key=lambda x: x.get('value', 0)
@@ -1902,21 +1902,21 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 *CEvrmoreAddress(address).to_scriptPubKey(),
                 OP_EVR_ASSET,
                 bytes.fromhex(
-                    AssetTransaction.satoriHex(self.vault.symbol) +
+                    AssetTransaction.satoriHex(self.wallet.symbol) +
                     TxUtils.padHexStringTo8Bytes(
                         TxUtils.intToLittleEndianHex(amount_sats))),
                 OP_DROP])
 
         vouts = [
             # SATORI back to sender
-            CMutableTxOut(0, _satori_asset_script(self.vault.address, sat_sats)),
+            CMutableTxOut(0, _satori_asset_script(self.wallet.address, sat_sats)),
             # SATORI fee to Mundo
             CMutableTxOut(0, _satori_asset_script(mundo_satori_fee_addr, mundo_satori_fee)),
         ]
         satori_change = satori_value - mundo_satori_fee
         if satori_change > 0:
             vouts.append(CMutableTxOut(
-                0, _satori_asset_script(self.vault.address, satori_change)))
+                0, _satori_asset_script(self.wallet.address, satori_change)))
         if mundo_evr_change_addr and mundo_evr_change_amt > 0:
             vouts.append(CMutableTxOut(
                 mundo_evr_change_amt,
@@ -1931,18 +1931,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Step 5: sign P2SH vin[0] with 0x81 (CSV single-sig branch)
         mundo_sighash = SIGHASH_ALL | SIGHASH_ANYONECANPAY  # 0x81
         p2sh_sig = await asyncio.to_thread(
-            self.vault.paymentChannelMultisigTransactionMiddle,
+            self.wallet.paymentChannelMultisigTransactionMiddle,
             new_tx, redeem_script, 0, mundo_sighash)
         new_tx.vin[0].scriptSig = CScript([p2sh_sig, OP_FALSE]) + redeem_script
 
         # Step 6: sign SATORI vin[1] with 0x81
         _, satori_scripts = await asyncio.to_thread(
-            self.vault._compileInputs,
+            self.wallet._compileInputs,
             [],              # gatheredCurrencyUnspents
             [satori_utxo],  # gatheredSatoriUnspents
         )
         await asyncio.to_thread(
-            self.vault._signInput,
+            self.wallet._signInput,
             new_tx, satori_vin_idx, satori_txin,
             satori_scripts[0], mundo_sighash)
 
@@ -1963,7 +1963,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
 
         # Step 8: broadcast the fully-signed tx
-        return await asyncio.to_thread(self.vault.broadcast, signed_hex)
+        return await asyncio.to_thread(self.wallet.broadcast, signed_hex)
 
     # ── End channel support ───────────────────────────────────────────────────
 
