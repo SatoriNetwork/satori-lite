@@ -2287,6 +2287,87 @@ def register_routes(app):
         startup.tombstonePublicationSync(pred_name)
         return jsonify({'success': True})
 
+    @app.route('/api/competition/submit-prediction', methods=['POST'])
+    @login_required
+    def api_competition_submit_prediction():
+        """Submit a prediction to a competition host via Nostr DM (predictor side).
+
+        Required fields: stream_name, stream_provider_pubkey, host_pubkey,
+        seq_num, predicted_value.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json() or {}
+        required = ['stream_name', 'stream_provider_pubkey', 'host_pubkey',
+                     'seq_num', 'predicted_value']
+        missing = [f for f in required if f not in data]
+        if missing:
+            return jsonify({'error': f'Missing: {", ".join(missing)}'}), 400
+        startup.submitPredictionSync(
+            stream_name=data['stream_name'],
+            stream_provider_pubkey=data['stream_provider_pubkey'],
+            host_pubkey=data['host_pubkey'],
+            seq_num=int(data['seq_num']),
+            predicted_value=float(data['predicted_value']),
+        )
+        return jsonify({'success': True, 'seq_num': data['seq_num']})
+
+    @app.route('/api/competition/simulate-observation', methods=['POST'])
+    @login_required
+    def api_competition_simulate_observation():
+        """Simulate receiving an observation and trigger engine + DM prediction.
+
+        For testing: injects an observation into the DB and runs the engine
+        path (predict → DM to competition host) without relying on relay
+        delivery. Required: stream_name, provider_pubkey, seq_num, value.
+        """
+        import asyncio as _asyncio
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json() or {}
+        required = ['stream_name', 'provider_pubkey', 'seq_num', 'value']
+        missing = [f for f in required if f not in data]
+        if missing:
+            return jsonify({'error': f'Missing: {", ".join(missing)}'}), 400
+        stream_name = data['stream_name']
+        provider_pubkey = data['provider_pubkey']
+        seq_num = int(data['seq_num'])
+        value = data['value']
+        import time as _time
+        ts = int(_time.time())
+        # Save observation to DB
+        is_new = startup.networkDB.save_observation(
+            stream_name, provider_pubkey, str(value), None, seq_num, ts)
+        if not is_new:
+            return jsonify({'error': 'Observation already exists', 'seq_num': seq_num}), 409
+        # Check if predicting and run engine + DM submission
+        predicting = startup.networkDB.is_predicting(stream_name, provider_pubkey)
+        if not predicting:
+            return jsonify({'success': True, 'seq_num': seq_num,
+                            'predicted': False, 'reason': 'not predicting this stream'})
+        # Create a mock observation object for the engine
+        from satorilib.satori_nostr.models import DatastreamObservation
+        obs = DatastreamObservation(
+            stream_name=stream_name,
+            timestamp=ts,
+            value=value,
+            seq_num=seq_num,
+        )
+        # Run engine on the network loop
+        loop = getattr(startup, '_networkLoop', None)
+        if loop and not loop.is_closed():
+            future = _asyncio.run_coroutine_threadsafe(
+                startup._networkRunEngine(stream_name, provider_pubkey, obs),
+                loop)
+            try:
+                future.result(timeout=10)
+            except Exception as e:
+                return jsonify({'success': True, 'seq_num': seq_num,
+                                'predicted': True, 'engine_error': str(e)})
+        return jsonify({'success': True, 'seq_num': seq_num, 'predicted': True})
+
     @app.route('/api/network/publication/remove', methods=['POST'])
     @login_required
     def api_network_publication_remove():

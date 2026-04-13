@@ -1127,6 +1127,21 @@ class NetworkDB:
         """, (stream_name, stream_provider_pubkey)).fetchall()
         return [dict(r) for r in rows]
 
+    def is_seq_already_scored(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        seq_num: int,
+    ) -> bool:
+        """Return True if any payment record exists for this seq_num."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT 1 FROM competition_payments "
+            "WHERE stream_name = ? AND stream_provider_pubkey = ? "
+            "AND seq_num = ? LIMIT 1",
+            (stream_name, stream_provider_pubkey, seq_num)).fetchone()
+        return row is not None
+
     def get_competition_leaderboard(
         self,
         stream_name: str,

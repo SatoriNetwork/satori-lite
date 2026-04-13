@@ -264,6 +264,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 client = await self._networkConnect(relay_url, ConfigClass)
                 if client:
                     await self._networkAnnouncePublications(relay_url)
+            # Hosts need prediction + access-request listeners on every
+            # relay where they publish, even when the reconcile loop
+            # (subscription path) never touches that relay.
+            if relay_url in self._networkClients:
+                self._networkEnsurePredictionListener(relay_url)
+                self._networkEnsureAccessRequestListener(relay_url)
 
     async def _networkConnect(self, relay_url: str, ConfigClass):
         """Connect to a relay if not already connected. Returns client or None."""
@@ -378,6 +384,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not competition or not competition.get('active'):
                 return
 
+            # Dedup: skip if we've already scored this seq_num
+            already_scored = await asyncio.to_thread(
+                self.networkDB.is_seq_already_scored,
+                stream_name, provider_pubkey, seq_num)
+            if already_scored:
+                return
+
             try:
                 observed_value = float(raw_value)
             except (TypeError, ValueError):
@@ -460,20 +473,43 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         provider_pubkey: str,
         seq_num: int,
     ) -> None:
-        """Send a payment to a predictor via an existing or new channel (host side).
+        """Score and pay a predictor for a competition (host side).
 
-        The predictor's wallet pubkey comes from the prediction DM itself —
-        attached by the predictor at submission time and stored in the
-        competition_predictions table. Opens a channel if none exists with
-        sufficient funds, then sends payment.
+        Always records the payment obligation in the DB (for leaderboard /
+        accountability) even if the actual channel payment fails.  The channel
+        payment is best-effort — wallet balance or network issues should not
+        prevent scoring results from being persisted.
         """
+        import time as _time
+        # Always record the scoring result first
         try:
-            if not predictor_wallet_pubkey:
-                logging.warning(
-                    f'Competition: no wallet pubkey for predictor '
-                    f'{predictor_nostr_pubkey[:12]}…, skipping payment')
-                return
+            await asyncio.to_thread(
+                self.networkDB.record_competition_payment,
+                stream_name,
+                provider_pubkey,
+                predictor_nostr_pubkey,
+                seq_num,
+                sats,
+                int(_time.time()),
+            )
+            logging.info(
+                f'Competition: scored {sats} sats for '
+                f'{predictor_nostr_pubkey[:12]}… seq={seq_num}',
+                color='green')
+        except Exception as e:
+            logging.warning(
+                f'Competition: failed to record payment for '
+                f'{predictor_nostr_pubkey[:12]}…: {e}')
+            return
 
+        # Now attempt the actual channel payment (best-effort)
+        if not predictor_wallet_pubkey:
+            logging.warning(
+                f'Competition: no wallet pubkey for predictor '
+                f'{predictor_nostr_pubkey[:12]}…, payment recorded but '
+                f'channel transfer skipped')
+            return
+        try:
             # Find an open sender channel with enough remainder
             channels = await asyncio.to_thread(
                 self.networkDB.get_channels_as_sender)
@@ -500,29 +536,22 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     self.networkDB.get_channel, p2sh)
                 if not channel or channel['remainder_sats'] < sats:
                     logging.warning(
-                        f'Competition: newly opened channel insufficient for '
-                        f'{sats} sats payment to {predictor_wallet_pubkey[:16]}…')
+                        f'Competition: channel insufficient for '
+                        f'{sats} sats to {predictor_wallet_pubkey[:16]}… '
+                        f'(payment recorded, transfer pending)')
                     return
 
-            await self.sendChannelPayment(channel['p2sh_address'], sats, stream_name)
-            import time as _time
-            await asyncio.to_thread(
-                self.networkDB.record_competition_payment,
-                stream_name,
-                provider_pubkey,
-                predictor_nostr_pubkey,
-                seq_num,
-                sats,
-                int(_time.time()),
-            )
+            await self.sendChannelPayment(
+                channel['p2sh_address'], sats, stream_name)
             logging.info(
-                f'Competition: paid {sats} sats to '
+                f'Competition: channel payment sent — {sats} sats to '
                 f'{predictor_nostr_pubkey[:12]}… for seq={seq_num}',
                 color='green')
         except Exception as e:
             logging.warning(
-                f'Competition: pay-predictor failed for '
-                f'{predictor_nostr_pubkey[:12]}…: {e}')
+                f'Competition: channel transfer failed for '
+                f'{predictor_nostr_pubkey[:12]}… (payment recorded, '
+                f'transfer pending): {e}')
 
     async def _channelPayForObservation(
         self,
