@@ -163,16 +163,21 @@
       </div>
       <div class="modal-body">
         <div class="mb-3">
-          <label class="form-label">Stream Name</label>
-          <input type="text" class="form-control" id="nc_stream_name" placeholder="btc-price-usd">
+          <label class="form-label">Stream Provider Pubkey</label>
+          <input type="text" class="form-control font-monospace" id="nc_provider_pubkey"
+            placeholder="hex pubkey of the stream producer"
+            oninput="onProviderPubkeyInput()">
         </div>
         <div class="mb-3">
-          <label class="form-label">Stream Provider Pubkey</label>
-          <input type="text" class="form-control font-monospace" id="nc_provider_pubkey" placeholder="hex pubkey of the stream producer">
+          <label class="form-label">Stream Name</label>
+          <select class="form-select" id="nc_stream_name" disabled>
+            <option value="">— enter a provider pubkey first —</option>
+          </select>
+          <div class="form-text" id="nc_stream_hint"></div>
         </div>
         <div class="mb-3">
           <label class="form-label">Total Pay per Observation (sats)</label>
-          <input type="number" class="form-control" id="nc_pay" min="1" placeholder="300">
+          <input type="number" class="form-control" id="nc_pay" min="1" placeholder="100">
           <div class="form-text">Total sats paid out each time the stream ticks, distributed however you choose.</div>
         </div>
         <div class="row g-3 mb-3">
@@ -366,6 +371,56 @@ async function closeCompetition(streamName, providerPubkey) {
     loadMine();
   } catch(e) {
     showAlert('Failed to close: ' + e);
+  }
+}
+
+// ── Stream lookup by provider pubkey ─────────────────────────
+let _providerLookupTimer = null;
+function onProviderPubkeyInput() {
+  clearTimeout(_providerLookupTimer);
+  _providerLookupTimer = setTimeout(lookupStreamsForProvider, 400);
+}
+
+async function lookupStreamsForProvider() {
+  const pubkey = document.getElementById('nc_provider_pubkey').value.trim();
+  const sel    = document.getElementById('nc_stream_name');
+  const hint   = document.getElementById('nc_stream_hint');
+
+  sel.innerHTML = '<option value="">— loading… —</option>';
+  sel.disabled = true;
+  hint.textContent = '';
+
+  if (!pubkey) {
+    sel.innerHTML = '<option value="">— enter a provider pubkey first —</option>';
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/network/subscriptions');
+    const data = await resp.json();
+    const matches = (data.subscriptions || []).filter(
+      s => s.provider_pubkey === pubkey && !s.stream_name.endsWith('_pred')
+    );
+
+    sel.innerHTML = '';
+    if (matches.length === 0) {
+      sel.innerHTML = '<option value="">— no subscribed streams found for this pubkey —</option>';
+      hint.textContent = 'You must be subscribed to the stream to host a competition on it.';
+      hint.style.color = 'var(--text-muted, #aaa)';
+    } else {
+      matches.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.stream_name;
+        opt.textContent = s.stream_name;
+        sel.appendChild(opt);
+      });
+      sel.disabled = false;
+      hint.textContent = `${matches.length} stream${matches.length > 1 ? 's' : ''} found.`;
+      hint.style.color = 'var(--text-muted, #aaa)';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">— failed to load streams —</option>';
+    hint.textContent = 'Could not fetch subscriptions: ' + e;
   }
 }
 

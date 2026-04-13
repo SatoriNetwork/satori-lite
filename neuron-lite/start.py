@@ -2460,15 +2460,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if loop is None or loop.is_closed():
             return self.networkDB.get_all_competitions(active_only=active_only)
         async def _discover():
-            results = []
+            seen: dict[str, tuple[int, dict]] = {}
             for client in self._networkClients.values():
                 try:
                     comps = await client.discover_competitions(
                         active_only=active_only)
-                    results.extend(c.to_dict() for c in comps)
+                    for c in comps:
+                        d = c.d_tag()
+                        if d not in seen or c.timestamp > seen[d][0]:
+                            seen[d] = (c.timestamp, c.to_dict())
                 except Exception as e:
                     logging.warning(f'Competition: discover failed: {e}')
-            return results
+            return [v for _, v in seen.values()]
         future = asyncio.run_coroutine_threadsafe(_discover(), loop)
         try:
             return future.result(timeout=15)
