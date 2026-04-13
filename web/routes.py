@@ -2866,7 +2866,17 @@ def register_routes(app):
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
-        return jsonify({'competitions': startup.discoverCompetitionsSync()})
+        my_pubkey = startup.nostrPubkey
+        joined = {
+            (r['stream_name'], r['stream_provider_pubkey'], r['host_pubkey'])
+            for r in startup.networkDB.get_all_joined_competitions()
+        }
+        competitions = startup.discoverCompetitionsSync()
+        for c in competitions:
+            key = (c['stream_name'], c['stream_provider_pubkey'], c['host_pubkey'])
+            c['is_mine'] = c['host_pubkey'] == my_pubkey
+            c['joined'] = key in joined
+        return jsonify({'competitions': competitions, 'my_pubkey': my_pubkey})
 
     @app.route('/api/competition/leaderboard', methods=['GET'])
     @login_required

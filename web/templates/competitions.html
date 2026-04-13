@@ -271,10 +271,15 @@ function renderBrowse(comps) {
       <td class="text-end">${c.paid_predictors ?? '—'}</td>
       <td class="text-end">${c.competing_predictors ?? '—'}</td>
       <td class="text-end">
-        <button class="btn btn-outline-primary btn-sm"
-          onclick="joinCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
-          Join
-        </button>
+        ${c.is_mine
+          ? '<span class="badge bg-secondary">Your competition</span>'
+          : c.joined
+            ? '<span class="badge bg-success">Joined</span>'
+            : `<button class="btn btn-outline-primary btn-sm"
+                onclick="joinCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
+                Join
+               </button>`
+        }
       </td>
     </tr>
   `).join('');
@@ -295,6 +300,7 @@ async function joinCompetition(streamName, providerPubkey, hostPubkey) {
     const data = await resp.json();
     if (data.error) { showAlert(data.error); return; }
     showAlert('Joined — your neuron will now predict this stream.', 'success');
+    loadBrowse();
   } catch(e) {
     showAlert('Failed to join: ' + e);
   }
