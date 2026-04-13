@@ -72,9 +72,9 @@ Last updated: 2026-04-12 (session 2)
 - [x] Payments resume on the refunded channel — auto-payment fires on new observations, remainder decrements correctly
 
 ### Channel Reclaim by Sender
-- [ ] `reclaimChannel` after CSV timeout — sender gets funds back
-- [ ] `remainder_sats` zeroed to prevent use of spent UTXO
-- [ ] Channel row persists (never deleted)
+- [x] `reclaimChannel` after CSV timeout — sender gets funds back (txid: 90f46c93..., 9400 SATORI to Bob)
+- [x] `remainder_sats` zeroed to prevent use of spent UTXO
+- [x] Channel row persists (never deleted)
 
 ### Tombstone / Settlement Events
 - [x] `KIND_CHANNEL_SETTLED` (34606) delivered from Alice to Bob after claim
@@ -97,29 +97,29 @@ Last updated: 2026-04-12 (session 2)
 - [x] Each relay maintains independent event set; subscriber sees union via per-relay listeners
 
 ### Free Stream (Scenario B from test plan)
-- [ ] Alice publishes free stream (price_per_obs=0)
-- [ ] Bob subscribes and receives observations without payment
+- [x] Alice publishes free stream (price_per_obs=0) — `e2e-free-ticker` announced and observed
+- [x] Bob subscribes and receives observations without payment (values 123.45, 456.78 delivered, no commitment published)
 
 ### Payment Rate Limiting (anti-gaming)
-- [ ] Normal cadence: observations at expected interval, each gets paid immediately
+- [x] Normal cadence: observations at expected interval, each gets paid immediately (seq=21 after 82s gap → immediate)
 - [ ] Slight variation: observation arrives within cadence but outside cooldown (cadence/2) — paid immediately
-- [ ] Flood: seller sends many observations within cooldown — only 1 immediate + 1 deferred payment per cadence
-- [ ] Deferred payment fires at cooldown end — seller receives it, relationship continues
-- [ ] Flood then silence: deferred fires, then seller resumes normal cadence — payments resume normally
-- [ ] No cadence (irregular stream): every observation paid immediately, no rate limit
-- [ ] Verify deferred payments don't stack (only one pending per subscription)
+- [x] Flood: seller sends many observations within cooldown — only 1 immediate + 1 deferred payment per cadence (4 obs in 2s → 2 payments)
+- [x] Deferred payment fires at cooldown end — seller receives it, relationship continues (fired at ~15s after first)
+- [x] Flood then silence: deferred fires, then seller resumes normal cadence — payments resume normally (seq=21 → immediate)
+- [x] No cadence (irregular stream): every observation paid immediately, no rate limit (verified in earlier sessions with cadence=0)
+- [x] Verify deferred payments don't stack (only one pending per subscription) (3 obs during cooldown → only 1 deferred fired)
 
 ## Test Scenarios (from e2e-testing.md)
 
 | Scenario | Description | Status |
 |----------|-------------|--------|
 | A — First-run funding | Manual wallet setup | Done (wallets funded) |
-| B — Free stream discovery | Smoke test, no payment | Not tested |
+| B — Free stream discovery | Smoke test, no payment | Verified (e2e-free-ticker) |
 | C — Priced stream, no payment | Access denied verification | Partially verified (seq 6 gated) |
 | D — Priced stream, channel + payment | Full payment flow | Verified (seq 3-5 delivered after payment) |
 | E — Channel exhaustion | Drain and verify gating | Verified (drained to 0, seq 6 blocked) |
-| F — Reclaim after timeout | CSV timeout reclaim | Not tested |
-| G — Payment rate limiting | Anti-gaming: flood obs, verify max 2 payments/cadence | Not tested |
+| F — Reclaim after timeout | CSV timeout reclaim | Verified (txid: 90f46c93...) |
+| G — Payment rate limiting | Anti-gaming: flood obs, verify max 2 payments/cadence | Verified (4 obs → 2 payments) |
 
 ## Verified Working (session 2)
 
@@ -156,6 +156,25 @@ Last updated: 2026-04-12 (session 2)
 - [x] After restart with div=8 default, `sendChannelPayment` correctly builds 2-output partial tx (receiver + P2SH change)
 - [x] Confirmed: 100 sats to receiver, 9300 sats to P2SH change (was previously all 9400 to P2SH with div=0)
 
+### Channel Reclaim by Sender (CSV timeout)
+- [x] `reclaimChannel` PATH A: Bob has EVR, builds CSV single-sig tx (OP_FALSE branch), broadcasts (txid: 90f46c93...)
+- [x] CSV timeout (10 min / ~17 min actual) expired with 29+ confirmations
+- [x] 9400 SATORI reclaimed to Bob's address + EVR change
+- [x] DB: remainder zeroed, channel row persists
+- [x] Channel successfully re-funded via `producePaymentChannelFromScript` (txid: e34073b0...)
+
+### Free Stream
+- [x] Alice publishes `e2e-free-ticker` (price_per_obs=0) — stream announce + observations
+- [x] Bob subscribes and receives plaintext observations (values 123.45, 456.78)
+- [x] No payment/commitment triggered for free stream (`_channelPayForObservation` returns early)
+
+### Payment Rate Limiting
+- [x] Cadence=30s, cooldown=15s set on `e2e-paid-ticker` subscription
+- [x] Flood test: 4 observations within 2 seconds → only 2 payments (1 immediate + 1 deferred at cooldown end)
+- [x] Deferred fires at ~15s after first payment (expected: 15s, actual: 15.3s)
+- [x] Deferred payments don't stack: 3 obs during cooldown → only 1 deferred
+- [x] After cooldown expires: next observation paid immediately (seq=21 after 82s gap → immediate, 9800→9700)
+
 ## Known Issues
 
 ### Manual test scripts must use correct event format
@@ -163,8 +182,9 @@ Last updated: 2026-04-12 (session 2)
 - Earlier manual publishes used wrong keys (`stream`, `ts`, `seq`) — events were silently dropped as decryption failures
 - Fix: always publish with correct DatastreamObservation format
 
-## Next Priority
+## Remaining
 
-1. **Payment rate limiting** — verify flood protection caps payments at 2 per cadence, deferred payment keeps relationship alive.
-2. **Channel reclaim by sender** — test CSV timeout reclaim path.
-3. **Free stream** — verify no-payment observation delivery.
+1. **`claimChannel` PATH A** — not tested (partial tx has fee=0, always goes to PATH B). Low priority.
+2. **Tombstone fallback** — when settlement not received, zeros remainder. Not tested.
+3. **Auto-refund trigger** — `_channelPayForObservation` calls `refundChannel` when drained. Not yet verified end-to-end.
+4. **Slight cadence variation** — observation within cadence but outside cooldown (cadence/2). Not tested.
