@@ -1,6 +1,6 @@
 # Stream Market Test Status
 
-Last updated: 2026-04-12 (session 2)
+Last updated: 2026-04-13 (session 4)
 
 ## Environment
 
@@ -66,7 +66,7 @@ Last updated: 2026-04-12 (session 2)
 - [x] Bob can send new micropayments on the refreshed channel (remainder 10000→9900 on claimed UTXO 6b01c97b...:0)
 
 ### Channel Refund
-- [ ] Auto-trigger: when channel drained, `_channelPayForObservation` calls `refundChannel` (needs channel to drain again to verify)
+- [x] Auto-trigger: when channel drained, `_channelPayForObservation` calls `refundChannel` — verified (txid: ca42e825...)
 - [x] `refundChannel` sends new SATORI to existing P2SH via `producePaymentChannelFromScript` (txid: 110c8a74...)
 - [x] DB updated with new `funding_txid`/`funding_vout`/`locked_sats`/`remainder_sats`
 - [x] Payments resume on the refunded channel — auto-payment fires on new observations, remainder decrements correctly
@@ -79,7 +79,7 @@ Last updated: 2026-04-12 (session 2)
 ### Tombstone / Settlement Events
 - [x] `KIND_CHANNEL_SETTLED` (34606) delivered from Alice to Bob after claim
 - [x] Bob processes settlement — updates channel with new UTXO (txid, vout, locked_sats, remainder all correct)
-- [ ] Tombstone fallback when settlement not received — zeros remainder
+- [x] Tombstone fallback when settlement not received — zeros remainder (verified: tombstone published, Bob zeroed remainder from 9700→0)
 
 ### Partial TX Validity
 - [x] Partial transactions built by `sendChannelPayment` are valid and broadcastable (proven by claim txids 6b01c97b... and 2f5a5330...)
@@ -175,6 +175,22 @@ Last updated: 2026-04-12 (session 2)
 - [x] Deferred payments don't stack: 3 obs during cooldown → only 1 deferred
 - [x] After cooldown expires: next observation paid immediately (seq=21 after 82s gap → immediate, 9800→9700)
 
+## Verified Working (session 4)
+
+### Tombstone Fallback (no settlement)
+- [x] Alice claims channel (PATH B, txid: a85366f6...) and publishes ONLY tombstone (empty KIND_CHANNEL_COMMITMENT with `d=p2sh_address`, `action=claimed` tag)
+- [x] Settlement intentionally withheld
+- [x] Bob receives tombstone via `_channelTombstoneListen` → `_channelHandleTombstone` fires
+- [x] Bob's remainder zeroed from 9700→0, locked_sats preserved at 10000
+- [x] Channel row persists (never deleted)
+
+### Auto-Refund Trigger (channel drained → auto-refund on next observation)
+- [x] After tombstone zeroed remainder, Alice publishes observation (seq=25, value=555.55)
+- [x] Bob receives observation, `_channelPayNow` detects `remainder=0 < price=100`
+- [x] `refundChannel` auto-fires: broadcasts 10000 SATORI sats to existing P2SH (txid: ca42e825...)
+- [x] Immediately after refund, commitment published: pay=100, remainder=9900
+- [x] Full cycle: tombstone → zero → observation → auto-refund → auto-pay (no manual intervention)
+
 ## Known Issues
 
 ### Manual test scripts must use correct event format
@@ -185,6 +201,4 @@ Last updated: 2026-04-12 (session 2)
 ## Remaining
 
 1. **`claimChannel` PATH A** — not tested (partial tx has fee=0, always goes to PATH B). Low priority.
-2. **Tombstone fallback** — when settlement not received, zeros remainder. Not tested.
-3. **Auto-refund trigger** — `_channelPayForObservation` calls `refundChannel` when drained. Not yet verified end-to-end.
-4. **Slight cadence variation** — observation within cadence but outside cooldown (cadence/2). Not tested.
+2. **Slight cadence variation** — observation within cadence but outside cooldown (cadence/2). Not tested. Low priority.
