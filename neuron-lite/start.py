@@ -831,6 +831,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from functools import partial as funcpartial
         tx = CMutableTransaction.deserialize(
             bytes.fromhex(commitment.partial_tx_hex))
+        # Ensure all sub-objects are mutable (deserialize may yield immutable)
+        tx.vin = [CMutableTxIn(v.prevout, v.scriptSig, v.nSequence)
+                   for v in tx.vin]
+        tx.vout = [CMutableTxOut(v.nValue, v.scriptPubKey)
+                    for v in tx.vout]
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
         sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
         # ── Fee estimation ──────────────────────────────────────────────────
@@ -1430,6 +1435,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Build partial tx with ONLY the P2SH input and SATORI outputs.
         # No EVR inputs are included — the receiver resolves the fee via
         # 3-path logic so the sender doesn't need EVR to send micropayments.
+        if self.wallet.divisibility == 0:
+            await asyncio.to_thread(self.wallet.getReadyToSend)
         def _build_partial_tx():
             sat_sats = TxUtils.roundSatsDownToDivisibility(
                 sats=cumulative_sats,
