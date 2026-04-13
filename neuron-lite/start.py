@@ -80,6 +80,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
         self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
+        self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
+        self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -525,10 +527,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Pay for an observation via a channel (sender/buyer side).
 
-        Looks up the subscription for price and provider wallet pubkey.
-        If no channel is open, or the current one is exhausted, auto-opens
-        a new channel using the configured fund amount.
-        Silently skips if the stream is free or no wallet pubkey is known.
+        Rate-limited: never pays more than once per cadence/2 seconds.
+        If an observation arrives during the cooldown, schedules exactly one
+        deferred payment at cooldown end. The deferred payment signals the
+        seller that the buyer is still subscribed. Streams with no cadence
+        (null/0) are not rate-limited.
         """
         try:
             sub = await asyncio.to_thread(
@@ -544,38 +547,110 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not subscription or subscription.get('price_per_obs', 0) == 0:
                 return  # free stream
             price_sats = subscription['price_per_obs']
-            provider_wallet_pubkey = subscription.get('provider_wallet_pubkey')
-            if not provider_wallet_pubkey:
-                return  # can't pay without knowing receiver's Satori wallet pubkey
-            # Find an open sender channel with sufficient remainder
-            channels = await asyncio.to_thread(
-                self.networkDB.get_channels_as_sender)
-            channel = next(
-                (c for c in channels
-                 if c['receiver_pubkey'] == provider_wallet_pubkey
-                 and c['remainder_sats'] >= price_sats),
-                None)
-            if not channel:
-                # Auto-open a fresh channel to this provider
-                fund_sats = self._channelFundSats()
-                timeout_minutes = self._channelTimeoutMinutes()
-                logging.info(
-                    f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
-                    f'fund={fund_sats} sats timeout={timeout_minutes} min',
-                    color='cyan')
-                p2sh = await self.openChannel(
-                    receiver_pubkey=provider_wallet_pubkey,
-                    amount_sats=fund_sats,
-                    minutes=timeout_minutes,
-                    receiver_nostr_pubkey=provider_pubkey,
-                )
-                channel = await asyncio.to_thread(
-                    self.networkDB.get_channel, p2sh)
-                if not channel or channel['remainder_sats'] < price_sats:
-                    return
-            await self.sendChannelPayment(channel['p2sh_address'], price_sats, stream_name)
+            cadence = subscription.get('cadence_seconds') or 0
+            cooldown = cadence / 2 if cadence > 0 else 0
+            key = (stream_name, provider_pubkey)
+            now = time.time()
+            last_paid = self._paymentCooldowns.get(key, 0)
+            if cooldown > 0 and (now - last_paid) < cooldown:
+                # Inside cooldown — schedule one deferred payment at cooldown end
+                if key not in self._paymentDeferred:
+                    delay = cooldown - (now - last_paid)
+                    loop = asyncio.get_event_loop()
+                    self._paymentDeferred[key] = loop.call_later(
+                        delay,
+                        lambda k=key, s=stream_name, p=provider_pubkey:
+                            asyncio.ensure_future(
+                                self._channelPayDeferred(s, p)))
+                    logging.debug(
+                        f'Channel: deferred payment for {stream_name} '
+                        f'in {delay:.1f}s (cooldown)')
+                return
+            await self._channelPayNow(stream_name, provider_pubkey, price_sats)
         except Exception as e:
             logging.warning(f'Channel: pay-for-observation failed: {e}')
+
+    async def _channelPayDeferred(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+    ) -> None:
+        """Execute a deferred payment scheduled during cooldown."""
+        key = (stream_name, provider_pubkey)
+        self._paymentDeferred.pop(key, None)
+        try:
+            conn_rows = await asyncio.to_thread(self.networkDB.get_active)
+            subscription = next(
+                (s for s in conn_rows
+                 if s['stream_name'] == stream_name
+                 and s['provider_pubkey'] == provider_pubkey),
+                None)
+            if not subscription or subscription.get('price_per_obs', 0) == 0:
+                return
+            price_sats = subscription['price_per_obs']
+            await self._channelPayNow(stream_name, provider_pubkey, price_sats)
+        except Exception as e:
+            logging.warning(f'Channel: deferred payment failed: {e}')
+
+    async def _channelPayNow(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        price_sats: int,
+    ) -> None:
+        """Send a channel payment immediately and reset the cooldown timer.
+
+        Handles channel lookup, refund if exhausted, and open if none exists.
+        """
+        conn_rows = await asyncio.to_thread(self.networkDB.get_active)
+        subscription = next(
+            (s for s in conn_rows
+             if s['stream_name'] == stream_name
+             and s['provider_pubkey'] == provider_pubkey),
+            None)
+        provider_wallet_pubkey = (
+            subscription.get('provider_wallet_pubkey') if subscription else None)
+        if not provider_wallet_pubkey:
+            return
+        channels = await asyncio.to_thread(
+            self.networkDB.get_channels_as_sender)
+        channel = next(
+            (c for c in channels
+             if c['receiver_pubkey'] == provider_wallet_pubkey),
+            None)
+        if channel and channel['remainder_sats'] < price_sats:
+            fund_sats = self._channelFundSats()
+            logging.info(
+                f'Channel: refunding {channel["p2sh_address"]} '
+                f'(remainder={channel["remainder_sats"]}) '
+                f'with {fund_sats} sats',
+                color='cyan')
+            await self.refundChannel(channel['p2sh_address'], fund_sats)
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, channel['p2sh_address'])
+            if not channel or channel['remainder_sats'] < price_sats:
+                return
+        elif not channel:
+            fund_sats = self._channelFundSats()
+            timeout_minutes = self._channelTimeoutMinutes()
+            logging.info(
+                f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
+                f'fund={fund_sats} sats timeout={timeout_minutes} min',
+                color='cyan')
+            p2sh = await self.openChannel(
+                receiver_pubkey=provider_wallet_pubkey,
+                amount_sats=fund_sats,
+                minutes=timeout_minutes,
+                receiver_nostr_pubkey=provider_pubkey,
+            )
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, p2sh)
+            if not channel or channel['remainder_sats'] < price_sats:
+                return
+        await self.sendChannelPayment(
+            channel['p2sh_address'], price_sats, stream_name)
+        key = (stream_name, provider_pubkey)
+        self._paymentCooldowns[key] = time.time()
 
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
@@ -753,10 +828,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Mark as settled so the tombstone fallback doesn't double-reset
         self._settledChannels.add(s.p2sh_address)
         if s.new_funding_vout == -1 or s.new_locked_sats == 0:
-            # Channel fully drained — delete it; next observation auto-opens a new one
-            await asyncio.to_thread(self.networkDB.delete_channel, s.p2sh_address)
+            # Channel fully drained — remainder is already 0 from sender's
+            # micropayment tracking; next observation will trigger refund.
             logging.info(
-                f'Channel: {s.p2sh_address} fully drained, deleted',
+                f'Channel: {s.p2sh_address} fully drained, awaiting refund',
                 color='yellow')
         else:
             # Update to new UTXO; cumulative tracking resets to 0
@@ -811,13 +886,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Channel: tombstone listener stopped on {relay_url}: {e}')
 
     async def _channelHandleTombstone(self, p2sh_address: str):
-        """Fallback reset: delete a sender channel when its tombstone arrives.
+        """Fallback reset for sender when a tombstone arrives.
 
         If KIND_CHANNEL_SETTLED was already received and processed, the channel
-        is in _settledChannels and we skip deletion — the settlement already
-        handled the proper Option A UTXO update. If the settlement was NOT
-        received, this is the safety net: delete the stale channel so the next
-        observation auto-opens a fresh one.
+        is in _settledChannels and we skip. Otherwise this is the safety net:
+        Alice claimed (spending the UTXO) but we missed the settlement, so
+        our funding_txid is stale. Zero remainder_sats so the next observation
+        triggers a refund instead of building txs against a spent UTXO.
         """
         if p2sh_address in self._settledChannels:
             self._settledChannels.discard(p2sh_address)
@@ -826,10 +901,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.networkDB.get_channel, p2sh_address)
         if not channel or not channel.get('is_sender'):
             return
-        await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+        await asyncio.to_thread(
+            self.networkDB.update_channel_remainder, p2sh_address, 0)
         logging.info(
-            f'Channel: {p2sh_address} tombstone fallback reset — '
-            f'deleted, next observation will re-open',
+            f'Channel: {p2sh_address} tombstone fallback — '
+            f'remainder zeroed, next observation will refund',
             color='yellow')
 
     async def _channelOpenListen(self, relay_url: str):
@@ -878,6 +954,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             co.blocks,
             co.minutes,
             sender_nostr_pubkey=co.sender_nostr_pubkey,
+            receiver_nostr_pubkey=self.nostrPubkey or '',
         )
         logging.info(
             f'Channel: registered inbound channel {co.p2sh_address} '
@@ -974,6 +1051,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from functools import partial as funcpartial
         tx = CMutableTransaction.deserialize(
             bytes.fromhex(commitment.partial_tx_hex))
+        # Ensure all sub-objects are mutable (deserialize may yield immutable)
+        tx.vin = [CMutableTxIn(v.prevout, v.scriptSig, v.nSequence)
+                   for v in tx.vin]
+        tx.vout = [CMutableTxOut(v.nValue, v.scriptPubKey)
+                    for v in tx.vout]
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
         sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
         # ── Fee estimation ──────────────────────────────────────────────────
@@ -1117,10 +1199,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{txid[:12]}…:{change_vout} ({change_sats} sats)',
                 color='cyan')
         else:
-            # No change output — channel fully drained
-            await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+            # No change output — channel fully drained on receiver side
             logging.info(
-                f'Channel: {p2sh_address} fully drained, deleted',
+                f'Channel: {p2sh_address} fully drained, awaiting refund',
                 color='yellow')
         await asyncio.to_thread(
             self.networkDB.clear_pending_commitment, p2sh_address)
@@ -1238,19 +1319,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         satori_vin_idx = len(new_vins)
         new_vins.append(satori_txin)
 
-        # Add SATORI fee output to Mundo
+        # Add SATORI change output to receiver (if any) — must come BEFORE
+        # Mundo fee so that vout[-2]=fee matches _verifyClaimAddress expectation
         from evrmore.core.script import OP_EVR_ASSET, OP_DROP
-        fee_script = CScript([
-            *CEvrmoreAddress(mundo_satori_fee_addr).to_scriptPubKey(),
-            OP_EVR_ASSET,
-            bytes.fromhex(
-                AssetTransaction.satoriHex(self.wallet.symbol) +
-                TxUtils.padHexStringTo8Bytes(
-                    TxUtils.intToLittleEndianHex(mundo_satori_fee))),
-            OP_DROP])
-        new_vouts.append(CMutableTxOut(0, fee_script))
-
-        # Add SATORI change output to receiver (if any)
         satori_change = satori_value - mundo_satori_fee
         if satori_change > 0:
             change_script = CScript([
@@ -1262,6 +1333,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         TxUtils.intToLittleEndianHex(satori_change))),
                 OP_DROP])
             new_vouts.append(CMutableTxOut(0, change_script))
+
+        # Add SATORI fee output to Mundo (vout[-2] position)
+        fee_script = CScript([
+            *CEvrmoreAddress(mundo_satori_fee_addr).to_scriptPubKey(),
+            OP_EVR_ASSET,
+            bytes.fromhex(
+                AssetTransaction.satoriHex(self.wallet.symbol) +
+                TxUtils.padHexStringTo8Bytes(
+                    TxUtils.intToLittleEndianHex(mundo_satori_fee))),
+            OP_DROP])
+        new_vouts.append(CMutableTxOut(0, fee_script))
 
         # Add EVR change output for Mundo
         if mundo_evr_change_addr and mundo_evr_change_amt > 0:
@@ -1454,6 +1536,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             blocks,
             minutes,
             sender_nostr_pubkey=self.nostrPubkey or '',
+            receiver_nostr_pubkey=receiver_nostr_pubkey or '',
         )
         logging.info(
             f'Channel: opened {p2sh_address} '
@@ -1483,6 +1566,54 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     logging.warning(
                         f'Channel: failed to announce open: {e}')
         return p2sh_address
+
+    async def refundChannel(
+        self,
+        p2sh_address: str,
+        amount_sats: int = None,
+    ) -> None:
+        """Send new SATORI to an existing channel's P2SH address (sender side).
+
+        Channels are persistent — when drained, they are refunded rather than
+        deleted and reopened.  Uses the stored redeem_script to call
+        producePaymentChannelFromScript, then updates the DB with the new
+        funding UTXO.
+
+        Args:
+            p2sh_address: The channel to refund
+            amount_sats: Amount to send (defaults to _channelFundSats())
+        """
+        channel = await asyncio.to_thread(
+            self.networkDB.get_channel, p2sh_address)
+        if not channel:
+            raise ValueError(f'Unknown channel: {p2sh_address}')
+        amount_sats = amount_sats or self._channelFundSats()
+        amount_satori = amount_sats / 1e8
+        # Refresh wallet UTXOs so _gatherSatoriUnspents sees current state
+        await asyncio.to_thread(self.wallet.getReadyToSend)
+        from evrmore.core.script import CScript
+        redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
+        script_payload = {
+            'redeem_script': str(redeem_script),
+            'redeem_script_hex': channel['redeem_script'],
+            'redeem_script_size': len(redeem_script),
+            'p2sh_address': p2sh_address,
+            'amount': amount_satori,
+        }
+        _txhex, txid, result = await asyncio.to_thread(
+            self.wallet.producePaymentChannelFromScript,
+            redeemScript=redeem_script,
+            scriptPayload=script_payload,
+            broadcast=True,
+        )
+        funding_vout = result.get('funding_vout') or 0
+        await asyncio.to_thread(
+            self.networkDB.update_channel_funding,
+            p2sh_address, txid, funding_vout, amount_sats)
+        logging.info(
+            f'Channel: refunded {p2sh_address} '
+            f'amount={amount_sats} sats txid={txid}',
+            color='green')
 
     async def sendChannelPayment(
         self,
@@ -1518,9 +1649,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         locked_sats = channel['locked_sats']
         cumulative_sats = (
             locked_sats - channel['remainder_sats'] + pay_amount_sats)
+        # The channel stores the receiver's 33-byte EVR wallet pubkey, but the
+        # partial tx output needs a P2PKH address string.
+        receiver_address = EvrmoreWallet.generateAddress(
+            channel['receiver_pubkey'])
         # Build partial tx with ONLY the P2SH input and SATORI outputs.
         # No EVR inputs are included — the receiver resolves the fee via
         # 3-path logic so the sender doesn't need EVR to send micropayments.
+        if self.wallet.divisibility == 0:
+            await asyncio.to_thread(self.wallet.getReadyToSend)
         def _build_partial_tx():
             sat_sats = TxUtils.roundSatsDownToDivisibility(
                 sats=cumulative_sats,
@@ -1530,7 +1667,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 gatheredSatoriSats=locked_sats,
                 changeAddress=channel['p2sh_address'])
             return self.wallet._compileClaimOnP2SHMultiSigStart(
-                toAddress=channel['receiver_pubkey'],
+                toAddress=receiver_address,
                 satoriSats=sat_sats,
                 feeOverride=None,
                 fundingTxIds=[channel['funding_txid']],
@@ -1558,9 +1695,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             timestamp=int(time.time()),
             stream_name=stream_name,
         )
+        # The Nostr `p` tag must be a 32-byte x-only Nostr pubkey — that is a
+        # different value from the 33-byte EVR wallet pubkey stored in
+        # channel['receiver_pubkey'], so we thread the persisted nostr pubkey
+        # from the channel row into the library call.
+        receiver_nostr_pubkey = channel.get('receiver_nostr_pubkey') or ''
         for client in self._networkClients.values():
             try:
-                await client.publish_commitment(commitment)
+                await client.publish_commitment(
+                    commitment, receiver_nostr_pubkey)
             except Exception as e:
                 logging.warning(f'Channel: failed to publish commitment: {e}')
         # Update sender's remainder so cumulative tracking is correct
@@ -1661,7 +1804,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 csv_value=csv_value,
                 sat_sats=sat_sats)
 
-        await asyncio.to_thread(self.networkDB.delete_channel, p2sh_address)
+        # Zero the remainder so no payments are attempted against the spent UTXO.
+        # The rest of the channel row (keys, redeem_script, etc.) stays intact.
+        await asyncio.to_thread(
+            self.networkDB.update_channel_remainder, p2sh_address, 0)
         logging.info(
             f'Channel: reclaimed {p2sh_address} — txid={txid}',
             color='yellow')
