@@ -2784,9 +2784,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
 
         # Get relay list from central, fall back to known relays from DB
+        import random
         try:
             relays = await asyncio.to_thread(self.server.getRelays)
             relay_urls = [r['relay_url'] for r in relays]
+            random.shuffle(relay_urls)
         except Exception as e:
             logging.warning(f'Could not fetch relay list from central: {e}')
             relay_urls = list({sub['relay_url'] for sub in desired})
