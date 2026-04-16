@@ -408,16 +408,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # Fetch observation timestamps so scoring modules can enforce
             # timing windows (e.g. disqualify predictions submitted too
             # close to the observation they're predicting).
+            #
+            # For horizon > 1 (step-ahead predictions), the relevant
+            # submission window starts at the trigger observation
+            # (seq_num - horizon), not the immediately preceding one.
+            # The window runs from the trigger to the target observation,
+            # so the 90% late-cutoff scales naturally with horizon.
+            horizon = competition.get('horizon', 1)
             cur_obs = await asyncio.to_thread(
                 self.networkDB.get_observation_by_seq,
                 stream_name, provider_pubkey, seq_num)
             observed_at = (cur_obs or {}).get('observed_at', 0)
-            prev_obs = None
-            if seq_num > 1:
-                prev_obs = await asyncio.to_thread(
+            trigger_seq = seq_num - horizon
+            trigger_obs = None
+            if trigger_seq >= 1:
+                trigger_obs = await asyncio.to_thread(
                     self.networkDB.get_observation_by_seq,
-                    stream_name, provider_pubkey, seq_num - 1)
-            prev_observed_at = (prev_obs or {}).get('observed_at', 0)
+                    stream_name, provider_pubkey, trigger_seq)
+            prev_observed_at = (trigger_obs or {}).get('observed_at', 0)
 
             from satorineuron.competition_scoring import compute_payouts
             payouts = await asyncio.to_thread(
@@ -803,11 +811,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     predicted_float = None
                 if predicted_float is not None:
                     for j in joined:
+                        # Look up competition horizon so we target the right
+                        # future observation.  horizon=1 (default) means
+                        # "predict the next value"; horizon=2 means "predict
+                        # two steps ahead", etc.
+                        comp = await asyncio.to_thread(
+                            self.networkDB.get_competition,
+                            stream_name, provider_pubkey,
+                            j['host_pubkey'])
+                        horizon = (comp or {}).get('horizon', 1)
                         await self.submitPrediction(
                             stream_name=stream_name,
                             stream_provider_pubkey=provider_pubkey,
                             host_pubkey=j['host_pubkey'],
-                            seq_num=observation.seq_num,
+                            seq_num=observation.seq_num + horizon,
                             predicted_value=predicted_float,
                         )
         except Exception as e:

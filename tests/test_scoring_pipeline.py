@@ -233,3 +233,113 @@ class TestComputePayouts:
         ]
         result = compute_payouts(comp, preds, observed_value=100.0)
         assert result.get('close', 0) > result.get('far', 0)
+
+
+# ── Tests: late-cutoff timing with horizon ────────────────────────────────────
+
+class TestLateCutoffTiming:
+    """Verify the 90% late-cutoff in the MAE scorer with different horizons.
+
+    The late-cutoff window runs from prev_observed_at (trigger observation)
+    to observed_at (target observation).  For horizon=1, this is a single-step
+    window; for horizon=2, it spans two steps — giving predictors a wider
+    but proportionally equivalent window.
+    """
+
+    def test_prediction_before_deadline_passes(self):
+        mod = _load_scorer('mae')
+        payload = {
+            'observed_value': 100.0,
+            'observed_at': 1000,
+            'prev_observed_at': 900,
+            'predictions': [
+                {'predictor_pubkey': 'alice', 'predicted_value': 99.0,
+                 'received_at': 980},   # 80% into window — before 90% cutoff
+            ],
+            'pay_per_obs_sats': 1000,
+            'paid_predictors': 1,
+            'scoring_params': {},
+        }
+        result = mod.score(payload)
+        assert 'alice' in result
+
+    def test_prediction_after_deadline_disqualified(self):
+        mod = _load_scorer('mae')
+        payload = {
+            'observed_value': 100.0,
+            'observed_at': 1000,
+            'prev_observed_at': 900,
+            'predictions': [
+                {'predictor_pubkey': 'alice', 'predicted_value': 99.0,
+                 'received_at': 995},   # 95% into window — past 90% cutoff
+            ],
+            'pay_per_obs_sats': 1000,
+            'paid_predictors': 1,
+            'scoring_params': {},
+        }
+        result = mod.score(payload)
+        assert result == {}
+
+    def test_horizon2_wider_window_accepts_early_prediction(self):
+        """With horizon=2, the window spans two steps (trigger to target).
+
+        prev_observed_at = trigger observation at t=800
+        observed_at = target observation at t=1000 (two steps later)
+        Window = 200, deadline = 800 + 200*0.9 = 980
+
+        A prediction at t=850 (submitted shortly after trigger) passes.
+        """
+        mod = _load_scorer('mae')
+        payload = {
+            'observed_value': 100.0,
+            'observed_at': 1000,
+            'prev_observed_at': 800,     # trigger obs (2 steps back)
+            'predictions': [
+                {'predictor_pubkey': 'alice', 'predicted_value': 99.0,
+                 'received_at': 850},    # shortly after trigger
+            ],
+            'pay_per_obs_sats': 1000,
+            'paid_predictors': 1,
+            'scoring_params': {},
+        }
+        result = mod.score(payload)
+        assert 'alice' in result
+
+    def test_horizon2_late_prediction_disqualified(self):
+        """With horizon=2 (window 200), a prediction at 95% is disqualified.
+
+        deadline = 800 + 200*0.9 = 980.  Received at 990 → disqualified.
+        """
+        mod = _load_scorer('mae')
+        payload = {
+            'observed_value': 100.0,
+            'observed_at': 1000,
+            'prev_observed_at': 800,
+            'predictions': [
+                {'predictor_pubkey': 'alice', 'predicted_value': 99.0,
+                 'received_at': 990},
+            ],
+            'pay_per_obs_sats': 1000,
+            'paid_predictors': 1,
+            'scoring_params': {},
+        }
+        result = mod.score(payload)
+        assert result == {}
+
+    def test_no_timing_data_skips_cutoff(self):
+        """If prev_observed_at or observed_at is 0, no timing check happens."""
+        mod = _load_scorer('mae')
+        payload = {
+            'observed_value': 100.0,
+            'observed_at': 0,
+            'prev_observed_at': 0,
+            'predictions': [
+                {'predictor_pubkey': 'alice', 'predicted_value': 99.0,
+                 'received_at': 999999},
+            ],
+            'pay_per_obs_sats': 1000,
+            'paid_predictors': 1,
+            'scoring_params': {},
+        }
+        result = mod.score(payload)
+        assert 'alice' in result
