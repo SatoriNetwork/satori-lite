@@ -405,9 +405,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not predictions:
                 return
 
+            # Fetch observation timestamps so scoring modules can enforce
+            # timing windows (e.g. disqualify predictions submitted too
+            # close to the observation they're predicting).
+            cur_obs = await asyncio.to_thread(
+                self.networkDB.get_observation_by_seq,
+                stream_name, provider_pubkey, seq_num)
+            observed_at = (cur_obs or {}).get('observed_at', 0)
+            prev_obs = None
+            if seq_num > 1:
+                prev_obs = await asyncio.to_thread(
+                    self.networkDB.get_observation_by_seq,
+                    stream_name, provider_pubkey, seq_num - 1)
+            prev_observed_at = (prev_obs or {}).get('observed_at', 0)
+
             from satorineuron.competition_scoring import compute_payouts
             payouts = await asyncio.to_thread(
-                compute_payouts, competition, predictions, observed_value)
+                compute_payouts, competition, predictions, observed_value,
+                observed_at, prev_observed_at)
 
             # Index predictions by pubkey so we can look up wallet pubkey
             preds_by_pubkey = {

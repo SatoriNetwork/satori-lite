@@ -5,15 +5,23 @@ Interface contract (all scoring modules must follow this):
     def score(payload: dict) -> dict[str, int]
 
 payload keys:
-    observed_value   float  — the actual observation value
-    predictions      list   — [{'predictor_pubkey': str, 'predicted_value': float}, ...]
-    pay_per_obs_sats int    — total sats budget for this observation
-    paid_predictors  int    — how many top predictors to pay
-    scoring_params   dict   — module-specific parameters (may be empty)
+    observed_value    float  — the actual observation value
+    observed_at       int    — unix timestamp of the current observation
+    prev_observed_at  int    — unix timestamp of the previous observation (0 if none)
+    predictions       list   — each entry is a dict:
+        predictor_pubkey   str   — who made the prediction
+        predicted_value    float — the predicted value
+        received_at        int   — unix timestamp when the host received it
+    pay_per_obs_sats  int    — total sats budget for this observation
+    paid_predictors   int    — how many top predictors to pay
+    scoring_params    dict   — module-specific parameters (may be empty)
 
 returns:
     dict mapping predictor_pubkey -> sats to pay (zero-value keys omitted)
     sum of values must not exceed pay_per_obs_sats
+
+Timing fields allow modules to enforce submission windows — e.g. disqualify
+predictions submitted too close to the observation they're predicting.
 """
 
 

@@ -33,13 +33,21 @@ def load_scorer(metric: str):
     return mod
 
 
-def build_payload(competition: dict, predictions: list, observed_value: float) -> dict:
+def build_payload(
+    competition: dict,
+    predictions: list,
+    observed_value: float,
+    observed_at: int = 0,
+    prev_observed_at: int = 0,
+) -> dict:
     """Build the payload dict passed to a scoring module's score() function.
 
     Args:
         competition: Row dict from the competitions table.
         predictions: List of row dicts from competition_predictions table.
         observed_value: The actual observed value for this seq_num.
+        observed_at: Unix timestamp of the current observation.
+        prev_observed_at: Unix timestamp of the previous observation (0 if none).
 
     Returns:
         Payload dict matching the scoring module interface contract.
@@ -47,10 +55,13 @@ def build_payload(competition: dict, predictions: list, observed_value: float) -
     scoring_params = json.loads(competition.get('scoring_params') or '{}')
     return {
         'observed_value': observed_value,
+        'observed_at': observed_at,
+        'prev_observed_at': prev_observed_at,
         'predictions': [
             {
                 'predictor_pubkey': p['predictor_pubkey'],
                 'predicted_value': float(p['predicted_value']),
+                'received_at': p.get('received_at', 0),
             }
             for p in predictions
         ],
@@ -60,13 +71,21 @@ def build_payload(competition: dict, predictions: list, observed_value: float) -
     }
 
 
-def compute_payouts(competition: dict, predictions: list, observed_value: float) -> dict:
+def compute_payouts(
+    competition: dict,
+    predictions: list,
+    observed_value: float,
+    observed_at: int = 0,
+    prev_observed_at: int = 0,
+) -> dict:
     """Run the scoring module for a competition and return payout amounts.
 
     Args:
         competition: Row dict from the competitions table (must have active=1).
         predictions: List of prediction row dicts for this seq_num.
         observed_value: The actual value to score against.
+        observed_at: Unix timestamp of the current observation.
+        prev_observed_at: Unix timestamp of the previous observation (0 if none).
 
     Returns:
         Dict mapping predictor_pubkey -> sats (only non-zero entries included).
@@ -85,7 +104,9 @@ def compute_payouts(competition: dict, predictions: list, observed_value: float)
         return {}
 
     try:
-        payload = build_payload(competition, predictions, observed_value)
+        payload = build_payload(
+            competition, predictions, observed_value,
+            observed_at, prev_observed_at)
         return {k: v for k, v in mod.score(payload).items() if v > 0}
     except Exception as e:
         logging.warning(f'Competition: scorer {metric} raised: {e}')
