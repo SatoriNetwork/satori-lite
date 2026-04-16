@@ -929,6 +929,7 @@
                                 <h6 class="mb-0" id="pubDrawerTitle">Publication Data</h6>
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-sm btn-outline-secondary" onclick="exportPubCsv()">Export CSV</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="editDataSource(pubDrawerStream.name)">Edit</button>
                                     <button class="btn btn-sm btn-outline-secondary" onclick="closePubDrawer()">Close</button>
                                 </div>
                             </div>
@@ -2619,6 +2620,10 @@
         const streamName = document.getElementById('dsStreamName').value.trim();
         const url = document.getElementById('dsUrl').value.trim();
         if (!streamName) { err.textContent = 'Stream name required'; return; }
+        const isEditing = document.getElementById('dsStreamName').readOnly;
+        if (!isEditing && pubsAllItems.some(p => p.stream_name === streamName)) {
+            err.textContent = 'A publication with this stream name already exists.'; return;
+        }
         // URL-dependent validation
         let cadence = 0;
         let parserType = '';
