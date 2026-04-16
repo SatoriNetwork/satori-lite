@@ -14,6 +14,7 @@ from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.server import SatoriServerClient
 from satorineuron import logging
 from satorineuron import config
+from satorineuron import VERSION
 from satorineuron.relay_manager import LocalRelayManager
 from satorineuron.init.wallet import WalletManager
 from satorineuron.structs.start import RunMode, StartupDagStruct
@@ -2775,7 +2776,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 # Register peer with central server
                 self.server.checkin(
                     vaultInfo=vaultInfo,
-                    nostrPubkey=self.nostrPubkey)
+                    nostrPubkey=self.nostrPubkey,
+                    version=VERSION)
 
                 logging.info("authenticated with central-lite", color="green")
                 break
