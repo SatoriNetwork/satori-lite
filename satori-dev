@@ -115,6 +115,7 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "  start       Start the neuron container"
     echo "  stop        Stop the neuron container"
     echo "  restart     Restart the neuron container"
+    echo "  watch       Hot-reload: restart on Python file changes (requires fswatch)"
     echo "  logs        Show container logs"
     echo "  status      Show container status"
     echo "  --help      Show this help"
@@ -123,6 +124,8 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "  ./satori-dev local          # Start with local central-lite"
     echo "  ./satori-dev local restart  # Restart with local central-lite"
     echo "  ./satori-dev restart        # Restart with remote central-lite"
+    echo "  ./satori-dev watch          # Watch .py files, restart on save"
+    echo "  ./satori-dev local watch    # Same, pointed at local central"
     echo ""
     echo "Development mode mounts local code directories:"
     echo "  ../satorilib/src, ./neuron-lite, ./engine-lite, ./web"
@@ -159,6 +162,45 @@ case "$COMMAND" in
         # Create fresh container
         create_container
         echo "Satori neuron restarted"
+        ;;
+    watch)
+        echo "Watching Python source files for changes (restart on save)..."
+        echo "  ./neuron-lite/**/*.py"
+        echo "  ./engine-lite/**/*.py"
+        echo "  ../satorilib/src/**/*.py"
+        echo "  (web templates reload automatically — no restart needed)"
+        echo "Press Ctrl+C to stop."
+        echo ""
+
+        if ! command -v fswatch &>/dev/null; then
+            echo "Error: fswatch is required."
+            echo "Install with: brew install fswatch"
+            exit 1
+        fi
+
+        if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+            echo "Error: Container '${CONTAINER_NAME}' is not running. Run './satori-dev' first."
+            exit 1
+        fi
+
+        LAST_RESTART_FILE="/tmp/satori_dev_last_restart"
+        echo "0" > "$LAST_RESTART_FILE"
+        DEBOUNCE=3  # seconds — collapse rapid saves into one restart
+
+        fswatch -r -e ".*" -i "\\.py$" \
+            "$(pwd)/neuron-lite" \
+            "$(pwd)/engine-lite" \
+            "$(pwd)/../satorilib/src" | while read changed_file; do
+            NOW=$(date +%s)
+            LAST=$(cat "$LAST_RESTART_FILE" 2>/dev/null || echo "0")
+            if (( NOW - LAST >= DEBOUNCE )); then
+                echo "$NOW" > "$LAST_RESTART_FILE"
+                echo "[$(date +%H:%M:%S)] Changed: $(basename "$changed_file")"
+                echo "[$(date +%H:%M:%S)] Restarting container..."
+                docker restart "$CONTAINER_NAME" >/dev/null
+                echo "[$(date +%H:%M:%S)] Ready. Watching..."
+            fi
+        done
         ;;
     logs)
         docker logs $CONTAINER_NAME --tail 100 -f

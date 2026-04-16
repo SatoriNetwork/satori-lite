@@ -38,6 +38,11 @@ def create_app(testing=False):
     ui_port = os.environ.get('SATORI_UI_PORT', '24601')
     app.config['SESSION_COOKIE_NAME'] = f'satori_session_{ui_port}'
 
+    # Enable template auto-reload in dev mode (no restart needed for HTML/CSS/JS)
+    if os.environ.get('SATORI_ENV') == 'dev':
+        app.config['TEMPLATES_AUTO_RELOAD'] = True
+        app.jinja_env.auto_reload = True
+
     # Server API URL (for proxying requests)
     from satorilib.config import get_api_url
     app.config['SATORI_API_URL'] = get_api_url()

@@ -2,7 +2,8 @@
 
     <!-- ── Brand ─────────────────────────────────────────── -->
     <div class="satori-brand">
-        <span class="satori-brand-mark">S</span>
+        <img src="{{ url_for('static', filename='img/satori-logo.svg') }}"
+             alt="Satori" class="satori-brand-logo">
         <div class="satori-brand-text">
             <span class="satori-brand-title">Satori</span>
             <span class="satori-brand-version">{{ version }}</span>
