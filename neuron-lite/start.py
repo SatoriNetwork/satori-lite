@@ -276,6 +276,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkClients[relay_url] = client
             self._networkSubscribed[relay_url] = set()
             logging.info(f'Network: connected to {relay_url}', color='green')
+            # Start channel-related listeners immediately on connect — they
+            # must run for pure publishers (no stream subscriptions) too, so
+            # senders can receive settlement/tombstone notifications from
+            # receivers who claim their channels.
+            self._networkEnsureChannelListener(relay_url)
+            self._networkEnsureChannelOpenListener(relay_url)
+            self._networkEnsureSettlementListener(relay_url)
+            self._networkEnsureTombstoneListener(relay_url)
             return client
         except Exception as e:
             logging.warning(f'Network: failed to connect to {relay_url}: {e}')
@@ -601,8 +609,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         client = self._networkClients.get(relay_url)
         if not client:
             return
+        logging.info(
+            f'Channel: settlement listener started on {relay_url}', color='cyan')
         try:
             async for inbound in client.settlements():
+                logging.info(
+                    f'Channel: received settlement on {relay_url} '
+                    f'p2sh={inbound.settlement.p2sh_address} '
+                    f'new_vout={inbound.settlement.new_funding_vout}',
+                    color='cyan')
                 await self._channelHandleSettlement(inbound)
         except asyncio.CancelledError:
             return
@@ -626,13 +641,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Channel: {s.p2sh_address} fully drained, awaiting refund',
                 color='yellow')
         else:
-            # Update to new UTXO; cumulative tracking resets to 0
+            # Update to new UTXO; cumulative tracking resets to 0.
+            # Use the settlement's timestamp so the sender's CSV-timer
+            # anchor matches the receiver's (Nostr delivery can be delayed).
             await asyncio.to_thread(
                 self.networkDB.update_channel_funding,
                 s.p2sh_address,
                 s.claim_txid,
                 s.new_funding_vout,
-                s.new_locked_sats)
+                s.new_locked_sats,
+                int(getattr(s, 'timestamp', 0)) or None)
             logging.info(
                 f'Channel: {s.p2sh_address} settled, new UTXO '
                 f'{s.claim_txid[:12]}…:{s.new_funding_vout} '
@@ -674,9 +692,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Alice claimed (spending the UTXO) but we missed the settlement, so
         our funding_txid is stale. Zero remainder_sats so the next observation
         triggers a refund instead of building txs against a spent UTXO.
+
+        Note: do NOT discard the _settledChannels marker here — multiple
+        tombstones arrive (one per relay) for the same claim, and popping the
+        marker after the first would cause subsequent tombstones to wrongly
+        zero out a channel the settlement already refreshed.
         """
         if p2sh_address in self._settledChannels:
-            self._settledChannels.discard(p2sh_address)
             return  # settlement already handled this properly
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
@@ -721,9 +743,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.networkDB.get_channel, co.p2sh_address)
         # Ignore replays: same P2SH + same funding_txid means we already have it.
         # A new funding_txid means the sender refunded/reopened — accept the
-        # update so the CSV timer and state reflect the new on-chain UTXO.
-        if existing and existing.get('funding_txid') == co.funding_txid:
-            return
+        # update ONLY if the announcement's timestamp is newer than what we
+        # already have. This prevents Nostr history replays from overwriting
+        # a newer on-chain state (e.g. a UTXO created by our own claim).
+        if existing:
+            if existing.get('funding_txid') == co.funding_txid:
+                return
+            announce_ts = int(getattr(co, 'timestamp', 0))
+            if announce_ts and announce_ts <= int(existing.get('created_at') or 0):
+                logging.info(
+                    f'Channel: ignoring stale channel_open for {co.p2sh_address} '
+                    f'(announce_ts={announce_ts} <= local={existing.get("created_at")})',
+                    color='yellow')
+                return
         await asyncio.to_thread(
             self.networkDB.save_channel,
             co.p2sh_address,
@@ -739,6 +771,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             co.minutes,
             sender_nostr_pubkey=co.sender_nostr_pubkey,
             receiver_nostr_pubkey=self.nostrPubkey or '',
+            created_at=int(getattr(co, 'timestamp', 0)) or None,
         )
         logging.info(
             f'Channel: {"updated" if existing else "registered inbound"} '
@@ -817,10 +850,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             The broadcast txid
         """
         from satorilib.satori_nostr.models import ChannelCommitment, ChannelSettlement
+        # Refresh UTXOs so PATH B can see our EVR for the mining fee
+        await asyncio.to_thread(self.wallet.getUnspents)
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
             raise ValueError(f'Unknown channel: {p2sh_address}')
+        expires_at = self._channelExpiresAt(channel)
+        if expires_at and int(time.time()) >= expires_at:
+            raise ValueError(
+                f'Channel {p2sh_address} has expired — the sender can now '
+                f'reclaim on-chain, so claiming here would race that reclaim '
+                f'and is not safe. Claim before the timeout next time.')
         commitment_json = channel.get('pending_commitment')
         if not commitment_json:
             raise ValueError(f'No pending commitment for channel: {p2sh_address}')
@@ -861,6 +902,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 sender_sig=sender_sigs[0],
                 receiver_sig=sig)
 
+        def _check_broadcast(result):
+            from satorilib.wallet.concepts.transaction import TransactionFailure
+            if isinstance(result, dict) and result.get('code') is not None:
+                raise TransactionFailure(
+                    f'broadcast rejected: {result.get("message", result)}')
+            return result
+
         if deficit <= 0:
             # ── PATH A: fee already embedded ────────────────────────────────
             our_sig = await asyncio.to_thread(
@@ -870,7 +918,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self.wallet._compileClaimOnP2SHMultiSigEnd,
                 tx, redeem_script, _make_redeem_params(our_sig), 1, None)
             tx_hex = tx.serialize().hex()
-            txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
+            txid = _check_broadcast(
+                await asyncio.to_thread(self.wallet.broadcast, tx_hex))
             logging.info(
                 f'Channel: PATH A claimed {p2sh_address} '
                 f'({commitment.pay_amount_sats} sats) — txid={txid}',
@@ -930,7 +979,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     tx, redeem_script, _make_redeem_params(our_sig), 1,
                     [evr_script])
                 tx_hex = tx.serialize().hex()
-                txid = await asyncio.to_thread(self.wallet.broadcast, tx_hex)
+                txid = _check_broadcast(
+                    await asyncio.to_thread(self.wallet.broadcast, tx_hex))
                 logging.info(
                     f'Channel: PATH B claimed {p2sh_address} '
                     f'({commitment.pay_amount_sats} sats, EVR fee {required_fee_b}) '
@@ -967,18 +1017,25 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # SATORI outputs have nValue=0 in the Python Evrmore library;
         # use commitment.remainder_sats for the canonical SATORI amount.
         change_sats = commitment.remainder_sats
-        # Determine which vout carries the P2SH change by script comparison.
-        # For PATH A/B we have tx in memory; for PATH C rebuild from commitment.
+        # Determine which vout carries the P2SH change. SATORI asset outputs
+        # are `<p2sh_script><asset_data>` — i.e. the scriptPubKey STARTS with
+        # the P2SH locking bytes. Exact equality would miss those, so we
+        # check the prefix.
         check_tx = CMutableTransaction.deserialize(
             bytes.fromhex(commitment.partial_tx_hex))
         for i, out in enumerate(check_tx.vout):
-            if bytes(out.scriptPubKey) == p2sh_script:
+            spk = bytes(out.scriptPubKey)
+            if spk == p2sh_script or spk.startswith(p2sh_script):
                 change_vout = i
                 break
+        # Single timestamp shared between local DB update and settlement publish
+        # so sender and receiver agree on when the CSV timer reset.
+        settlement_ts = int(time.time())
         if change_vout >= 0 and change_sats > 0:
             await asyncio.to_thread(
                 self.networkDB.update_channel_funding,
-                p2sh_address, txid, change_vout, change_sats)
+                p2sh_address, txid, change_vout, change_sats,
+                settlement_ts)
             logging.info(
                 f'Channel: {p2sh_address} new UTXO '
                 f'{txid[:12]}…:{change_vout} ({change_sats} sats)',
@@ -999,13 +1056,26 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 claim_txid=txid,
                 new_funding_vout=change_vout,
                 new_locked_sats=change_sats,
-                timestamp=int(time.time()),
+                timestamp=settlement_ts,
             )
-            for client in self._networkClients.values():
+            published_count = 0
+            for relay_url, client in self._networkClients.items():
                 try:
                     await client.publish_settlement(settlement, sender_nostr_pubkey)
+                    published_count += 1
+                    logging.info(
+                        f'Channel: published settlement on {relay_url} '
+                        f'to sender {sender_nostr_pubkey[:16]}…', color='cyan')
                 except Exception as e:
-                    logging.warning(f'Channel: failed to publish settlement: {e}')
+                    logging.warning(
+                        f'Channel: failed to publish settlement on {relay_url}: {e}')
+            if published_count == 0:
+                logging.error(
+                    f'Channel: settlement for {p2sh_address} published to 0 relays')
+        else:
+            logging.warning(
+                f'Channel: {p2sh_address} has no sender_nostr_pubkey — '
+                f'cannot notify sender of settlement')
         # Tombstone the commitment on all relays
         for client in self._networkClients.values():
             try:
@@ -1266,9 +1336,67 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """Return the configured channel funding amount in sats (default 1 SATORI)."""
         return int(config.get().get('channel_fund_sats', 100_000_000))
 
+    def _channelFetchUtxoSatori(
+        self,
+        txid: str,
+        vout: int,
+        fallback_sats: int,
+    ) -> int:
+        """Parse the broadcast tx's SATORI asset output to get the exact
+        on-chain amount. Falls back to the requested amount on any error.
+        """
+        try:
+            raw = self.wallet.electrumx.api.sendRequest(
+                method='blockchain.transaction.get',
+                params=[txid, True])
+            if not isinstance(raw, dict):
+                return fallback_sats
+            vouts = raw.get('vout') or []
+            if vout >= len(vouts):
+                return fallback_sats
+            asm = vouts[vout].get('scriptPubKey', {}).get('asm', '')
+            # Asset data hex comes after 'OP_EVR_ASSET '. Format:
+            # <len><'evrt'><asset_name_len><asset_name><8-byte LE amount>...
+            marker = 'OP_EVR_ASSET '
+            idx = asm.find(marker)
+            if idx < 0:
+                return fallback_sats
+            asset_hex = asm[idx + len(marker):].split()[0]
+            # skip 1 byte length, 4 bytes 'evrt' (total 5 bytes = 10 hex)
+            data = asset_hex[10:]
+            # skip asset name: 1 byte length + name
+            name_len = int(data[:2], 16)
+            amount_hex = data[2 + 2 * name_len : 2 + 2 * name_len + 16]
+            # little-endian to int
+            amount = int.from_bytes(bytes.fromhex(amount_hex), 'little')
+            return amount
+        except Exception as e:
+            logging.warning(f'Channel: could not parse UTXO amount for {txid[:12]}: {e}')
+            return fallback_sats
+
     def _channelTimeoutMinutes(self) -> int:
         """Return the configured channel lifetime in minutes (default 90 days)."""
         return int(config.get().get('channel_timeout_minutes', 129600))
+
+    @staticmethod
+    def _channelExpiresAt(channel: dict) -> int:
+        """Unix time after which the CSV lock is (best-effort) satisfied.
+
+        Uses the real CSV-rounded seconds (512-second granularity for time-
+        locks, ~60-second approximation for block-locks). Returns 0 if the
+        channel lacks a created_at or a timeout spec.
+        """
+        created_at = int(channel.get('created_at') or 0)
+        if not created_at:
+            return 0
+        minutes = channel.get('minutes')
+        blocks = channel.get('blocks')
+        if minutes:
+            units = max(1, math.ceil(float(minutes) * 60 / 512))
+            return created_at + units * 512
+        if blocks:
+            return created_at + int(blocks) * 60
+        return 0
 
     async def openChannel(
         self,
@@ -1309,6 +1437,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             True,       # broadcast
         )
         p2sh_address = script_payload['p2sh_address']
+        # Persist the actual SATORI amount that landed in the funding UTXO, not
+        # the user's requested amount. Query the broadcast tx's output to get
+        # the exact on-chain value — producePaymentChannel's internal rounding
+        # can shift a sat, and every subsequent commitment would fail to
+        # balance inputs/outputs on-chain if we stored the request.
+        funding_vout = script_payload['funding_vout'] or 0
+        actual_locked = await asyncio.to_thread(
+            self._channelFetchUtxoSatori,
+            script_payload['funding_txid'],
+            funding_vout,
+            amount_sats)
         await asyncio.to_thread(
             self.networkDB.save_channel,
             p2sh_address,
@@ -1317,9 +1456,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             script_payload['redeem_script_hex'],
             script_payload['funding_txid'],
             script_payload['funding_vout'] or 0,
-            amount_sats,
-            amount_sats,  # remainder starts equal to locked
-            True,         # is_sender
+            actual_locked,
+            actual_locked,  # remainder starts equal to locked
+            True,            # is_sender
             blocks,
             minutes,
             sender_nostr_pubkey=self.nostrPubkey or '',
@@ -1339,7 +1478,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 redeem_script=script_payload['redeem_script_hex'],
                 funding_txid=script_payload['funding_txid'],
                 funding_vout=script_payload['funding_vout'] or 0,
-                locked_sats=amount_sats,
+                locked_sats=actual_locked,
                 blocks=blocks,
                 minutes=minutes,
                 timestamp=int(time.time()),
@@ -1394,9 +1533,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             broadcast=True,
         )
         funding_vout = result.get('funding_vout') or 0
+        # Use the actual on-chain UTXO amount to avoid divisibility rounding
+        # discrepancies between our request and what actually landed on-chain.
+        actual_locked = await asyncio.to_thread(
+            self._channelFetchUtxoSatori, txid, funding_vout, amount_sats)
+        # Single shared timestamp for local DB + announcement so sender
+        # and receiver agree on the CSV-timer anchor.
+        refund_ts = int(time.time())
         await asyncio.to_thread(
             self.networkDB.update_channel_funding,
-            p2sh_address, txid, funding_vout, amount_sats)
+            p2sh_address, txid, funding_vout, actual_locked, refund_ts)
         logging.info(
             f'Channel: refunded {p2sh_address} '
             f'amount={amount_sats} sats txid={txid}',
@@ -1414,10 +1560,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 redeem_script=channel['redeem_script'],
                 funding_txid=txid,
                 funding_vout=funding_vout,
-                locked_sats=amount_sats,
+                locked_sats=actual_locked,
                 blocks=channel.get('blocks'),
                 minutes=channel.get('minutes'),
-                timestamp=int(time.time()),
+                timestamp=refund_ts,
                 sender_nostr_pubkey=self.nostrPubkey or '',
             )
             for client in self._networkClients.values():
@@ -1451,6 +1597,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.networkDB.get_channel, p2sh_address)
         if not channel:
             raise ValueError(f'Unknown channel: {p2sh_address}')
+        expires_at = self._channelExpiresAt(channel)
+        if expires_at and int(time.time()) >= expires_at:
+            raise ValueError(
+                f'Channel {p2sh_address} has expired — the sender can now '
+                f'reclaim, so new commitments would race that reclaim and '
+                f'are not safe to send')
         if pay_amount_sats > channel['remainder_sats']:
             raise ValueError(
                 f'Pay amount {pay_amount_sats} exceeds channel remainder '
@@ -1619,8 +1771,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         try:
             txid = _check_broadcast(await asyncio.to_thread(_build_standard_reclaim))
-        except TransactionFailure:
-            # PATH B: sender has no EVR — fall back to Mundo
+        except TransactionFailure as e:
+            err = str(e).lower()
+            # Chain-side rejections that Mundo fallback cannot help with
+            if 'non-final' in err or 'nonfinal' in err:
+                raise TransactionFailure(
+                    'reclaim not yet valid on-chain — the CSV lock uses '
+                    'median-time-past which lags real time by ~30-60 min. '
+                    'The UI shows "expired" at the nominal timeout, but the '
+                    'network will only accept the reclaim once enough blocks '
+                    'have confirmed past that time. Try again later.')
+            if 'broadcast rejected' in err:
+                raise
+            # Otherwise assume EVR gathering failed → PATH B via Mundo
             txid = await self._reclaimChannelViaMundo(
                 channel=channel,
                 redeem_script=redeem_script,

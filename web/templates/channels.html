@@ -323,9 +323,16 @@ function fmtDuration(secs) {
 }
 
 function channelExpiresAt(ch) {
+  // Matches the on-chain CSV-rounded boundary: 512-second granularity for
+  // time-locks (ceil up), ~60-second approximation per block for block-locks.
+  // Note: on-chain mempool uses median-time-past, which lags real time by
+  // 30-60 min, so reclaim may remain "non-final" for a while after this.
   if (!ch.created_at) return null;
-  if (ch.minutes) return ch.created_at + ch.minutes * 60;
-  if (ch.blocks)  return ch.created_at + ch.blocks * 600;
+  if (ch.minutes) {
+    const units = Math.max(1, Math.ceil(ch.minutes * 60 / 512));
+    return ch.created_at + units * 512;
+  }
+  if (ch.blocks)  return ch.created_at + ch.blocks * 60;
   return null;
 }
 
@@ -394,19 +401,56 @@ function showAlert(msg, type='danger') {
 let _cachedSending = [];
 let _cachedReceiving = [];
 
-async function loadChannels() {
+// Fields that actually affect the rendered rows. Ignoring other fields keeps
+// polling cheap — if nothing visible changed we skip the DOM re-render so open
+// detail panels and hover state aren't disturbed.
+const _RENDER_FIELDS = [
+  'p2sh_address','locked_sats','remainder_sats','created_at','minutes','blocks',
+  'pending_commitment','receiver_pubkey','sender_pubkey','funding_txid','funding_vout',
+];
+function _channelsChanged(a, b) {
+  if (a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    for (const f of _RENDER_FIELDS) {
+      if (a[i][f] !== b[i][f]) return true;
+    }
+  }
+  return false;
+}
+
+async function loadChannels(opts) {
+  const silent = !!(opts && opts.silent);
   try {
     const resp = await fetch('/api/channels');
     const data = await resp.json();
-    if (data.error) { showAlert(data.error); return; }
-    _cachedSending = data.sending || [];
-    _cachedReceiving = data.receiving || [];
-    renderSending(_cachedSending);
-    renderReceiving(_cachedReceiving);
+    if (data.error) { if (!silent) showAlert(data.error); return; }
+    const newSending = data.sending || [];
+    const newReceiving = data.receiving || [];
+    const sendChanged = _channelsChanged(_cachedSending, newSending);
+    const recvChanged = _channelsChanged(_cachedReceiving, newReceiving);
+    _cachedSending = newSending;
+    _cachedReceiving = newReceiving;
+    if (!sendChanged && !recvChanged && silent) return;
+    // Preserve which detail panels are open across the re-render.
+    const openDetails = new Set();
+    document.querySelectorAll('.detail-row').forEach(r => {
+      if (r.style.display !== 'none') openDetails.add(r.id);
+    });
+    if (sendChanged || !silent) renderSending(_cachedSending);
+    if (recvChanged || !silent) renderReceiving(_cachedReceiving);
+    openDetails.forEach(id => {
+      const row = document.getElementById(id);
+      if (row) row.style.display = 'table-row';
+    });
   } catch(e) {
-    showAlert('Failed to load channels: ' + e);
+    if (!silent) showAlert('Failed to load channels: ' + e);
   }
 }
+
+// Background poll — surfaces remote state (incoming commitments, settlements,
+// tombstones) without requiring a manual refresh. Silent so transient network
+// blips don't pop alerts.
+setInterval(() => loadChannels({ silent: true }), 5000);
 
 // Tick every second — update time-left cells and re-evaluate reclaim button
 // state without re-fetching from the backend.
@@ -418,11 +462,43 @@ function tickTimers() {
     if (!ch) return;
     const tl = channelTimeLeft(ch);
     el.innerHTML = `<span class="${tl.textClass}">${tl.label}</span>`;
-    // Update reclaim button pulse state (sender rows only)
+    // Update reclaim button pulse state + disable Pay/Claim when expired.
+    // Writes are guarded to only apply on actual state change — writing on
+    // every tick causes a visible 1Hz repaint flicker in some browsers.
     if (side === 'send') {
-      const btn = document.querySelector(`[data-reclaim-idx="${i}"]`);
-      if (btn && !tl.isClosed) {
-        btn.classList.toggle('btn-reclaim-ready', !!tl.expired);
+      const rbtn = document.querySelector(`[data-reclaim-idx="${i}"]`);
+      if (rbtn && !tl.isClosed) {
+        const wantPulse = !!tl.expired;
+        if (rbtn.classList.contains('btn-reclaim-ready') !== wantPulse) {
+          rbtn.classList.toggle('btn-reclaim-ready', wantPulse);
+        }
+      }
+      const pbtn = document.querySelector(`[data-pay-idx="${i}"]`);
+      if (pbtn) {
+        const off = !!(tl.isClosed || tl.expired);
+        if (pbtn.disabled !== off) pbtn.disabled = off;
+        if (pbtn.classList.contains('disabled') !== off) {
+          pbtn.classList.toggle('disabled', off);
+        }
+        const wantTitle = (tl.expired && !tl.isClosed)
+          ? 'Channel expired — new payments would race the on-chain reclaim and are not safe'
+          : '';
+        if (pbtn.title !== wantTitle) pbtn.title = wantTitle;
+      }
+    } else {
+      const cbtn = document.querySelector(`[data-claim-idx="${i}"]`);
+      if (cbtn) {
+        const pc = parsePendingCommitment(ch);
+        const hasPending = !!pc && (ch.locked_sats - (pc.remainder_sats ?? ch.locked_sats)) > 0;
+        const off = !!(!hasPending || tl.isClosed || tl.expired);
+        if (cbtn.disabled !== off) cbtn.disabled = off;
+        if (cbtn.classList.contains('disabled') !== off) {
+          cbtn.classList.toggle('disabled', off);
+        }
+        const wantTitle = (tl.expired && !tl.isClosed)
+          ? 'Channel expired — the sender can now reclaim on-chain, so claiming here would race that reclaim and is not safe'
+          : '';
+        if (cbtn.title !== wantTitle) cbtn.title = wantTitle;
       }
     }
   });
@@ -514,8 +590,11 @@ function renderSending(rows) {
       <td class="text-end" data-time-left="${i}" data-side="send"><span class="${tl.textClass}">${tl.label}</span></td>
       <td onclick="event.stopPropagation()">
         <div class="action-btns">
-          <button class="btn btn-outline-secondary btn-sm ${tl.isClosed ? 'disabled' : ''}"
-                  onclick="openPayModal('${ch.p2sh_address}')" ${tl.isClosed ? 'disabled' : ''}>Pay</button>
+          <button class="btn btn-outline-secondary btn-sm ${tl.isClosed || tl.expired ? 'disabled' : ''}"
+                  data-pay-idx="${i}"
+                  onclick="openPayModal('${ch.p2sh_address}')"
+                  ${tl.isClosed || tl.expired ? 'disabled' : ''}
+                  title="${tl.expired && !tl.isClosed ? 'Channel expired — new payments would race the on-chain reclaim and are not safe' : ''}">Pay</button>
           <button class="btn ${reclaimClass} btn-sm" data-reclaim-idx="${i}"
                   onclick="reclaim('${ch.p2sh_address}')" ${reclaimDisabled}>${reclaimLabel}</button>
         </div>
@@ -556,9 +635,11 @@ function renderReceiving(rows) {
       <td class="text-end ${hasPending ? 'claimable-amount' : 'text-muted'}">${fmtSatori(claimable)}${hasPending ? '' : ' <small>(pending)</small>'}</td>
       <td class="text-end" data-time-left="${i}" data-side="recv"><span class="${tl.textClass}">${tl.label}</span></td>
       <td class="text-end" onclick="event.stopPropagation()">
-        <button class="btn btn-outline-success btn-sm${hasPending && !tl.isClosed ? '' : ' disabled'}"
+        <button class="btn btn-outline-success btn-sm${hasPending && !tl.isClosed && !tl.expired ? '' : ' disabled'}"
+                data-claim-idx="${i}"
                 onclick="claimChannel('${ch.p2sh_address}')"
-                ${hasPending && !tl.isClosed ? '' : 'disabled'}>
+                ${hasPending && !tl.isClosed && !tl.expired ? '' : 'disabled'}
+                title="${tl.expired && !tl.isClosed ? 'Channel expired — the sender can now reclaim on-chain, so claiming here would race that reclaim and is not safe' : ''}">
           Claim
         </button>
       </td>
