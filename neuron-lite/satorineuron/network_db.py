@@ -672,6 +672,7 @@ class NetworkDB:
                 remainder_sats        = excluded.remainder_sats,
                 blocks                = excluded.blocks,
                 minutes               = excluded.minutes,
+                created_at            = excluded.created_at,
                 sender_nostr_pubkey   = COALESCE(excluded.sender_nostr_pubkey,
                                                   sender_nostr_pubkey),
                 receiver_nostr_pubkey = COALESCE(excluded.receiver_nostr_pubkey,

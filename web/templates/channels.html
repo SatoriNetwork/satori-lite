@@ -352,6 +352,24 @@ function fmtTimestamp(ts) {
   return new Date(ts * 1000).toLocaleString();
 }
 
+function parsePendingCommitment(ch) {
+  if (!ch.pending_commitment) return null;
+  try {
+    return typeof ch.pending_commitment === 'string'
+      ? JSON.parse(ch.pending_commitment)
+      : ch.pending_commitment;
+  } catch (e) { return null; }
+}
+
+// Claimable = cumulative commitment amount minus what's already been claimed on-chain.
+// After an on-chain claim, remainder_sats and locked_sats are reset so (locked-remainder)=0.
+function receiverClaimable(ch) {
+  const pc = parsePendingCommitment(ch);
+  if (!pc) return 0;
+  const alreadyClaimed = Math.max(0, ch.locked_sats - ch.remainder_sats);
+  return Math.max(0, (pc.pay_amount_sats || 0) - alreadyClaimed);
+}
+
 // ── Copy to clipboard ─────────────────────────────────────────
 function copyText(text, btn) {
   navigator.clipboard.writeText(text).then(() => {
@@ -395,7 +413,8 @@ function detailField(label, value, copyable) {
 }
 
 function buildDetailPanel(ch, isSender) {
-  const claimable = ch.locked_sats - ch.remainder_sats;
+  const paidSoFar = ch.locked_sats - ch.remainder_sats;
+  const claimable = isSender ? paidSoFar : receiverClaimable(ch);
   const counterpartyLabel = isSender ? 'Receiver Wallet Pubkey' : 'Sender Wallet Pubkey';
   const counterpartyKey = isSender ? ch.receiver_pubkey : ch.sender_pubkey;
   const pendingInfo = !isSender
@@ -416,7 +435,7 @@ function buildDetailPanel(ch, isSender) {
       <div class="col-md-6">
         ${detailField('Locked', fmtSatori(ch.locked_sats), false)}
         ${isSender
-          ? detailField('Paid So Far', fmtSatori(claimable), false)
+          ? detailField('Paid So Far', fmtSatori(paidSoFar), false)
           : detailField('Claimable', `<span class="claimable-amount">${fmtSatori(claimable)}</span>`, false)}
         ${detailField('Remaining', fmtSatori(ch.remainder_sats), false)}
         ${detailField('Timeout', ch.minutes ? ch.minutes.toLocaleString() + ' min' : ch.blocks ? ch.blocks.toLocaleString() + ' blocks' : '—', false)}
@@ -489,8 +508,8 @@ function renderReceiving(rows) {
     return;
   }
   tbody.innerHTML = rows.map((ch, i) => {
-    const claimable = ch.locked_sats - ch.remainder_sats;
-    const hasPending = !!ch.pending_commitment;
+    const claimable = receiverClaimable(ch);
+    const hasPending = !!ch.pending_commitment && claimable > 0;
     const detailId = `recv-detail-${i}`;
     const tl = channelTimeLeft(ch);
     const rowClass = tl.isClosed ? 'ch-closed' : '';
