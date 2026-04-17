@@ -1291,6 +1291,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The P2SH address of the new channel
         """
+        if self.wallet.unspentAssets is None or self.wallet.unspentCurrency is None:
+            await asyncio.to_thread(self.wallet.getUnspents)
         amount_satori = amount_sats / 1e8
         txid, script_payload = await asyncio.to_thread(
             self.wallet.producePaymentChannel,
@@ -1518,6 +1520,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from satorilib.wallet.concepts.transaction import TransactionFailure
         from satorilib.wallet.utils.transaction import TxUtils
 
+        if self.wallet.unspentAssets is None or self.wallet.unspentCurrency is None:
+            await asyncio.to_thread(self.wallet.getUnspents)
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:

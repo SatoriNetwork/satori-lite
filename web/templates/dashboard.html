@@ -771,6 +771,16 @@
                                 </button>
                             </div>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label">Wallet Public Key</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace" id="identityPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityPubkey')" title="Copy">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
+                            </div>
+                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can open payment channels to you.</div>
+                        </div>
                         <div class="mb-0">
                             <label class="form-label">Identity Private Key</label>
                             <div class="input-group">
@@ -2168,6 +2178,11 @@
                 document.getElementById('identityAddress').value = result.wallet_address;
             } else {
                 document.getElementById('identityAddress').value = 'Not available';
+            }
+            if (result.wallet_pubkey) {
+                document.getElementById('identityPubkey').value = result.wallet_pubkey;
+            } else {
+                document.getElementById('identityPubkey').value = 'Not available';
             }
         }
     }

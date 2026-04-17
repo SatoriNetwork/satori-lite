@@ -1105,6 +1105,7 @@ def register_routes(app):
             # Get wallet address
             if wallet_manager.wallet and hasattr(wallet_manager.wallet, 'address'):
                 result['wallet_address'] = wallet_manager.wallet.address
+                result['wallet_pubkey'] = getattr(wallet_manager.wallet, 'pubkey', None)
             # Get vault address
             if wallet_manager.vault and hasattr(wallet_manager.vault, 'address'):
                 result['vault_address'] = wallet_manager.vault.address
@@ -2667,7 +2668,14 @@ def register_routes(app):
             p2sh_address = future.result(timeout=60)
             return jsonify({'p2sh_address': p2sh_address})
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            msg = str(e)
+            if 'not enough satori' in msg.lower():
+                return jsonify({'error': 'Insufficient SATORI balance. Add SATORI to your wallet before opening a channel.'}), 400
+            if 'bad params' in msg.lower():
+                return jsonify({'error': 'Invalid channel parameters. Check the amount and timeout values.'}), 400
+            if 'invalid' in msg.lower() or 'pubkey' in msg.lower():
+                return jsonify({'error': 'Invalid receiver public key.'}), 400
+            return jsonify({'error': msg}), 500
 
     @app.route('/api/channels/pay', methods=['POST'])
     @login_required
