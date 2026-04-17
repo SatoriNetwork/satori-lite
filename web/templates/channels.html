@@ -149,6 +149,9 @@
           <div class="form-text text-muted">
             After this timeout you can reclaim unclaimed funds. Provide minutes <em>or</em> blocks.
           </div>
+          <div class="form-text text-muted" style="font-style:italic;">
+            Note: the blockchain rounds timeouts up in ~8.5 minute steps, so the actual expiry can be up to ~9 minutes later than what you set.
+          </div>
         </div>
         <div id="ocError" class="alert alert-danger d-none"></div>
       </div>
@@ -346,7 +349,7 @@ function channelTimeLeft(ch) {
   if (!expiresAt) return { dotClass: 'ch-dot-active', textClass: 'time-left-active', label: '—', isClosed: false };
   const secsLeft = expiresAt - Math.floor(Date.now() / 1000);
   if (secsLeft <= 0) {
-    return { dotClass: 'ch-dot-expired', textClass: 'time-left-expired', label: 'expired ' + fmtDuration(secsLeft) + ' ago', isClosed: false, expired: true };
+    return { dotClass: 'ch-dot-expired', textClass: 'time-left-expired', label: 'expired', isClosed: false, expired: true };
   }
   if (secsLeft < 3600) {
     return { dotClass: 'ch-dot-expiring', textClass: 'time-left-expiring', label: fmtDuration(secsLeft) + ' left', isClosed: false };

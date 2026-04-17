@@ -816,6 +816,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Channel: commitment for unknown channel '
                 f'{commitment.p2sh_address} — ignoring')
             return
+        # Bind the commitment envelope to the channel's known pubkeys. Nostr
+        # kind 34604 is parameterized-replaceable by (kind, author, d_tag), so
+        # any publisher can emit an event with d=p2sh_address; we must verify
+        # the payload claims the right sender/receiver before accepting it,
+        # otherwise a spoofed commitment can DoS the real pending state.
+        if commitment.sender_pubkey != channel['sender_pubkey']:
+            logging.warning(
+                f'Channel: rejecting commitment for {commitment.p2sh_address} — '
+                f'sender_pubkey mismatch (got {commitment.sender_pubkey[:16]}…, '
+                f'expected {channel["sender_pubkey"][:16]}…)',
+                color='yellow')
+            return
+        if commitment.receiver_pubkey != channel['receiver_pubkey']:
+            logging.warning(
+                f'Channel: rejecting commitment for {commitment.p2sh_address} — '
+                f'receiver_pubkey mismatch',
+                color='yellow')
+            return
         try:
             commitment_json = commitment.to_json()
             await asyncio.to_thread(
