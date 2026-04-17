@@ -7,18 +7,47 @@
 <div class="container-fluid py-4" style="max-width: 960px;">
 
   <!-- Header -->
-  <div class="d-flex align-items-center justify-content-between mb-4">
+  <div class="d-flex align-items-start justify-content-between mb-3">
     <div>
       <h4 class="mb-1">Payment Channels</h4>
       <p class="text-muted small mb-0">
-        Off-chain micropayments for data streams. Open a channel to lock SATORI,
-        then pay per observation without an on-chain transaction each time.
+        Off-chain micropayments for data streams — lock SATORI once, pay per observation with no on-chain fee each time.
       </p>
     </div>
-    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#openChannelModal">
+    <button class="btn btn-primary btn-sm ms-3 flex-shrink-0" style="white-space:nowrap;" data-bs-toggle="modal" data-bs-target="#openChannelModal">
       <i class="material-icons align-middle" style="font-size:16px;">add</i>
       Open Channel
     </button>
+  </div>
+
+  <!-- How it works -->
+  <div class="card mb-4" style="border-color: var(--border-color); background: var(--bg-card);">
+    <div class="card-body py-3 px-4">
+      <p class="text-muted mb-3" style="text-transform:uppercase; letter-spacing:.08em; font-size:.68rem; font-weight:600;">How it works</p>
+      <div class="hiw-grid">
+        <div class="hiw-step">
+          <div class="hiw-num">1</div>
+          <div>
+            <div class="hiw-title">Open a channel</div>
+            <div class="small text-muted">Get the receiver's wallet pubkey, set an amount and timeout. SATORI gets locked into a shared on-chain address.</div>
+          </div>
+        </div>
+        <div class="hiw-step">
+          <div class="hiw-num">2</div>
+          <div>
+            <div class="hiw-title">Pay per observation</div>
+            <div class="small text-muted">Click <strong>Pay</strong> to send off-chain commitments to the receiver — no on-chain fee, no waiting for confirmations.</div>
+          </div>
+        </div>
+        <div class="hiw-step">
+          <div class="hiw-num">3</div>
+          <div>
+            <div class="hiw-title">Reclaim unused funds</div>
+            <div class="small text-muted">After the timeout expires, use <strong>Reclaim</strong> to sweep any unspent SATORI back to your wallet.</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Alert area -->
@@ -166,6 +195,65 @@
 
 {% block extra_js %}
 <style>
+/* ── How it works grid ─────────────────────────────────── */
+.hiw-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+@media (max-width: 640px) {
+  .hiw-grid { grid-template-columns: 1fr; }
+}
+.hiw-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.hiw-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bs-primary, #6366f1);
+  color: #fff;
+  font-size: .7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+.hiw-title {
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  margin-bottom: 3px;
+}
+
+/* ── Table address cells ───────────────────────────────── */
+.table code {
+  white-space: nowrap;
+  font-size: .8rem;
+}
+.table th {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  border-bottom-width: 1px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.table td {
+  vertical-align: middle;
+  font-size: .85rem;
+}
+
+/* ── Action buttons ────────────────────────────────────── */
+.action-btns { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* ── Detail panel ──────────────────────────────────────── */
 .detail-row td { background: var(--bg-card, #1a1a2e); padding: 0 !important; }
 .detail-panel {
   padding: 12px 16px;
@@ -312,11 +400,13 @@ function renderSending(rows) {
       <td class="text-end">${fmtSatori(paid)}</td>
       <td class="text-end">${fmtSatori(ch.remainder_sats)}</td>
       <td class="text-end">${timeout(ch)}</td>
-      <td class="text-end" onclick="event.stopPropagation()">
-        <button class="btn btn-outline-secondary btn-sm me-1"
-                onclick="openPayModal('${ch.p2sh_address}')">Pay</button>
-        <button class="btn btn-outline-secondary btn-sm"
-                onclick="reclaim('${ch.p2sh_address}')">Reclaim</button>
+      <td onclick="event.stopPropagation()">
+        <div class="action-btns">
+          <button class="btn btn-outline-secondary btn-sm"
+                  onclick="openPayModal('${ch.p2sh_address}')">Pay</button>
+          <button class="btn btn-outline-secondary btn-sm"
+                  onclick="reclaim('${ch.p2sh_address}')">Reclaim</button>
+        </div>
       </td>
     </tr>
     <tr class="detail-row" id="${detailId}" style="display:none">
