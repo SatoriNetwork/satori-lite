@@ -834,6 +834,37 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'receiver_pubkey mismatch',
                 color='yellow')
             return
+        # Bounds + monotonicity. remainder_sats tracks what's still locked in
+        # the channel; each new commitment must not exceed what was originally
+        # locked, and must not *increase* vs the prior pending commitment (that
+        # would roll back a payment the receiver already accepted).
+        locked = int(channel.get('locked_sats') or 0)
+        if (commitment.remainder_sats < 0
+                or commitment.remainder_sats > locked
+                or commitment.pay_amount_sats < 0):
+            logging.warning(
+                f'Channel: rejecting commitment for {commitment.p2sh_address} — '
+                f'out-of-range amounts (pay={commitment.pay_amount_sats}, '
+                f'remainder={commitment.remainder_sats}, locked={locked})',
+                color='yellow')
+            return
+        prior_json = channel.get('pending_commitment')
+        if prior_json:
+            try:
+                from satorilib.satori_nostr.models import ChannelCommitment
+                prior = ChannelCommitment.from_json(prior_json)
+                if commitment.remainder_sats > prior.remainder_sats:
+                    logging.warning(
+                        f'Channel: rejecting commitment for '
+                        f'{commitment.p2sh_address} — remainder increased '
+                        f'({prior.remainder_sats} → {commitment.remainder_sats}), '
+                        f'which would roll back an accepted payment',
+                        color='yellow')
+                    return
+            except Exception as e:
+                logging.warning(
+                    f'Channel: could not parse prior commitment for '
+                    f'{commitment.p2sh_address}: {e} — accepting new one')
         try:
             commitment_json = commitment.to_json()
             await asyncio.to_thread(
