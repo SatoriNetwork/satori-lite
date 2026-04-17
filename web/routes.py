@@ -1109,6 +1109,9 @@ def register_routes(app):
             # Get vault address
             if wallet_manager.vault and hasattr(wallet_manager.vault, 'address'):
                 result['vault_address'] = wallet_manager.vault.address
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                result['nostr_pubkey'] = startup.nostrPubkey
             return jsonify(result)
         return jsonify({'error': 'Wallet not initialized'}), 500
 
@@ -2727,7 +2730,11 @@ def register_routes(app):
                 startup.reclaimChannel(p2sh_address=p2sh_address),
                 loop)
             txid = future.result(timeout=60)
-            return jsonify({'txid': txid})
+            if isinstance(txid, dict):
+                txid = txid.get('result') or txid.get('txid') or str(txid)
+            elif isinstance(txid, (list, tuple)):
+                txid = txid[0] if txid else ''
+            return jsonify({'txid': str(txid) if txid else ''})
         except Exception as e:
             return jsonify({'error': str(e)})
 
@@ -2750,6 +2757,10 @@ def register_routes(app):
                 startup.claimChannel(p2sh_address=p2sh_address),
                 loop)
             txid = future.result(timeout=60)
-            return jsonify({'txid': txid})
+            if isinstance(txid, dict):
+                txid = txid.get('result') or txid.get('txid') or str(txid)
+            elif isinstance(txid, (list, tuple)):
+                txid = txid[0] if txid else ''
+            return jsonify({'txid': str(txid) if txid else ''})
         except Exception as e:
             return jsonify({'error': str(e)})

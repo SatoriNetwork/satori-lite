@@ -1520,8 +1520,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from satorilib.wallet.concepts.transaction import TransactionFailure
         from satorilib.wallet.utils.transaction import TxUtils
 
-        if self.wallet.unspentAssets is None or self.wallet.unspentCurrency is None:
-            await asyncio.to_thread(self.wallet.getUnspents)
+        await asyncio.to_thread(self.wallet.getUnspents)
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
@@ -1548,7 +1547,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         def _build_standard_reclaim():
             """PATH A: gather EVR, build csv reclaim tx, sign, broadcast."""
             from evrmore.core.script import CScript, OP_FALSE, SIGHASH_ALL
-            fee = TxUtils.defaultFee
+            # P2SH scriptSig is large (~200 bytes); use size-aware fee estimate
+            # (2 inputs: P2SH + EVR, 2 outputs: SATORI + EVR change)
+            fee = TxUtils.estimatedFee(inputCount=2, outputCount=2)
             # raises TransactionFailure if not enough EVR
             gathered_utxos, gathered_sats = self.wallet._gatherCurrencyUnspents(
                 feeOverride=fee)
@@ -1579,8 +1580,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 tx, redeem_script, redeem_params_csv, 1, txin_scripts_evr)
             return self.wallet.broadcast(self.wallet._txToHex(tx))
 
+        def _check_broadcast(result):
+            from satorilib.wallet.concepts.transaction import TransactionFailure
+            if isinstance(result, dict) and result.get('code') is not None:
+                raise TransactionFailure(
+                    f'broadcast rejected: {result.get("message", result)}')
+            return result
+
         try:
-            txid = await asyncio.to_thread(_build_standard_reclaim)
+            txid = _check_broadcast(await asyncio.to_thread(_build_standard_reclaim))
         except TransactionFailure:
             # PATH B: sender has no EVR — fall back to Mundo
             txid = await self._reclaimChannelViaMundo(
@@ -1596,6 +1604,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         logging.info(
             f'Channel: reclaimed {p2sh_address} — txid={txid}',
             color='yellow')
+        # Refresh UTXOs so wallet balance reflects the reclaimed funds
+        await asyncio.to_thread(self.wallet.getUnspents)
         return txid
 
     async def _reclaimChannelViaMundo(
@@ -1625,7 +1635,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             CScript, SIGHASH_ALL, SIGHASH_ANYONECANPAY,
             OP_EVR_ASSET, OP_DROP, OP_FALSE)
         from evrmore.wallet import CEvrmoreAddress
-        from satorilib.wallet.concepts.transaction import AssetTransaction
+        from satorilib.wallet.concepts.transaction import AssetTransaction, TransactionFailure
         from satorilib.wallet.utils.transaction import TxUtils
 
         MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
@@ -1748,7 +1758,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
 
         # Step 8: broadcast the fully-signed tx
-        return await asyncio.to_thread(self.wallet.broadcast, signed_hex)
+        result = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
+        if isinstance(result, dict) and result.get('code') is not None:
+            raise TransactionFailure(
+                f'broadcast rejected: {result.get("message", result)}')
+        return result
 
     # ── End channel support ───────────────────────────────────────────────────
 

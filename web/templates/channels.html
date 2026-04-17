@@ -253,6 +253,36 @@
 /* ── Action buttons ────────────────────────────────────── */
 .action-btns { display: flex; gap: 6px; justify-content: flex-end; }
 
+/* ── Channel status ────────────────────────────────────── */
+.ch-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ch-dot-active   { background: #28a745; box-shadow: 0 0 4px #28a74588; }
+.ch-dot-expiring { background: #ffc107; box-shadow: 0 0 4px #ffc10788; }
+.ch-dot-expired  { background: #dc3545; box-shadow: 0 0 4px #dc354588; }
+.ch-dot-closed   { background: #6c757d; }
+tr.ch-closed td  { opacity: 0.45; }
+tr.ch-closed:hover td { opacity: 0.65; }
+.time-left-active   { color: #28a745; font-size: .8rem; }
+.time-left-expiring { color: #ffc107; font-size: .8rem; }
+.time-left-expired  { color: #dc3545; font-size: .8rem; font-weight: 600; }
+.time-left-closed   { color: #6c757d; font-size: .8rem; font-style: italic; }
+
+/* ── Reclaim ready pulse ───────────────────────────────── */
+@keyframes reclaim-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0.55); }
+  50%       { box-shadow: 0 0 0 6px rgba(220,53,69,0); }
+}
+.btn-reclaim-ready {
+  animation: reclaim-pulse 1.6s ease-in-out infinite;
+  border-color: #dc3545 !important;
+  color: #dc3545 !important;
+  font-weight: 600;
+}
+
 /* ── Detail panel ──────────────────────────────────────── */
 .detail-row td { background: var(--bg-card, #1a1a2e); padding: 0 !important; }
 .detail-panel {
@@ -284,10 +314,37 @@ function satoriToSats(satori) {
 
 const fmtAddr = (s) => s ? s.slice(0, 10) + '…' + s.slice(-6) : '—';
 
-function timeout(ch) {
-  if (ch.minutes) return ch.minutes.toLocaleString() + ' min';
-  if (ch.blocks)  return ch.blocks.toLocaleString() + ' blocks';
-  return '—';
+function fmtDuration(secs) {
+  secs = Math.abs(Math.round(secs));
+  if (secs < 60)    return secs + 's';
+  if (secs < 3600)  return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h ' + Math.floor((secs % 3600) / 60) + 'm';
+  return Math.floor(secs / 86400) + 'd ' + Math.floor((secs % 86400) / 3600) + 'h';
+}
+
+function channelExpiresAt(ch) {
+  if (!ch.created_at) return null;
+  if (ch.minutes) return ch.created_at + ch.minutes * 60;
+  if (ch.blocks)  return ch.created_at + ch.blocks * 600;
+  return null;
+}
+
+function channelTimeLeft(ch) {
+  if (ch.remainder_sats === 0) {
+    const expiresAt = channelExpiresAt(ch);
+    const isExpired = expiresAt ? Math.floor(Date.now() / 1000) >= expiresAt : true;
+    return { dotClass: 'ch-dot-closed', textClass: 'time-left-closed', label: 'closed', isClosed: true, expired: isExpired };
+  }
+  const expiresAt = channelExpiresAt(ch);
+  if (!expiresAt) return { dotClass: 'ch-dot-active', textClass: 'time-left-active', label: '—', isClosed: false };
+  const secsLeft = expiresAt - Math.floor(Date.now() / 1000);
+  if (secsLeft <= 0) {
+    return { dotClass: 'ch-dot-expired', textClass: 'time-left-expired', label: 'expired ' + fmtDuration(secsLeft) + ' ago', isClosed: false, expired: true };
+  }
+  if (secsLeft < 3600) {
+    return { dotClass: 'ch-dot-expiring', textClass: 'time-left-expiring', label: fmtDuration(secsLeft) + ' left', isClosed: false };
+  }
+  return { dotClass: 'ch-dot-active', textClass: 'time-left-active', label: fmtDuration(secsLeft) + ' left', isClosed: false };
 }
 
 function fmtTimestamp(ts) {
@@ -362,7 +419,7 @@ function buildDetailPanel(ch, isSender) {
           ? detailField('Paid So Far', fmtSatori(claimable), false)
           : detailField('Claimable', `<span class="claimable-amount">${fmtSatori(claimable)}</span>`, false)}
         ${detailField('Remaining', fmtSatori(ch.remainder_sats), false)}
-        ${detailField('Timeout', timeout(ch), false)}
+        ${detailField('Timeout', ch.minutes ? ch.minutes.toLocaleString() + ' min' : ch.blocks ? ch.blocks.toLocaleString() + ' blocks' : '—', false)}
         ${detailField('Opened At', fmtTimestamp(ch.created_at), false)}
         ${pendingInfo}
         ${ch.redeem_script ? `<div class="detail-field">
@@ -388,24 +445,32 @@ function renderSending(rows) {
   tbody.innerHTML = rows.map((ch, i) => {
     const paid = ch.locked_sats - ch.remainder_sats;
     const detailId = `send-detail-${i}`;
-    return `<tr onclick="toggleDetail('${detailId}')" style="cursor:pointer">
-      <td>
-        <button class="eye-btn" onclick="event.stopPropagation(); toggleDetail('${detailId}')" title="Details">
-          <i class="material-icons" style="font-size:16px;">visibility</i>
-        </button>
+    const tl = channelTimeLeft(ch);
+    const rowClass = tl.isClosed ? 'ch-closed' : '';
+    const reclaimDisabled = tl.isClosed ? 'disabled' : '';
+    const reclaimLabel = tl.isClosed ? 'Reclaimed' : 'Reclaim';
+    const reclaimClass = tl.isClosed ? 'btn-outline-secondary disabled' : tl.expired ? 'btn-outline-secondary btn-reclaim-ready' : 'btn-outline-secondary';
+    return `<tr class="${rowClass}" onclick="toggleDetail('${detailId}')" style="cursor:pointer">
+      <td style="width:28px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+          <span class="ch-dot ${tl.dotClass}" title="${tl.label}"></span>
+          <button class="eye-btn" onclick="event.stopPropagation(); toggleDetail('${detailId}')" title="Details">
+            <i class="material-icons" style="font-size:16px;">visibility</i>
+          </button>
+        </div>
       </td>
       <td><code title="${ch.p2sh_address}">${fmtAddr(ch.p2sh_address)}</code></td>
       <td><code title="${ch.receiver_pubkey}">${fmtAddr(ch.receiver_pubkey)}</code></td>
       <td class="text-end">${fmtSatori(ch.locked_sats)}</td>
       <td class="text-end">${fmtSatori(paid)}</td>
       <td class="text-end">${fmtSatori(ch.remainder_sats)}</td>
-      <td class="text-end">${timeout(ch)}</td>
+      <td class="text-end"><span class="${tl.textClass}">${tl.label}</span></td>
       <td onclick="event.stopPropagation()">
         <div class="action-btns">
-          <button class="btn btn-outline-secondary btn-sm"
-                  onclick="openPayModal('${ch.p2sh_address}')">Pay</button>
-          <button class="btn btn-outline-secondary btn-sm"
-                  onclick="reclaim('${ch.p2sh_address}')">Reclaim</button>
+          <button class="btn btn-outline-secondary btn-sm ${tl.isClosed ? 'disabled' : ''}"
+                  onclick="openPayModal('${ch.p2sh_address}')" ${tl.isClosed ? 'disabled' : ''}>Pay</button>
+          <button class="btn ${reclaimClass} btn-sm"
+                  onclick="reclaim('${ch.p2sh_address}')" ${reclaimDisabled}>${reclaimLabel}</button>
         </div>
       </td>
     </tr>
@@ -427,21 +492,26 @@ function renderReceiving(rows) {
     const claimable = ch.locked_sats - ch.remainder_sats;
     const hasPending = !!ch.pending_commitment;
     const detailId = `recv-detail-${i}`;
-    return `<tr onclick="toggleDetail('${detailId}')" style="cursor:pointer">
-      <td>
-        <button class="eye-btn" onclick="event.stopPropagation(); toggleDetail('${detailId}')" title="Details">
-          <i class="material-icons" style="font-size:16px;">visibility</i>
-        </button>
+    const tl = channelTimeLeft(ch);
+    const rowClass = tl.isClosed ? 'ch-closed' : '';
+    return `<tr class="${rowClass}" onclick="toggleDetail('${detailId}')" style="cursor:pointer">
+      <td style="width:28px;">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+          <span class="ch-dot ${tl.dotClass}" title="${tl.label}"></span>
+          <button class="eye-btn" onclick="event.stopPropagation(); toggleDetail('${detailId}')" title="Details">
+            <i class="material-icons" style="font-size:16px;">visibility</i>
+          </button>
+        </div>
       </td>
       <td><code title="${ch.p2sh_address}">${fmtAddr(ch.p2sh_address)}</code></td>
       <td><code title="${ch.sender_pubkey}">${fmtAddr(ch.sender_pubkey)}</code></td>
       <td class="text-end">${fmtSatori(ch.locked_sats)}</td>
       <td class="text-end ${hasPending ? 'claimable-amount' : 'text-muted'}">${fmtSatori(claimable)}${hasPending ? '' : ' <small>(pending)</small>'}</td>
-      <td class="text-end">${timeout(ch)}</td>
+      <td class="text-end"><span class="${tl.textClass}">${tl.label}</span></td>
       <td class="text-end" onclick="event.stopPropagation()">
-        <button class="btn btn-outline-success btn-sm${hasPending ? '' : ' disabled'}"
+        <button class="btn btn-outline-success btn-sm${hasPending && !tl.isClosed ? '' : ' disabled'}"
                 onclick="claimChannel('${ch.p2sh_address}')"
-                ${hasPending ? '' : 'disabled'}>
+                ${hasPending && !tl.isClosed ? '' : 'disabled'}>
           Claim
         </button>
       </td>
