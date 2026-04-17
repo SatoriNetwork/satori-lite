@@ -1,81 +1,114 @@
-<nav class="navbar navbar-expand-lg px-4 satori-navbar">
-    <span class="navbar-brand satori-brand-wrap">
-        <span class="satori-brand-title">Satori</span>
-        <small class="text-muted satori-brand-version">{{ version }}</small>
-    </span>
-    <span class="satori-nav-item satori-connection">
+<nav class="satori-navbar">
+
+    <!-- ── Brand ─────────────────────────────────────────── -->
+    <div class="satori-brand">
+        <img src="{{ url_for('static', filename='img/satori-logo.svg') }}"
+             alt="Satori" class="satori-brand-logo">
+        <div class="satori-brand-text">
+            <span class="satori-brand-title">Satori</span>
+            <span class="satori-brand-version">{{ version }}</span>
+        </div>
+    </div>
+
+    <!-- ── Status chip ────────────────────────────────────── -->
+    <div class="satori-status-chip">
         <span class="status-indicator status-online" id="statusIndicator"></span>
         <span id="statusText" class="d-none d-sm-inline">Connected</span>
-        <span class="text-muted ms-2 d-none d-md-inline" id="sessionCountdownLabel">Auto logout in <span id="sessionCountdown">05:00</span></span>
-    </span>
-    <div class="ms-auto d-flex align-items-center satori-nav-actions">
-        <div class="dropdown satori-nav-item">
-            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="walletDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <i class="material-icons align-middle" style="font-size: 16px;">account_balance_wallet</i>
-                Wallet
+        <span class="satori-countdown d-none d-lg-inline" id="sessionCountdownLabel">
+            · <span id="sessionCountdown">05:00</span>
+        </span>
+    </div>
+
+    <!-- ── Primary navigation (segmented pill) ────────────── -->
+    <div class="satori-nav-pill">
+        <a href="{{ url_for('dashboard') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'dashboard' else '' }}">
+            <i class="material-icons">dashboard</i>
+            <span>Dashboard</span>
+        </a>
+        <a href="{{ url_for('local_predictions') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'local_predictions' else '' }}">
+            <i class="material-icons">timeline</i>
+            <span>Predictions</span>
+        </a>
+        <a href="{{ url_for('stake_management') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'stake_management' else '' }}">
+            <i class="material-icons">handshake</i>
+            <span>Stake</span>
+        </a>
+        <a href="{{ url_for('p2p_page') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'p2p_page' else '' }}">
+            <i class="material-icons">hub</i>
+            <span>P2P</span>
+        </a>
+        <a href="{{ url_for('channels_page') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'channels_page' else '' }}">
+            <i class="material-icons">toll</i>
+            <span>Channels</span>
+        </a>
+        <a href="{{ url_for('competitions_page') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'competitions_page' else '' }}">
+            <i class="material-icons">emoji_events</i>
+            <span>Competitions</span>
+        </a>
+        <a href="{{ url_for('relay_settings') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'relay_settings' else '' }}">
+            <i class="material-icons">settings</i>
+            <span>Settings</span>
+        </a>
+    </div>
+
+    <!-- ── Utility actions (right cluster) ───────────────── -->
+    <div class="satori-util-group">
+
+        <!-- Wallet dropdown -->
+        <div class="dropdown">
+            <button class="util-btn" type="button" id="walletDropdown"
+                    data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="material-icons">account_balance_wallet</i>
+                <span class="util-label">Wallet</span>
+                <i class="material-icons util-chevron">expand_more</i>
             </button>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="walletDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+            <ul class="dropdown-menu dropdown-menu-end satori-dropdown"
+                aria-labelledby="walletDropdown">
                 <li>
                     {% if request.endpoint == 'dashboard' %}
-                    <a class="dropdown-item" href="#" onclick="openImportWalletModal(); return false;" style="color: var(--text-primary);">
-                        <i class="material-icons align-middle me-2" style="font-size: 18px;">upload_file</i>
-                        Import Wallet
+                    <a class="dropdown-item satori-dd-item" href="#"
+                       onclick="openImportWalletModal(); return false;">
+                        <i class="material-icons">upload_file</i>Import Wallet
                     </a>
                     {% else %}
-                    <a class="dropdown-item" href="{{ url_for('dashboard') }}" style="color: var(--text-primary);">
-                        <i class="material-icons align-middle me-2" style="font-size: 18px;">upload_file</i>
-                        Import Wallet
+                    <a class="dropdown-item satori-dd-item"
+                       href="{{ url_for('dashboard') }}">
+                        <i class="material-icons">upload_file</i>Import Wallet
                     </a>
                     {% endif %}
                 </li>
-                <li><hr class="dropdown-divider" style="border-color: var(--border-color);"></li>
+                <li><hr class="satori-dd-divider"></li>
                 <li>
-                    <a class="dropdown-item" href="/api/wallet/download" style="color: var(--text-primary);">
-                        <i class="material-icons align-middle me-2" style="font-size: 18px;">download</i>
-                        Download Wallet
+                    <a class="dropdown-item satori-dd-item"
+                       href="/api/wallet/download">
+                        <i class="material-icons">download</i>Download Wallet
                     </a>
                 </li>
             </ul>
         </div>
 
-        <a href="{{ url_for('dashboard') }}" class="btn {{ 'btn-primary' if request.endpoint == 'dashboard' else 'btn-outline-light' }} btn-sm satori-nav-item">
-            <i class="material-icons align-middle" style="font-size: 16px;">dashboard</i>
-            Dashboard
-        </a>
-        <a href="{{ url_for('local_predictions') }}" class="btn {{ 'btn-primary' if request.endpoint == 'local_predictions' else 'btn-outline-light' }} btn-sm satori-nav-item">
-            <i class="material-icons align-middle" style="font-size: 16px;">timeline</i>
-            Local Predictions
-        </a>
-        <a href="{{ url_for('stake_management') }}" class="btn {{ 'btn-primary' if request.endpoint == 'stake_management' else 'btn-outline-light' }} btn-sm satori-nav-item">
-            <i class="material-icons align-middle" style="font-size: 16px;">handshake</i>
-            Stake Management
-        </a>
-        <a href="{{ url_for('p2p_page') }}" class="btn {{ 'btn-primary' if request.endpoint == 'p2p_page' else 'btn-outline-light' }} btn-sm satori-nav-item">
-            <i class="material-icons align-middle" style="font-size: 16px;">hub</i>
-            P2P
-        </a>
-        <a href="{{ url_for('channels_page') }}" class="btn {{ 'btn-primary' if request.endpoint == 'channels_page' else 'btn-outline-light' }} btn-sm satori-nav-item">
-            <i class="material-icons align-middle" style="font-size: 16px;">toll</i>
-            Channels
-        </a>
-        <a href="{{ url_for('competitions_page') }}" class="btn {{ 'btn-primary' if request.endpoint == 'competitions_page' else 'btn-outline-light' }} btn-sm satori-nav-item">
-            <i class="material-icons align-middle" style="font-size: 16px;">emoji_events</i>
-            Competitions
-        </a>
-        <a href="{{ url_for('relay_settings') }}" class="btn {{ 'btn-primary' if request.endpoint == 'relay_settings' else 'btn-outline-light' }} btn-sm satori-nav-item">
-            <i class="material-icons align-middle" style="font-size: 16px;">settings</i>
-            Settings
-        </a>
-        <div class="dropdown satori-nav-item">
-            <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="trainingFrequencyDropdown" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
-                <i class="material-icons align-middle" style="font-size: 16px;">tune</i>
-                Training
+        <!-- Training dropdown -->
+        <div class="dropdown">
+            <button class="util-btn" type="button" id="trainingFrequencyDropdown"
+                    data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                    aria-expanded="false">
+                <i class="material-icons">tune</i>
+                <span class="util-label">Training</span>
+                <i class="material-icons util-chevron">expand_more</i>
             </button>
-            <div class="dropdown-menu dropdown-menu-end p-3 training-menu" aria-labelledby="trainingFrequencyDropdown" style="background: var(--bg-card); border: 1px solid var(--border-color); min-width: 320px;">
+            <div class="dropdown-menu dropdown-menu-end satori-dropdown training-menu"
+                 aria-labelledby="trainingFrequencyDropdown">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <label class="form-label mb-0">AI Engine Training Frequency</label>
-                    <span title="Controls how frequently the AI engine trains new models. Lower frequency = less CPU usage. Higher frequency = faster model improvements.">
-                        <i class="material-icons text-muted" style="font-size: 16px; cursor: help;">info</i>
+                    <label class="form-label mb-0" style="font-size:0.8rem;">Training Frequency</label>
+                    <span title="Controls how frequently the AI engine trains new models. Lower = less CPU.">
+                        <i class="material-icons text-muted" style="font-size:15px;cursor:help;">info</i>
                     </span>
                 </div>
                 <div class="d-flex align-items-center gap-2">
@@ -92,9 +125,21 @@
                 </div>
             </div>
         </div>
-        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm satori-nav-item">Logout</a>
-        <button class="theme-toggle satori-nav-item" onclick="toggleTheme()" title="Toggle dark/light mode">
+
+        <!-- Divider -->
+        <span class="nav-vdivider"></span>
+
+        <!-- Logout -->
+        <a href="{{ url_for('logout') }}" class="util-btn util-ghost">
+            <i class="material-icons">logout</i>
+            <span class="util-label">Logout</span>
+        </a>
+
+        <!-- Theme toggle -->
+        <button class="util-btn util-icon-only" onclick="toggleTheme()"
+                title="Toggle dark/light mode">
             <i class="material-icons" id="themeIcon">light_mode</i>
         </button>
     </div>
+
 </nav>

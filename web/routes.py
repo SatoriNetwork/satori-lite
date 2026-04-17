@@ -1105,9 +1105,13 @@ def register_routes(app):
             # Get wallet address
             if wallet_manager.wallet and hasattr(wallet_manager.wallet, 'address'):
                 result['wallet_address'] = wallet_manager.wallet.address
+                result['wallet_pubkey'] = getattr(wallet_manager.wallet, 'pubkey', None)
             # Get vault address
             if wallet_manager.vault and hasattr(wallet_manager.vault, 'address'):
                 result['vault_address'] = wallet_manager.vault.address
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                result['nostr_pubkey'] = startup.nostrPubkey
             return jsonify(result)
         return jsonify({'error': 'Wallet not initialized'}), 500
 
@@ -1368,43 +1372,45 @@ def register_routes(app):
             wallet_evr = 0.0
             vault_evr = 0.0
 
+            def _fetch_balances(wallet_obj, label):
+                """Fetch balances for a wallet/vault object.
+                Falls back to reconnecting if the server returns an empty response
+                (some servers don't support multi-asset balance queries).
+                """
+                satori = 0.0
+                evr = 0.0
+                if not wallet_obj or not hasattr(wallet_obj, 'getBalances'):
+                    return satori, evr
+                # Wait for electrumx connection
+                for _ in range(3):
+                    if wallet_obj.electrumx and wallet_obj.electrumx.connected():
+                        wallet_obj.getBalances()
+                        break
+                    time.sleep(1)
+                else:
+                    wallet_obj.getBalances()
+                # If the server returned an empty dict, it doesn't support multi-asset
+                # queries — force a reconnect and retry once
+                raw = getattr(wallet_obj, 'balances', None)
+                if not raw:
+                    logger.warning(f"{label}: empty balance response, reconnecting...")
+                    wallet_manager._electrumx = None  # force new server on next connect
+                    wallet_manager.connect()
+                    wallet_obj.getBalances()
+                    raw = getattr(wallet_obj, 'balances', None)
+                    logger.info(f"{label}: retry raw balances: {raw}")
+                satori = wallet_obj.balance.amount if hasattr(wallet_obj, 'balance') and wallet_obj.balance else 0.0
+                evr = wallet_obj.currency.amount if hasattr(wallet_obj, 'currency') and wallet_obj.currency else 0.0
+                logger.info(f"{label} balance: SATORI={satori}, EVR={evr}")
+                return satori, evr
+
             # Get wallet (identity) balance
             if wallet_manager.wallet:
-                wallet = wallet_manager.wallet
-                if hasattr(wallet, 'getBalances'):
-                    logger.info("Getting wallet balances...")
-                    # Retry if connection not ready yet
-                    for _ in range(3):
-                        if wallet.electrumx and wallet.electrumx.connected():
-                            wallet.getBalances()
-                            break
-                        time.sleep(1)
-                    else:
-                        wallet.getBalances()  # Final attempt
-                    if hasattr(wallet, 'balance') and wallet.balance:
-                        wallet_balance = wallet.balance.amount if hasattr(wallet.balance, 'amount') else 0.0
-                    if hasattr(wallet, 'currency') and wallet.currency:
-                        wallet_evr = wallet.currency.amount if hasattr(wallet.currency, 'amount') else 0.0
-                    logger.info(f"Wallet balance: SATORI={wallet_balance}, EVR={wallet_evr}")
+                wallet_balance, wallet_evr = _fetch_balances(wallet_manager.wallet, 'Wallet')
 
             # Get vault balance
             if wallet_manager.vault:
-                vault = wallet_manager.vault
-                if hasattr(vault, 'getBalances'):
-                    logger.info("Getting vault balances...")
-                    # Retry if connection not ready yet
-                    for _ in range(3):
-                        if vault.electrumx and vault.electrumx.connected():
-                            vault.getBalances()
-                            break
-                        time.sleep(1)
-                    else:
-                        vault.getBalances()  # Final attempt
-                    if hasattr(vault, 'balance') and vault.balance:
-                        vault_balance = vault.balance.amount if hasattr(vault.balance, 'amount') else 0.0
-                    if hasattr(vault, 'currency') and vault.currency:
-                        vault_evr = vault.currency.amount if hasattr(vault.currency, 'amount') else 0.0
-                    logger.info(f"Vault balance: SATORI={vault_balance}, EVR={vault_evr}")
+                vault_balance, vault_evr = _fetch_balances(wallet_manager.vault, 'Vault')
 
             total_satori = wallet_balance + vault_balance
             total_evr = wallet_evr + vault_evr
@@ -2784,7 +2790,14 @@ def register_routes(app):
             p2sh_address = future.result(timeout=60)
             return jsonify({'p2sh_address': p2sh_address})
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            msg = str(e)
+            if 'not enough satori' in msg.lower():
+                return jsonify({'error': 'Insufficient SATORI balance. Add SATORI to your wallet before opening a channel.'}), 400
+            if 'bad params' in msg.lower():
+                return jsonify({'error': 'Invalid channel parameters. Check the amount and timeout values.'}), 400
+            if 'invalid' in msg.lower() or 'pubkey' in msg.lower():
+                return jsonify({'error': 'Invalid receiver public key.'}), 400
+            return jsonify({'error': msg}), 500
 
     @app.route('/api/channels/pay', methods=['POST'])
     @login_required
@@ -2836,7 +2849,11 @@ def register_routes(app):
                 startup.reclaimChannel(p2sh_address=p2sh_address),
                 loop)
             txid = future.result(timeout=60)
-            return jsonify({'txid': txid})
+            if isinstance(txid, dict):
+                txid = txid.get('result') or txid.get('txid') or str(txid)
+            elif isinstance(txid, (list, tuple)):
+                txid = txid[0] if txid else ''
+            return jsonify({'txid': str(txid) if txid else ''})
         except Exception as e:
             return jsonify({'error': str(e)})
 
@@ -2859,7 +2876,11 @@ def register_routes(app):
                 startup.claimChannel(p2sh_address=p2sh_address),
                 loop)
             txid = future.result(timeout=60)
-            return jsonify({'txid': txid})
+            if isinstance(txid, dict):
+                txid = txid.get('result') or txid.get('txid') or str(txid)
+            elif isinstance(txid, (list, tuple)):
+                txid = txid[0] if txid else ''
+            return jsonify({'txid': str(txid) if txid else ''})
         except Exception as e:
             return jsonify({'error': str(e)})
 

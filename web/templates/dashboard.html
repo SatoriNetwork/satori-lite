@@ -16,6 +16,638 @@
     }
 </style>
 {% endif %}
+<style>
+    /* ── Dashboard layout ──────────────────────────────── */
+    .dash-container {
+        padding: 1.5rem 1.5rem 2.5rem;
+    }
+
+    /* Card header – consistent title sizing */
+    .card-header h5 {
+        font-size: 0.825rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .card-header h5 .material-icons {
+        font-size: 15px;
+        opacity: 0.55;
+        vertical-align: middle;
+        margin-right: 0.45rem;
+    }
+
+    /* Drag handle – subtle */
+    .drag-handle {
+        opacity: 0.25;
+        transition: opacity 0.12s;
+        cursor: grab;
+    }
+    .drag-handle:hover { opacity: 0.6; }
+
+    /* ── QR code: invert in dark mode so it renders as white-on-dark ── */
+    #walletQrCode img { filter: none; }
+    [data-theme="dark"] #walletQrCode img { filter: invert(1); }
+
+    /* ── Balance icon: invert only in dark mode ── */
+    .balance-icon { opacity: 0.5; filter: none; }
+    [data-theme="dark"] .balance-icon { filter: invert(1); }
+
+    /* ── 3-column card header: title | tabs (centered) | actions ── */
+    .card-header-3col {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+    }
+    .card-header-3col h5 { justify-self: start; }
+    .card-header-3col .bal-tabs { justify-self: center; }
+    .card-header-actions {
+        justify-self: end;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    /* ── Balance tab switcher (lives in card-header) ──── */
+    .bal-tabs {
+        display: flex;
+        gap: 3px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 3px;
+    }
+    [data-theme="light"] .bal-tabs {
+        background: rgba(0,0,0,0.04);
+    }
+    .bal-tab {
+        padding: 0.25rem 0.7rem;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 0.7rem;
+        font-weight: 600;
+        border-radius: 6px;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .bal-tab:hover {
+        background: rgba(255,255,255,0.05);
+        color: var(--text-secondary);
+    }
+    [data-theme="light"] .bal-tab:hover {
+        background: rgba(0,0,0,0.04);
+    }
+    .bal-tab.bal-tab-active {
+        background: var(--accent-primary);
+        color: #fff;
+        border-color: transparent;
+    }
+
+    /* ── Balance card body ─────────────────────────────── */
+    .balance-card-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+    }
+
+    /* ── Balance stat row ──────────────────────────────── */
+    .dash-stat-row {
+        display: flex;
+        align-items: stretch;
+        flex: 1;
+    }
+    .dash-stat {
+        flex: 1;
+        padding: 1.5rem 1rem;
+        text-align: center;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    .dash-stat + .dash-stat::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 20%;
+        height: 60%;
+        width: 1px;
+        background: var(--border-color);
+    }
+    .dash-stat-value {
+        font-size: 1.65rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        letter-spacing: -0.04em;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.1;
+        min-height: 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .dash-stat-label {
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        margin-top: 0.35rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+    }
+
+    /* ── Monitor grid ──────────────────────────────────── */
+    .monitor-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .monitor-cell {
+        padding: 1rem 1rem 0.75rem;
+        background: transparent;
+        position: relative;
+    }
+    .monitor-cell + .monitor-cell {
+        border-left: 1px solid var(--border-color);
+    }
+    .monitor-cell-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 0.5rem;
+    }
+    .monitor-cell-title {
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--text-muted);
+    }
+    .monitor-cell-current {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+    }
+    .monitor-cell-footer {
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        margin-top: 0.45rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    @media (max-width: 991.98px) {
+        .monitor-grid { grid-template-columns: repeat(2, 1fr); }
+        .monitor-cell:nth-child(3) { border-left: 0; border-top: 1px solid var(--border-color); }
+        .monitor-cell:nth-child(4) { border-top: 1px solid var(--border-color); }
+    }
+    @media (max-width: 575.98px) {
+        .monitor-grid { grid-template-columns: 1fr; }
+        .monitor-cell + .monitor-cell {
+            border-left: 0;
+            border-top: 1px solid var(--border-color);
+        }
+    }
+
+    /* Host info line */
+    .monitor-host-info {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    /* ── Toast ─────────────────────────────────────────── */
+    .toast {
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 10px !important;
+        overflow: hidden;
+    }
+    .toast-header {
+        background: var(--bg-card-header) !important;
+        color: var(--text-primary) !important;
+        border-bottom: 1px solid var(--border-color) !important;
+    }
+    .toast-body {
+        color: var(--text-secondary) !important;
+        font-size: 0.85rem;
+    }
+
+    /* ── Pagination ─────────────────────────────────────── */
+    .page-link {
+        background: var(--bg-card) !important;
+        border-color: var(--border-color) !important;
+        color: var(--text-secondary) !important;
+    }
+    .page-link:hover {
+        background: var(--bg-secondary) !important;
+        color: var(--text-primary) !important;
+    }
+    .page-item.active .page-link {
+        background: var(--accent-primary) !important;
+        border-color: var(--accent-primary) !important;
+        color: #fff !important;
+    }
+    .page-item.disabled .page-link {
+        background: var(--bg-card) !important;
+        border-color: var(--border-color) !important;
+        color: var(--text-muted) !important;
+    }
+
+    /* ── Drawer borders ─────────────────────────────────── */
+    #obsDrawer, #pubDrawer, #relayDrawer {
+        border-top: 1px solid var(--border-color) !important;
+    }
+
+    /* ── P2P section heading ────────────────────────────── */
+    .dash-section-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-muted);
+        padding-bottom: 0.75rem;
+    }
+    .dash-section-title .material-icons {
+        font-size: 14px;
+        opacity: 0.6;
+    }
+    .dash-section-title::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border-color);
+        margin-left: 0.5rem;
+    }
+
+    /* ── Data Source Form ───────────────────────────────── */
+    #dataSourceForm {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color) !important;
+        border-radius: 10px;
+    }
+    .ds-form-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.85rem 1rem 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .ds-form-title {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .ds-form-title .material-icons { font-size: 14px; opacity: 0.6; }
+    .ds-close-btn {
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--text-muted);
+        cursor: pointer;
+        line-height: 1;
+        transition: color 0.12s;
+    }
+    .ds-close-btn:hover { color: var(--text-primary); }
+    .ds-close-btn .material-icons { font-size: 18px; }
+    .ds-form-body { padding: 1rem; }
+    .ds-field-group {
+        display: grid;
+        gap: 0.6rem;
+        margin-bottom: 0.85rem;
+    }
+    .ds-field-group.cols-3 { grid-template-columns: 1fr 1fr 2fr; }
+    .ds-field-group.cols-2 { grid-template-columns: 1fr 1fr; }
+    .ds-field-group.cols-1 { grid-template-columns: 1fr; }
+    .ds-field-group.cols-url { grid-template-columns: 1fr 90px; }
+    .ds-field-group.cols-fetch { grid-template-columns: 1fr 90px 180px 1fr; }
+    .ds-field label {
+        display: block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--text-muted);
+        margin-bottom: 0.3rem;
+    }
+    .ds-field textarea.form-control { resize: vertical; }
+    .ds-field .form-control,
+    .ds-field .form-select {
+        background: var(--bg-input);
+        border-color: var(--border-color);
+        color: var(--text-primary);
+        font-size: 0.82rem;
+        border-radius: 6px;
+        padding: 0.38rem 0.6rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .ds-field .form-control:focus,
+    .ds-field .form-select:focus {
+        background: var(--bg-input-focus);
+        border-color: var(--border-color-focus);
+        box-shadow: none;
+        color: var(--text-primary);
+    }
+    .ds-field .form-control::placeholder { color: var(--text-muted); opacity: 0.6; }
+    .ds-field .form-control[readonly] {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+    .ds-price-row {
+        margin-bottom: 0.85rem;
+    }
+    .ds-price-inner {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        background: rgba(90, 90, 255, 0.08);
+        border: 1px solid rgba(90, 90, 255, 0.25);
+        border-radius: 8px;
+        padding: 0.6rem 0.85rem;
+    }
+    [data-theme="light"] .ds-price-inner {
+        background: rgba(74, 74, 255, 0.06);
+        border-color: rgba(74, 74, 255, 0.2);
+    }
+    .ds-price-label {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--accent-primary);
+        flex: 1;
+    }
+    .ds-price-label .material-icons { font-size: 14px; }
+    .ds-price-tooltip-wrap {
+        display: flex;
+        align-items: center;
+        cursor: help;
+        position: relative;
+    }
+    .ds-price-help { font-size: 13px !important; opacity: 0.5; transition: opacity 0.15s; }
+    .ds-price-tooltip-wrap:hover .ds-price-help { opacity: 1; }
+    .ds-price-tooltip-wrap::after {
+        content: '1 sat = 0.00000001 SATORI — the smallest unit of SATORI';
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.72rem;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: 0;
+        white-space: nowrap;
+        padding: 0.35rem 0.6rem;
+        border-radius: 6px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+        z-index: 10;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .ds-price-tooltip-wrap:hover::after { opacity: 1; }
+    .ds-price-sub {
+        font-size: 0.65rem;
+        font-weight: 500;
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--text-muted);
+        margin-left: 0.15rem;
+    }
+    .ds-price-input-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+    }
+    .ds-price-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        cursor: pointer;
+        margin-left: 0.25rem;
+        user-select: none;
+    }
+    .ds-price-toggle-track {
+        width: 28px;
+        height: 15px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 999px;
+        position: relative;
+        transition: background 0.2s, border-color 0.2s;
+    }
+    .ds-price-toggle-track.active {
+        background: var(--accent-primary);
+        border-color: var(--accent-primary);
+    }
+    .ds-price-toggle-thumb {
+        width: 9px;
+        height: 9px;
+        background: var(--text-muted);
+        border-radius: 50%;
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        transition: transform 0.2s, background 0.2s;
+    }
+    .ds-price-toggle-track.active .ds-price-toggle-thumb {
+        transform: translateX(13px);
+        background: #fff;
+    }
+    .ds-price-toggle-label {
+        font-size: 0.65rem;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        color: var(--text-muted);
+        transition: color 0.2s;
+    }
+    .ds-price-toggle:hover .ds-price-toggle-label { color: var(--text-secondary); }
+    .ds-price-unit {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: var(--accent-primary);
+        opacity: 0.75;
+        white-space: nowrap;
+    }
+    .ds-price-input::-webkit-outer-spin-button,
+    .ds-price-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .ds-price-input[type=number] { -moz-appearance: textfield; }
+    .ds-price-input {
+        width: 180px;
+        background: var(--bg-input);
+        border: 1px solid rgba(90, 90, 255, 0.3);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-size: 0.88rem;
+        font-weight: 600;
+        padding: 0.32rem 0.6rem;
+        text-align: right;
+        transition: border-color 0.15s;
+    }
+    .ds-price-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+        box-shadow: 0 0 0 2px rgba(90, 90, 255, 0.15);
+    }
+
+    .ds-section-sep {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-muted);
+        margin: 0.9rem 0 0.75rem;
+    }
+    .ds-section-sep::before,
+    .ds-section-sep::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: var(--border-color);
+    }
+    .ds-section-sep::before { flex: 0 0 0px; margin-right: 0; }
+    .ds-parser-tabs {
+        display: flex;
+        gap: 2px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 2px;
+        width: fit-content;
+        margin-bottom: 0.6rem;
+    }
+    .ds-parser-tab {
+        padding: 0.22rem 0.7rem;
+        border: none;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 0.7rem;
+        font-weight: 600;
+        border-radius: 4px;
+        cursor: pointer;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        transition: background 0.12s, color 0.12s;
+    }
+    .ds-parser-tab.active {
+        background: var(--accent-primary);
+        color: #fff;
+    }
+    .ds-external-hint {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        margin-bottom: 0.85rem;
+    }
+    .ds-external-hint code {
+        font-size: 0.72rem;
+        color: var(--accent-primary);
+        background: transparent;
+        padding: 0;
+    }
+    .ds-form-footer {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--border-color);
+        margin-top: 0.25rem;
+    }
+    .ds-form-footer .ds-error {
+        font-size: 0.75rem;
+        color: #dc3545;
+        margin-left: 0.25rem;
+    }
+    .ds-cadence-unit-group {
+        display: flex;
+        gap: 1px;
+        padding: 2px !important;
+        background: var(--bg-input) !important;
+    }
+    .ds-cadence-unit {
+        border: none;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 0.68rem;
+        font-weight: 600;
+        padding: 0.18rem 0.42rem;
+        border-radius: 3px;
+        cursor: pointer;
+        text-transform: lowercase;
+        letter-spacing: 0.02em;
+        transition: background 0.12s, color 0.12s;
+        white-space: nowrap;
+    }
+    .ds-cadence-unit:hover { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+    [data-theme="light"] .ds-cadence-unit:hover { background: rgba(0,0,0,0.06); }
+    .ds-cadence-unit.active {
+        background: var(--accent-primary);
+        color: #fff;
+    }
+
+    .ds-test-results {
+        margin-top: 0.85rem;
+        padding-top: 0.85rem;
+        border-top: 1px solid var(--border-color);
+    }
+    .ds-test-results label {
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--text-muted);
+        display: block;
+        margin-bottom: 0.3rem;
+    }
+
+    /* ── noEvrWarning nudge ─────────────────────────────── */
+    #noEvrWarning {
+        font-size: 0.72rem;
+        padding: 0.4rem 0.75rem;
+        border-radius: 6px;
+        background: rgba(234, 179, 8, 0.07);
+        border: 1px solid rgba(234, 179, 8, 0.2);
+        color: #ca8a04 !important;
+        margin-top: 0.75rem !important;
+    }
+    [data-theme="dark"] #noEvrWarning {
+        color: #fbbf24 !important;
+        background: rgba(251, 191, 36, 0.06);
+        border-color: rgba(251, 191, 36, 0.18);
+    }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -27,7 +659,7 @@
         <div class="modal-content" style="background: var(--bg-card); border: 1px solid var(--border-color);">
             <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
                 <h5 class="modal-title" id="importWalletModalLabel">
-                    <i class="material-icons align-middle me-2">upload_file</i>
+                    <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">upload_file</i>
                     Import Wallet
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
@@ -70,144 +702,105 @@
     </div>
 </div>
 
-<div class="container-fluid py-4">
+<div class="container-fluid dash-container">
     <div class="row g-4" id="dashboardLayoutRow">
-        <!-- Wallet Section -->
-        <div class="col-12 dashboard-widget-col" data-widget-id="wallet" draggable="true">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
+        <!-- Addresses Card -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="wallet" draggable="true">
+            <div class="card h-100 d-flex flex-column">
+                <div class="card-header card-header-3col">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">account_balance_wallet</i>
-                        Wallet
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">account_balance_wallet</i>
+                        Addresses
                     </h5>
-                    <div class="d-flex align-items-center gap-2">
-                        <a href="#" class="btn btn-outline-secondary btn-sm" onclick="toggleIdentityWallet(); return false;">
-                            <i class="material-icons align-middle" style="font-size: 16px;">badge</i>
-                            Identity
-                        </a>
+                    <div class="bal-tabs">
+                        <button class="bal-tab bal-tab-active" onclick="switchWalletTab('vault', this)">Vault</button>
+                        <button class="bal-tab" onclick="switchWalletTab('identity', this)">Wallet (Identity)</button>
+                    </div>
+                    <div class="card-header-actions">
                         <span class="text-muted drag-handle" title="Drag to reorder">
                             <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                         </span>
                     </div>
                 </div>
                 <div class="card-body">
-                    <div class="row">
-                        <!-- Left side: QR Code and Address -->
-                        <div class="col-lg-6 mb-4 mb-lg-0">
-                            <div class="text-center mb-3">
-                                <div id="walletQrCode" class="mb-3" style="display: inline-block; background: white; padding: 10px; border-radius: 10px;">
-                                    <p class="text-muted mb-0">Loading QR code...</p>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Wallet Address</label>
-                                <div class="input-group">
-                                    <input type="text" class="form-control" id="walletAddress" readonly placeholder="Loading...">
-                                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('walletAddress')" title="Copy to clipboard">
-                                        <i class="material-icons align-middle">content_copy</i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="text-center">
-                                <p id="showPrivateKeyBtn" class="text-danger mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
-                                    <i class="material-icons align-middle" style="font-size: 18px;">visibility</i>
-                                    Show Private Key
-                                </p>
-                                <div id="privateKeySection" style="display: none;">
-                                    <p class="text-muted mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
-                                        <i class="material-icons align-middle" style="font-size: 18px;">visibility_off</i>
-                                        Hide Private Key
-                                    </p>
-                                    <div class="alert alert-warning" style="word-break: break-all;">
-                                        <small><strong>Private Key:</strong></small><br>
-                                        <code id="walletPrivateKey">Loading...</code>
-                                    </div>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="copyPrivateKey()">
-                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
-                                        Copy Private Key
-                                    </button>
-                                </div>
+                    <!-- Vault pane -->
+                    <div id="walletVaultPane">
+                        <div class="text-center mb-3">
+                            <div id="walletQrCode" class="mb-3" style="display: inline-block; background: white; padding: 10px; border-radius: 10px;">
+                                <p class="text-muted mb-0">Loading QR code...</p>
                             </div>
                         </div>
-
-                        <!-- Right side: Send Tokens -->
-                        <div class="col-lg-6">
-                            <h6 class="mb-3">
-                                <i class="material-icons align-middle me-1">send</i>
-                                Send SATORI
-                            </h6>
-                            <div class="mb-3">
-                                <label class="form-label">Send From</label>
-                                <div class="d-flex gap-3">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
-                                        <label class="form-check-label" for="sendFromVault">
-                                            Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
-                                        </label>
-                                    </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
-                                        <label class="form-check-label" for="sendFromWallet">
-                                            Identity Wallet <small class="text-muted" id="walletBalanceLabel">(--)</small>
-                                        </label>
-                                    </div>
-                                </div>
+                        <div class="mb-3">
+                            <label class="form-label">Vault Address</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="walletAddress" readonly placeholder="Loading...">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('walletAddress')" title="Copy to clipboard">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Destination Address</label>
-                                <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
-                            </div>
-                            <div class="row mb-3">
-                                <div class="col-8">
-                                    <label class="form-label">Amount</label>
-                                    <input type="number" class="form-control" id="sendAmount" placeholder="0.00" step="0.00000001" min="0">
-                                </div>
-                                <div class="col-4">
-                                    <label class="form-label">Sweep All</label>
-                                    <div class="form-check mt-2">
-                                        <input class="form-check-input" type="checkbox" id="sendSweep" onchange="toggleSweepAmount()">
-                                        <label class="form-check-label" for="sendSweep">Send All</label>
-                                    </div>
-                                </div>
-                            </div>
-                            <button class="btn btn-primary w-100" onclick="sendTransaction()" id="sendBtn">
-                                <i class="material-icons align-middle me-1">send</i>
-                                Send Transaction
-                            </button>
-                            <div id="sendResult" class="mt-3" style="display: none;"></div>
-                            <p class="text-muted small mt-3 mb-0">
-                                Transaction fees will be paid during the send process. They typically amount to no more than 0.25 EVR.
+                        </div>
+                        <div class="text-center">
+                            <p id="showPrivateKeyBtn" class="text-danger mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
+                                <i class="material-icons align-middle" style="font-size: 18px;">visibility</i>
+                                Show Private Key
                             </p>
+                            <div id="privateKeySection" style="display: none;">
+                                <p class="text-muted mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
+                                    <i class="material-icons align-middle" style="font-size: 18px;">visibility_off</i>
+                                    Hide Private Key
+                                </p>
+                                <div class="alert alert-warning" style="word-break: break-all;">
+                                    <small><strong>Private Key:</strong></small><br>
+                                    <code id="walletPrivateKey">Loading...</code>
+                                </div>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="copyPrivateKey()">
+                                    <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                                    Copy Private Key
+                                </button>
+                            </div>
                         </div>
                     </div>
-
-                    <!-- Identity Wallet (Collapsed) -->
-                    <div id="identityWalletSection" style="display: none;" class="mt-4 pt-4 border-top">
-                        <h6 class="text-muted mb-3">
-                            <i class="material-icons align-middle me-1">badge</i>
-                            Identity Wallet (for digital identity only - do not send tokens here)
-                        </h6>
-                        <div class="row">
-                            <div class="col-md-6 mb-3 mb-md-0">
-                                <label class="form-label small">Identity Address</label>
-                                <div class="input-group input-group-sm">
-                                    <input type="text" class="form-control" id="identityAddress" readonly placeholder="Loading...">
-                                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityAddress')" title="Copy">
-                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
-                                    </button>
-                                </div>
+                    <!-- Identity pane -->
+                    <div id="walletIdentityPane" style="display: none;">
+                        <div class="mb-3">
+                            <label class="form-label">Identity Address</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="identityAddress" readonly placeholder="Loading...">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityAddress')" title="Copy">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label small">Identity Private Key</label>
-                                <div class="input-group input-group-sm">
-                                    <input type="password" class="form-control" id="identityPrivateKey" readonly placeholder="Click to reveal...">
-                                    <button class="btn btn-outline-secondary" onclick="toggleIdentityPrivateKey()" title="Show/Hide">
-                                        <i class="material-icons align-middle" style="font-size: 16px;" id="identityKeyIcon">visibility</i>
-                                    </button>
-                                    <button class="btn btn-outline-secondary" onclick="copyIdentityPrivateKey()" title="Copy">
-                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
-                                    </button>
-                                </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Wallet Public Key</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace" id="identityPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityPubkey')" title="Copy">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
+                            </div>
+                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can open payment channels to you.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nostr Public Key</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace" id="identityNostrPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityNostrPubkey')" title="Copy">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
+                            </div>
+                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can send you channel open notifications.</div>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">Identity Private Key</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" id="identityPrivateKey" readonly placeholder="Click to reveal...">
+                                <button class="btn btn-outline-secondary" onclick="toggleIdentityPrivateKey()" title="Show/Hide">
+                                    <i class="material-icons align-middle" id="identityKeyIcon">visibility</i>
+                                </button>
+                                <button class="btn btn-outline-secondary" onclick="copyIdentityPrivateKey()" title="Copy">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -215,15 +808,78 @@
             </div>
         </div>
 
-        <!-- Balance Section -->
-        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="balance" draggable="true">
+        <!-- Send SATORI Card -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="send" draggable="true">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">account_balance_wallet</i>
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">send</i>
+                        Send SATORI
+                    </h5>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Send From</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
+                                <label class="form-check-label" for="sendFromVault">
+                                    Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
+                                <label class="form-check-label" for="sendFromWallet">
+                                    Wallet (Identity) <small class="text-muted" id="walletBalanceLabel">(--)</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Destination Address</label>
+                        <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-8">
+                            <label class="form-label">Amount</label>
+                            <input type="number" class="form-control" id="sendAmount" placeholder="0.00" step="0.00000001" min="0">
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Sweep All</label>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="sendSweep" onchange="toggleSweepAmount()">
+                                <label class="form-check-label" for="sendSweep">Send All</label>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary w-100" onclick="sendTransaction()" id="sendBtn">
+                        <i class="material-icons align-middle me-1">send</i>
+                        Send Transaction
+                    </button>
+                    <div id="sendResult" class="mt-3" style="display: none;"></div>
+                    <p class="text-muted small mt-3 mb-0">
+                        Transaction fees will be paid during the send process. They typically amount to no more than 0.25 EVR.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Balance Section -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="balance" draggable="true">
+            <div class="card h-100 d-flex flex-column">
+                <div class="card-header card-header-3col">
+                    <h5 class="mb-0">
+                        <img src="{{ url_for('static', filename='img/balance-icon.png') }}" alt="" class="balance-icon align-middle me-2" style="width: 20px; height: 20px;">
                         Balance
                     </h5>
-                    <div class="d-flex align-items-center gap-2">
+                    <div class="bal-tabs">
+                        <button class="bal-tab bal-tab-active" onclick="switchBalTab('vault', this)">Vault</button>
+                        <button class="bal-tab" onclick="switchBalTab('identity', this)">Wallet (Identity)</button>
+                    </div>
+                    <div class="card-header-actions">
                         <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance()">
                             <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
                         </button>
@@ -232,28 +888,44 @@
                         </span>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div class="row text-center py-3">
-                        <div class="col-md-4 col-6 mb-3 mb-md-0">
-                            <h3 id="tokenBalance">
+                <div class="card-body p-0 balance-card-body">
+                    <!-- Vault pane -->
+                    <div id="balVaultPane" class="dash-stat-row">
+                        <div class="dash-stat">
+                            <div class="dash-stat-value" id="tokenBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
-                            </h3>
-                            <p class="text-muted mb-0">SATORI Token</p>
+                            </div>
+                            <div class="dash-stat-label">SATORI</div>
                         </div>
-                        <div class="col-md-4 col-6 mb-3 mb-md-0">
-                            <h3 id="stakeBalance">
+                        <div class="dash-stat">
+                            <div class="dash-stat-value" id="stakeBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
-                            </h3>
-                            <p class="text-muted mb-0">SATORI Stake</p>
+                            </div>
+                            <div class="dash-stat-label">Stake</div>
                         </div>
-                        <div class="col-md-4 col-12">
-                            <h3 id="evrBalance">
+                        <div class="dash-stat">
+                            <div class="dash-stat-value" id="evrBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
-                            </h3>
-                            <p class="text-muted mb-0">Evrmore (EVR)</p>
+                            </div>
+                            <div class="dash-stat-label">EVR</div>
                         </div>
                     </div>
-                    <p id="noEvrWarning" class="text-muted small mb-0 mt-1" style="display: none; opacity: 0.7;">
+                    <!-- Identity pane -->
+                    <div id="balIdentityPane" class="dash-stat-row" style="display:none;">
+                        <div class="dash-stat">
+                            <div class="dash-stat-value" id="identityWalletBalance">
+                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                            </div>
+                            <div class="dash-stat-label">SATORI</div>
+                        </div>
+                        <div class="dash-stat">
+                            <div class="dash-stat-value" id="identityEvrBalance">
+                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                            </div>
+                            <div class="dash-stat-label">EVR</div>
+                        </div>
+                    </div>
+                    <p id="noEvrWarning" class="mb-0 mx-3 mb-3" style="display: none;">
                         Without EVR in your wallet, larger transaction fees will be paid in SATORI.
                     </p>
                 </div>
@@ -265,7 +937,7 @@
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">card_giftcard</i>
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">card_giftcard</i>
                         Reward Address
                     </h5>
                     <span class="text-muted drag-handle" title="Drag to reorder">
@@ -290,7 +962,7 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">monitor_heart</i>
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">monitor_heart</i>
                         Neuron Monitoring
                     </h5>
                     <div class="d-flex align-items-center gap-2">
@@ -301,62 +973,48 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <div class="small text-muted mb-3" id="systemHostInfo">Host details unavailable</div>
-                    <div class="row g-3">
-                        <div class="col-12 col-md-6 col-xl-3">
-                            <div class="card h-100">
-                                <div class="card-body p-3">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <span class="small text-muted">CPU</span>
-                                        <strong id="systemCpuCurrent">--</strong>
-                                    </div>
-                                    <div style="height: 120px;">
-                                        <canvas id="systemCpuChart"></canvas>
-                                    </div>
-                                    <div class="small text-muted mt-2">System uptime: <span id="systemUptime">--</span></div>
-                                </div>
+                    <div class="monitor-host-info" id="systemHostInfo">Host details unavailable</div>
+                    <div class="monitor-grid">
+                        <div class="monitor-cell">
+                            <div class="monitor-cell-header">
+                                <span class="monitor-cell-title">CPU</span>
+                                <span class="monitor-cell-current" id="systemCpuCurrent">--</span>
                             </div>
-                        </div>
-                        <div class="col-12 col-md-6 col-xl-3">
-                            <div class="card h-100">
-                                <div class="card-body p-3">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <span class="small text-muted">Memory</span>
-                                        <strong id="systemMemCurrent">--</strong>
-                                    </div>
-                                    <div style="height: 120px;">
-                                        <canvas id="systemMemChart"></canvas>
-                                    </div>
-                                    <div class="small text-muted mt-2">Process RSS: <span id="systemProcMemCurrent">--</span></div>
-                                </div>
+                            <div style="height: 110px;">
+                                <canvas id="systemCpuChart"></canvas>
                             </div>
+                            <div class="monitor-cell-footer">Uptime: <span id="systemUptime">--</span></div>
                         </div>
-                        <div class="col-12 col-md-6 col-xl-3">
-                            <div class="card h-100">
-                                <div class="card-body p-3">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <span class="small text-muted">Disk</span>
-                                        <strong id="systemDiskCurrent">--</strong>
-                                    </div>
-                                    <div style="height: 120px;">
-                                        <canvas id="systemDiskChart"></canvas>
-                                    </div>
-                                    <div class="small text-muted mt-2">Root usage trend</div>
-                                </div>
+                        <div class="monitor-cell">
+                            <div class="monitor-cell-header">
+                                <span class="monitor-cell-title">Memory</span>
+                                <span class="monitor-cell-current" id="systemMemCurrent">--</span>
                             </div>
+                            <div style="height: 110px;">
+                                <canvas id="systemMemChart"></canvas>
+                            </div>
+                            <div class="monitor-cell-footer">RSS: <span id="systemProcMemCurrent">--</span></div>
                         </div>
-                        <div class="col-12 col-md-6 col-xl-3">
-                            <div class="card h-100">
-                                <div class="card-body p-3">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <span class="small text-muted">Process CPU</span>
-                                        <strong id="systemProcCpuCurrent">--</strong>
-                                    </div>
-                                    <div style="height: 120px;">
-                                        <canvas id="systemProcChart"></canvas>
-                                    </div>
-                                    <div class="small text-muted mt-2">Threads: <span id="systemThreads">--</span> | Uptime: <span id="systemProcessUptime">--</span></div>
-                                </div>
+                        <div class="monitor-cell">
+                            <div class="monitor-cell-header">
+                                <span class="monitor-cell-title">Disk</span>
+                                <span class="monitor-cell-current" id="systemDiskCurrent">--</span>
+                            </div>
+                            <div style="height: 110px;">
+                                <canvas id="systemDiskChart"></canvas>
+                            </div>
+                            <div class="monitor-cell-footer">Root usage trend</div>
+                        </div>
+                        <div class="monitor-cell">
+                            <div class="monitor-cell-header">
+                                <span class="monitor-cell-title">Process CPU</span>
+                                <span class="monitor-cell-current" id="systemProcCpuCurrent">--</span>
+                            </div>
+                            <div style="height: 110px;">
+                                <canvas id="systemProcChart"></canvas>
+                            </div>
+                            <div class="monitor-cell-footer">
+                                Threads: <span id="systemThreads">--</span> &middot; <span id="systemProcessUptime">--</span>
                             </div>
                         </div>
                     </div>
@@ -366,22 +1024,15 @@
 
     </div>
 
-    <div id="p2p" class="row g-4 mt-2">
-        <div class="col-12">
-            <div class="d-flex align-items-center gap-2">
-                <i class="material-icons align-middle">hub</i>
-                <h4 class="mb-0">P2P</h4>
-            </div>
-        </div>
-    </div>
+    <div id="p2p"></div>
 
-    <div class="row g-4 mt-2" id="p2pLayoutRow">
+    <div class="row g-4" id="p2pLayoutRow">
         <!-- Relay Settings Section -->
         <div class="col-12 p2p-widget-col" data-widget-id="relay-settings" draggable="true">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">cell_tower</i>
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">cell_tower</i>
                         Relay Settings
                     </h5>
                     <span class="text-muted drag-handle" title="Drag to reorder">
@@ -425,7 +1076,7 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">playlist_add_check</i>
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">playlist_add_check</i>
                         Subscriptions
                     </h5>
                     <div class="d-flex align-items-center gap-2">
@@ -502,7 +1153,7 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">publish</i>
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">publish</i>
                         Publications
                     </h5>
                     <div class="d-flex align-items-center gap-2">
@@ -521,106 +1172,157 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <!-- New Data Source Form -->
-                    <div id="dataSourceForm" style="display: none;" class="mb-3 p-3 border rounded">
-                        <h6 class="mb-3" id="dsFormTitle">New Data Source</h6>
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-4">
-                                <label class="form-label form-label-sm">Stream Name</label>
-                                <input type="text" id="dsStreamName" class="form-control form-control-sm" placeholder="btc-price">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label form-label-sm">Display Name</label>
-                                <input type="text" id="dsName" class="form-control form-control-sm" placeholder="Bitcoin Price">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label form-label-sm">Description</label>
-                                <input type="text" id="dsDescription" class="form-control form-control-sm" placeholder="BTC/USD spot price">
-                            </div>
+                    <!-- New / Edit Data Source Form -->
+                    <div id="dataSourceForm" style="display: none;" class="mb-3">
+                        <!-- Header -->
+                        <div class="ds-form-header">
+                            <span class="ds-form-title">
+                                <i class="material-icons">cable</i>
+                                <span id="dsFormTitle">New Data Source</span>
+                            </span>
+                            <button class="ds-close-btn" onclick="toggleDataSourceForm(false)" title="Cancel">
+                                <i class="material-icons">close</i>
+                            </button>
                         </div>
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-3">
-                                <label class="form-label form-label-sm">Price per Observation <small class="text-muted">(sats, 0 = free)</small></label>
-                                <input type="number" id="dsPricePerObs" class="form-control form-control-sm" value="0" min="0" placeholder="0">
+
+                        <div class="ds-form-body">
+                            <!-- Identity -->
+                            <div class="ds-field-group" style="grid-template-columns: 1fr 1fr 2fr;">
+                                <div class="ds-field">
+                                    <label>Stream Name</label>
+                                    <input type="text" id="dsStreamName" class="form-control" placeholder="btc-price">
+                                </div>
+                                <div class="ds-field">
+                                    <label>Display Name</label>
+                                    <input type="text" id="dsName" class="form-control" placeholder="Bitcoin Price">
+                                </div>
+                                <div class="ds-field">
+                                    <label>Description</label>
+                                    <textarea id="dsDescription" class="form-control" rows="3" placeholder="BTC/USD spot price" style="resize: vertical; font-size: 0.82rem;"></textarea>
+                                </div>
                             </div>
-                        </div>
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-6">
-                                <label class="form-label form-label-sm">URL <small class="text-muted">(leave empty for external push)</small></label>
-                                <input type="text" id="dsUrl" class="form-control form-control-sm" placeholder="https://api.example.com/price" oninput="toggleFetchFields()">
+
+                            <!-- Pricing -->
+                            <div class="ds-price-row">
+                                <div class="ds-price-inner">
+                                    <div class="ds-price-label">
+                                        <i class="material-icons">bolt</i>
+                                        <span id="dsPriceLabel">Sats (Satoshis) per Observation</span>
+                                        <span class="ds-price-sub">(0 = free)</span>
+                                        <span class="ds-price-tooltip-wrap" title="1 sat = 0.00000001 SATORI — the smallest unit of SATORI">
+                                            <i class="material-icons ds-price-help">help_outline</i>
+                                        </span>
+                                    </div>
+                                    <div class="ds-price-input-wrap">
+                                        <input type="number" id="dsPricePerObs" class="ds-price-input" value="0" min="0" step="1" placeholder="0">
+                                        <span id="dsPriceUnit" class="ds-price-unit">sats</span>
+                                        <span style="width:1px; height:14px; background:var(--border-color); display:inline-block; margin: 0 0.4rem;"></span>
+                                        <div class="ds-price-toggle" onclick="togglePriceUnit()" title="Switch between sats and SATORI">
+                                            <div class="ds-price-toggle-track" id="dsPriceToggleTrack">
+                                                <div class="ds-price-toggle-thumb"></div>
+                                            </div>
+                                            <span class="ds-price-toggle-label" id="dsPriceToggleLabel">SATORI</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="col-md-2" id="dsMethodGroup">
-                                <label class="form-label form-label-sm">Method</label>
-                                <select id="dsMethod" class="form-select form-select-sm">
-                                    <option value="GET">GET</option>
-                                    <option value="POST">POST</option>
-                                </select>
-                            </div>
-                            <div class="col-md-3" id="dsCadenceGroup">
-                                <label class="form-label form-label-sm">Cadence <small class="text-muted">(optional)</small></label>
-                                <div class="input-group input-group-sm">
-                                    <input type="number" id="dsCadenceMin" class="form-control form-control-sm" value="" min="15" placeholder="—">
-                                    <span class="input-group-text">min</span>
-                                    <select id="dsCadencePreset" class="form-select form-select-sm" onchange="applyCadencePreset()">
-                                        <option value="">Presets</option>
-                                        <option value="15">15 min</option>
-                                        <option value="30">30 min</option>
-                                        <option value="60">1 hour</option>
-                                        <option value="240">4 hours</option>
-                                        <option value="1440">1 day</option>
-                                        <option value="10080">1 week</option>
-                                        <option value="43200">1 month</option>
-                                        <option value="525600">1 year</option>
+
+                            <!-- Fetch section -->
+                            <div class="ds-section-sep">Data Fetch</div>
+                            <div class="ds-field-group cols-url" id="dsMethodGroup">
+                                <div class="ds-field">
+                                    <label>URL <span style="font-weight:400; text-transform:none; letter-spacing:0;">(leave empty for external push)</span></label>
+                                    <input type="text" id="dsUrl" class="form-control" placeholder="https://api.example.com/price" oninput="toggleFetchFields()">
+                                </div>
+                                <div class="ds-field">
+                                    <label>Method</label>
+                                    <select id="dsMethod" class="form-select">
+                                        <option value="GET">GET</option>
+                                        <option value="POST">POST</option>
                                     </select>
                                 </div>
                             </div>
-                            <div class="col-md-2" id="dsHeadersGroup">
-                                <label class="form-label form-label-sm">Headers (JSON)</label>
-                                <input type="text" id="dsHeaders" class="form-control form-control-sm" placeholder='{"Authorization": "..."}'>
+                            <div class="ds-field-group cols-2" id="dsCadenceGroup">
+                                <div class="ds-field">
+                                    <label>Cadence <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="dsCadenceMin" class="form-control" value="" min="10" placeholder="—" style="font-size:0.82rem;">
+                                        <span class="input-group-text ds-cadence-unit-group" style="padding: 0; background:var(--bg-input); border-color:var(--border-color);">
+                                            <button type="button" class="ds-cadence-unit active" id="dsCadenceUnitMin" onclick="switchCadenceUnit('min')">min</button>
+                                            <button type="button" class="ds-cadence-unit" id="dsCadenceUnitHr" onclick="switchCadenceUnit('hr')">hr</button>
+                                            <button type="button" class="ds-cadence-unit" id="dsCadenceUnitDay" onclick="switchCadenceUnit('day')">day</button>
+                                            <button type="button" class="ds-cadence-unit" id="dsCadenceUnitWk" onclick="switchCadenceUnit('wk')">wk</button>
+                                        </span>
+                                        <select id="dsCadencePreset" class="form-select" onchange="applyCadencePreset()" style="font-size:0.78rem; max-width:100px; background:var(--bg-input); border-color:var(--border-color); color:var(--text-secondary);">
+                                            <option value="">Presets</option>
+                                            <option value="15">15 min</option>
+                                            <option value="30">30 min</option>
+                                            <option value="60">1 hour</option>
+                                            <option value="240">4 hours</option>
+                                            <option value="1440">1 day</option>
+                                            <option value="10080">1 week</option>
+                                            <option value="43200">1 month</option>
+                                            <option value="525600">1 year</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="ds-field" id="dsHeadersGroup">
+                                    <label>Headers <span style="font-weight:400; text-transform:none; letter-spacing:0;">(JSON)</span></label>
+                                    <input type="text" id="dsHeaders" class="form-control" placeholder='{"Authorization": "Bearer ..."}'>
+                                </div>
                             </div>
-                        </div>
-                        <div class="row g-2 mb-2" id="dsParserRow">
-                            <div class="col-md-3">
-                                <label class="form-label form-label-sm">Parser Type</label>
-                                <select id="dsParserType" class="form-select form-select-sm" onchange="toggleParserInput()">
+
+                            <!-- Parser section -->
+                            <div id="dsParserRow">
+                                <div class="ds-section-sep">Parser</div>
+                                <div class="ds-parser-tabs">
+                                    <button type="button" class="ds-parser-tab active" id="dsParserTabJsonPath" onclick="switchParserTab('json_path')">JSON Path</button>
+                                    <button type="button" class="ds-parser-tab" id="dsParserTabPython" onclick="switchParserTab('python')">Python</button>
+                                </div>
+                                <!-- hidden select keeps existing save logic intact -->
+                                <select id="dsParserType" style="display:none;">
                                     <option value="json_path">JSON Path</option>
                                     <option value="python">Python Function</option>
                                 </select>
-                            </div>
-                            <div class="col-md-9" id="dsParserJsonPathGroup">
-                                <label class="form-label form-label-sm">JSON Path</label>
-                                <input type="text" id="dsParserJsonPath" class="form-control form-control-sm" placeholder="data.price">
-                            </div>
-                            <div class="col-md-9" id="dsParserPythonGroup" style="display: none;">
-                                <label class="form-label form-label-sm">Python Function <small class="text-muted">(receives <code>text</code>, return the value)</small></label>
-                                <textarea id="dsParserPython" class="form-control form-control-sm font-monospace" rows="4" placeholder="import json&#10;data = json.loads(text)&#10;return data['price']"></textarea>
-                            </div>
-                        </div>
-                        <div id="dsExternalHint" style="display: none;" class="mb-2">
-                            <small class="text-muted">
-                                No URL — this stream accepts data via <code>POST /api/network/publish</code>
-                                with <code>{\"stream_name\": \"...\", \"value\": \"...\"}</code>
-                            </small>
-                        </div>
-                        <div class="d-flex gap-2 mb-2">
-                            <button class="btn btn-sm btn-outline-info" onclick="testDataSource(this)">Test</button>
-                            <button class="btn btn-sm btn-primary" onclick="saveDataSource(this)">Save</button>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="toggleDataSourceForm(false)">Cancel</button>
-                            <span id="dsError" class="text-danger small align-self-center"></span>
-                        </div>
-                        <div id="dsTestResults" style="display: none;">
-                            <div class="row g-2">
-                                <div class="col-md-8">
-                                    <label class="form-label form-label-sm">Response <small class="text-muted">(click a value to select it)</small></label>
-                                    <div id="dsTestTree" class="border rounded p-2 bg-light" style="max-height: 280px; overflow: auto; font-size: 0.8rem;"></div>
+                                <div id="dsParserJsonPathGroup" class="ds-field">
+                                    <label>JSON Path</label>
+                                    <input type="text" id="dsParserJsonPath" class="form-control" placeholder="data.price">
                                 </div>
-                                <div class="col-md-4">
-                                    <label class="form-label form-label-sm">Extracted Value</label>
-                                    <div id="dsTestValue" class="border rounded p-2 bg-light font-monospace" style="min-height: 40px;"></div>
+                                <div id="dsParserPythonGroup" style="display: none;" class="ds-field">
+                                    <label>Python Function <span style="font-weight:400; text-transform:none; letter-spacing:0;">(receives <code style="color:var(--accent-primary);background:none;padding:0;font-size:inherit;">text</code>, return the value)</span></label>
+                                    <textarea id="dsParserPython" class="form-control font-monospace" rows="4" placeholder="import json&#10;data = json.loads(text)&#10;return data['price']" style="font-size:0.78rem; resize:vertical;"></textarea>
                                 </div>
                             </div>
-                        </div>
-                    </div>
+
+                            <!-- External push hint -->
+                            <div id="dsExternalHint" style="display: none;" class="ds-external-hint">
+                                No URL — this stream accepts data pushed via
+                                <code>POST /api/network/publish</code>
+                                with <code>{"stream_name": "...", "value": "..."}</code>
+                            </div>
+
+                            <!-- Footer actions -->
+                            <div class="ds-form-footer">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="testDataSource(this)">Test</button>
+                                <button class="btn btn-sm btn-primary" onclick="saveDataSource(this)">Save</button>
+                                <span id="dsError" class="ds-error"></span>
+                            </div>
+
+                            <!-- Test results -->
+                            <div id="dsTestResults" class="ds-test-results" style="display: none;">
+                                <div class="row g-2">
+                                    <div class="col-md-8">
+                                        <label>Response <span style="font-weight:400; text-transform:none; letter-spacing:0;">(click a value to select it)</span></label>
+                                        <div id="dsTestTree" class="border rounded p-2" style="max-height: 280px; overflow: auto; font-size: 0.8rem; background:var(--bg-input); border-color:var(--border-color) !important;"></div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label>Extracted Value</label>
+                                        <div id="dsTestValue" class="border rounded p-2 font-monospace" style="min-height: 40px; background:var(--bg-input); border-color:var(--border-color) !important; font-size:0.8rem; color:var(--text-primary);"></div>
+                                    </div>
+                                </div><!-- /row g-2 -->
+                            </div><!-- /dsTestResults -->
+                        </div><!-- /ds-form-body -->
+                    </div><!-- /dataSourceForm -->
                     <div id="pubsEmpty" class="text-center text-muted py-3">
                         No publications yet.
                     </div>
@@ -650,6 +1352,7 @@
                                 <h6 class="mb-0" id="pubDrawerTitle">Publication Data</h6>
                                 <div class="d-flex gap-2">
                                     <button class="btn btn-sm btn-outline-secondary" onclick="exportPubCsv()">Export CSV</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="editDataSource(pubDrawerStream.name)">Edit</button>
                                     <button class="btn btn-sm btn-outline-secondary" onclick="closePubDrawer()">Close</button>
                                 </div>
                             </div>
@@ -680,7 +1383,7 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">rss_feed</i>
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">rss_feed</i>
                         Relays
                     </h5>
                     <div class="d-flex align-items-center gap-2">
@@ -816,9 +1519,9 @@
 <!-- Status Messages -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
     <div id="statusToast" class="toast" role="alert">
-        <div class="toast-header bg-dark text-white">
-            <strong class="me-auto">Satori</strong>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+        <div class="toast-header">
+            <strong class="me-auto" style="font-size:0.8rem;font-weight:600;">Satori</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" style="filter: var(--btn-close-filter, none);"></button>
         </div>
         <div class="toast-body" id="toastMessage"></div>
     </div>
@@ -1043,14 +1746,20 @@
         // Fetches SATORI token and EVR balance
         setBalanceLoading('tokenBalance', true);
         setBalanceLoading('evrBalance', true);
+        setBalanceLoading('identityWalletBalance', true);
+        setBalanceLoading('identityEvrBalance', true);
 
         try {
             const result = await apiCall('/wallet/balance/direct');
             if (result && !result.error) {
-                document.getElementById('tokenBalance').textContent = result.total !== undefined ? formatBalance(result.total) : '--';
-                document.getElementById('evrBalance').textContent = result.total_evr !== undefined ? formatBalance(result.total_evr) : '--';
+                // Vault pane
+                document.getElementById('tokenBalance').textContent = result.vault_balance !== undefined ? formatBalance(result.vault_balance) : '--';
+                document.getElementById('evrBalance').textContent = result.vault_evr !== undefined ? formatBalance(result.vault_evr) : '--';
+                // Identity pane
+                document.getElementById('identityWalletBalance').textContent = result.wallet_balance !== undefined ? formatBalance(result.wallet_balance) : '--';
+                document.getElementById('identityEvrBalance').textContent = result.wallet_evr !== undefined ? formatBalance(result.wallet_evr) : '--';
 
-                // Show/hide no-EVR warning
+                // Show/hide no-EVR warning (check total EVR)
                 const noEvrWarning = document.getElementById('noEvrWarning');
                 if (noEvrWarning) {
                     noEvrWarning.style.display = (result.total_evr !== undefined && parseFloat(result.total_evr) <= 0) ? 'block' : 'none';
@@ -1064,9 +1773,10 @@
                     document.getElementById('walletBalanceLabel').textContent = '(' + formatBalance(result.wallet_balance) + ')';
                 }
             } else {
-                // If there's an error, show dashes
                 document.getElementById('tokenBalance').textContent = '--';
                 document.getElementById('evrBalance').textContent = '--';
+                document.getElementById('identityWalletBalance').textContent = '--';
+                document.getElementById('identityEvrBalance').textContent = '--';
                 document.getElementById('vaultBalanceLabel').textContent = '(--)';
                 document.getElementById('walletBalanceLabel').textContent = '(--)';
                 if (result && result.error) {
@@ -1077,9 +1787,25 @@
             console.error('Failed to fetch balance from ElectrumX:', error);
             document.getElementById('tokenBalance').textContent = '--';
             document.getElementById('evrBalance').textContent = '--';
+            document.getElementById('identityWalletBalance').textContent = '--';
+            document.getElementById('identityEvrBalance').textContent = '--';
             document.getElementById('vaultBalanceLabel').textContent = '(--)';
             document.getElementById('walletBalanceLabel').textContent = '(--)';
         }
+    }
+
+    function switchBalTab(tab, btn) {
+        document.getElementById('balVaultPane').style.display = tab === 'vault' ? 'flex' : 'none';
+        document.getElementById('balIdentityPane').style.display = tab === 'identity' ? 'flex' : 'none';
+        btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
+        btn.classList.add('bal-tab-active');
+    }
+
+    function switchWalletTab(tab, btn) {
+        document.getElementById('walletVaultPane').style.display = tab === 'vault' ? 'block' : 'none';
+        document.getElementById('walletIdentityPane').style.display = tab === 'identity' ? 'block' : 'none';
+        btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
+        btn.classList.add('bal-tab-active');
     }
 
     async function loadAllBalances() {
@@ -1462,6 +2188,16 @@
                 document.getElementById('identityAddress').value = result.wallet_address;
             } else {
                 document.getElementById('identityAddress').value = 'Not available';
+            }
+            if (result.wallet_pubkey) {
+                document.getElementById('identityPubkey').value = result.wallet_pubkey;
+            } else {
+                document.getElementById('identityPubkey').value = 'Not available';
+            }
+            if (result.nostr_pubkey) {
+                document.getElementById('identityNostrPubkey').value = result.nostr_pubkey;
+            } else {
+                document.getElementById('identityNostrPubkey').value = 'Not available';
             }
         }
     }
@@ -2058,8 +2794,8 @@
             }
             const cadenceMin = parseInt(row.cadence_minutes) || 0;
             const hasUrl = !!row.url;
-            if (hasUrl && cadenceMin && cadenceMin < 15) {
-                errors.push('Row ' + (i+1) + ': cadence must be at least 15 minutes');
+            if (hasUrl && cadenceMin && cadenceMin < 10) {
+                errors.push('Row ' + (i+1) + ': cadence must be at least 10 minutes');
                 continue;
             }
             if (hasUrl && !row.parser_config) {
@@ -2116,9 +2852,11 @@
         ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython'].forEach(
             id => document.getElementById(id).value = '');
         document.getElementById('dsCadenceMin').value = '';
+        resetPriceUnit();
         document.getElementById('dsPricePerObs').value = '0';
         document.getElementById('dsMethod').value = 'GET';
         document.getElementById('dsParserType').value = 'json_path';
+        switchCadenceUnit('min');
         toggleParserInput();
         toggleFetchFields();
         document.getElementById('dsTestResults').style.display = 'none';
@@ -2139,7 +2877,19 @@
             document.getElementById('dsUrl').value = ds.url || '';
             document.getElementById('dsMethod').value = ds.method || 'GET';
             document.getElementById('dsHeaders').value = ds.headers || '';
-            document.getElementById('dsCadenceMin').value = ds.cadence_seconds ? Math.round(ds.cadence_seconds / 60) : '';
+            if (ds.cadence_seconds) {
+                const totalMin = Math.round(ds.cadence_seconds / 60);
+                let unit = 'min';
+                if (totalMin % 10080 === 0) unit = 'wk';
+                else if (totalMin % 1440 === 0) unit = 'day';
+                else if (totalMin % 60 === 0) unit = 'hr';
+                switchCadenceUnit(unit);
+                document.getElementById('dsCadenceMin').value = totalMin / CADENCE_UNIT_MULTIPLIERS[unit];
+            } else {
+                switchCadenceUnit('min');
+                document.getElementById('dsCadenceMin').value = '';
+            }
+            resetPriceUnit();
             document.getElementById('dsPricePerObs').value = ds.price_per_obs || 0;
             document.getElementById('dsParserType').value = ds.parser_type || 'json_path';
             toggleParserInput();
@@ -2160,23 +2910,90 @@
         }
     }
 
+    // cadence unit state: 'min' | 'hr' | 'day' | 'wk'
+    const CADENCE_UNIT_MULTIPLIERS = { min: 1, hr: 60, day: 1440, wk: 10080 };
+    let cadenceUnit = 'min';
+
+    function switchCadenceUnit(unit) {
+        const input = document.getElementById('dsCadenceMin');
+        const currentVal = parseFloat(input.value);
+        if (!isNaN(currentVal) && currentVal > 0) {
+            // convert displayed value: current minutes → new unit
+            const inMinutes = currentVal * CADENCE_UNIT_MULTIPLIERS[cadenceUnit];
+            const newVal = inMinutes / CADENCE_UNIT_MULTIPLIERS[unit];
+            input.value = Number.isInteger(newVal) ? newVal : parseFloat(newVal.toFixed(2));
+        }
+        cadenceUnit = unit;
+        ['min','hr','day','wk'].forEach(u => {
+            document.getElementById('dsCadenceUnit' + u.charAt(0).toUpperCase() + u.slice(1))
+                .classList.toggle('active', u === unit);
+        });
+    }
+
+    let priceInSatori = false;
+    const SATS_PER_SATORI = 100_000_000;
+
+    function togglePriceUnit() {
+        const input = document.getElementById('dsPricePerObs');
+        const currentVal = parseFloat(input.value) || 0;
+        priceInSatori = !priceInSatori;
+        if (priceInSatori) {
+            input.value = currentVal / SATS_PER_SATORI || '';
+            input.step = '0.00000001';
+            input.placeholder = '0.00000001';
+            document.getElementById('dsPriceUnit').textContent = 'SATORI';
+            document.getElementById('dsPriceLabel').textContent = 'SATORI per Observation';
+            document.getElementById('dsPriceToggleTrack').classList.add('active');
+        } else {
+            input.value = Math.round(currentVal * SATS_PER_SATORI) || '';
+            input.step = '1';
+            input.placeholder = '0';
+            document.getElementById('dsPriceUnit').textContent = 'sats';
+            document.getElementById('dsPriceLabel').textContent = 'Sats (Satoshis) per Observation';
+            document.getElementById('dsPriceToggleTrack').classList.remove('active');
+        }
+    }
+
+    function getPriceInSats() {
+        const val = parseFloat(document.getElementById('dsPricePerObs').value) || 0;
+        return priceInSatori ? Math.round(val * SATS_PER_SATORI) : Math.round(val);
+    }
+
+    function resetPriceUnit() {
+        if (priceInSatori) togglePriceUnit(); // reset to sats
+    }
+
     function applyCadencePreset() {
-        const preset = document.getElementById('dsCadencePreset').value;
-        if (preset) document.getElementById('dsCadenceMin').value = preset;
+        const presetMin = parseInt(document.getElementById('dsCadencePreset').value);
+        if (presetMin) {
+            const val = presetMin / CADENCE_UNIT_MULTIPLIERS[cadenceUnit];
+            document.getElementById('dsCadenceMin').value = Number.isInteger(val) ? val : parseFloat(val.toFixed(2));
+        }
         document.getElementById('dsCadencePreset').value = '';
+    }
+
+    function switchParserTab(type) {
+        document.getElementById('dsParserType').value = type;
+        document.getElementById('dsParserTabJsonPath').classList.toggle('active', type === 'json_path');
+        document.getElementById('dsParserTabPython').classList.toggle('active', type === 'python');
+        toggleParserInput();
     }
 
     function toggleParserInput() {
         const type = document.getElementById('dsParserType').value;
         document.getElementById('dsParserJsonPathGroup').style.display = type === 'json_path' ? '' : 'none';
         document.getElementById('dsParserPythonGroup').style.display = type === 'python' ? '' : 'none';
+        // sync tab buttons
+        const tabJsonPath = document.getElementById('dsParserTabJsonPath');
+        const tabPython = document.getElementById('dsParserTabPython');
+        if (tabJsonPath) tabJsonPath.classList.toggle('active', type === 'json_path');
+        if (tabPython) tabPython.classList.toggle('active', type === 'python');
     }
 
     function toggleFetchFields() {
         const hasUrl = document.getElementById('dsUrl').value.trim() !== '';
-        document.getElementById('dsMethodGroup').style.display = hasUrl ? '' : 'none';
+        // URL + Method row is always visible; only hide cadence/parser when no URL
         document.getElementById('dsCadenceGroup').style.display = hasUrl ? '' : 'none';
-        document.getElementById('dsHeadersGroup').style.display = hasUrl ? '' : 'none';
         document.getElementById('dsParserRow').style.display = hasUrl ? '' : 'none';
         document.getElementById('dsExternalHint').style.display = hasUrl ? 'none' : '';
     }
@@ -2249,8 +3066,7 @@
     }
 
     function selectJsonPath(path, value) {
-        document.getElementById('dsParserType').value = 'json_path';
-        toggleParserInput();
+        switchParserTab('json_path');
         document.getElementById('dsParserJsonPath').value = path;
         document.getElementById('dsTestValue').innerHTML =
             '<span class="text-success fw-bold">' + value + '</span>' +
@@ -2317,15 +3133,20 @@
         const streamName = document.getElementById('dsStreamName').value.trim();
         const url = document.getElementById('dsUrl').value.trim();
         if (!streamName) { err.textContent = 'Stream name required'; return; }
+        const isEditing = document.getElementById('dsStreamName').readOnly;
+        if (!isEditing && pubsAllItems.some(p => p.stream_name === streamName)) {
+            err.textContent = 'A publication with this stream name already exists.'; return;
+        }
         // URL-dependent validation
         let cadence = 0;
         let parserType = '';
         let parserConfig = '';
         const headers = document.getElementById('dsHeaders').value.trim() || null;
         if (url) {
-            const cadenceMin = parseInt(document.getElementById('dsCadenceMin').value);
-            if (!cadenceMin || cadenceMin < 15) { err.textContent = 'Cadence must be at least 15 minutes'; return; }
-            cadence = cadenceMin * 60;
+            const cadenceRaw = parseFloat(document.getElementById('dsCadenceMin').value);
+            const cadenceMin = cadenceRaw * CADENCE_UNIT_MULTIPLIERS[cadenceUnit];
+            if (!cadenceMin || cadenceMin < 10) { err.textContent = 'Cadence must be at least 15 minutes'; return; }
+            cadence = Math.round(cadenceMin) * 60;
             parserType = document.getElementById('dsParserType').value;
             parserConfig = parserType === 'json_path'
                 ? document.getElementById('dsParserJsonPath').value.trim()
@@ -2349,7 +3170,7 @@
                 cadence_seconds: cadence,
                 parser_type: parserType,
                 parser_config: parserConfig,
-                price_per_obs: parseInt(document.getElementById('dsPricePerObs').value) || 0,
+                price_per_obs: getPriceInSats(),
             })
         });
         btnDone(btn);
@@ -2500,6 +3321,11 @@
         const drawer = document.getElementById('pubDrawer');
         const title = document.getElementById('pubDrawerTitle');
         const body = document.getElementById('pubDrawerBody');
+        // toggle closed if clicking the already-open stream
+        if (drawer.style.display === 'block' && pubDrawerStream.name === pub.stream_name) {
+            closePubDrawer();
+            return;
+        }
         title.textContent = pub.stream_name;
         body.innerHTML = '<tr><td colspan="3" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
         drawer.style.display = 'block';

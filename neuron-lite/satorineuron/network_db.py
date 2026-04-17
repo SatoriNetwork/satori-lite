@@ -773,8 +773,15 @@ class NetworkDB:
         minutes: float = None,
         sender_nostr_pubkey: str = None,
         receiver_nostr_pubkey: str = None,
+        created_at: int = None,
     ) -> None:
-        """Persist a payment channel. Upserts on p2sh_address."""
+        """Persist a payment channel. Upserts on p2sh_address.
+
+        If created_at is provided, it is used as the CSV timer anchor. Callers
+        on the receiver side should pass the sender's announcement timestamp so
+        both sides agree on when the channel started — Nostr delivery delays
+        would otherwise skew the receiver's clock ahead of the sender's.
+        """
         conn = self._get_conn()
         conn.execute("""
             INSERT INTO channels
@@ -791,6 +798,7 @@ class NetworkDB:
                 remainder_sats        = excluded.remainder_sats,
                 blocks                = excluded.blocks,
                 minutes               = excluded.minutes,
+                created_at            = excluded.created_at,
                 sender_nostr_pubkey   = COALESCE(excluded.sender_nostr_pubkey,
                                                   sender_nostr_pubkey),
                 receiver_nostr_pubkey = COALESCE(excluded.receiver_nostr_pubkey,
@@ -799,7 +807,8 @@ class NetworkDB:
             p2sh_address, sender_pubkey, receiver_pubkey, redeem_script,
             funding_txid, funding_vout, locked_sats, remainder_sats,
             blocks, minutes, 1 if is_sender else 0, sender_nostr_pubkey,
-            receiver_nostr_pubkey, int(time.time()),
+            receiver_nostr_pubkey,
+            created_at if created_at is not None else int(time.time()),
         ))
         conn.commit()
 
@@ -886,21 +895,27 @@ class NetworkDB:
         funding_txid: str,
         funding_vout: int,
         locked_sats: int,
+        created_at: int = None,
     ) -> None:
-        """Update channel after a claim creates a new P2SH UTXO (Option A).
+        """Update channel after a claim or refund creates a new P2SH UTXO.
 
         Resets locked_sats and remainder_sats to the new UTXO value so
-        cumulative payment tracking restarts from zero.
+        cumulative payment tracking restarts from zero. Also resets
+        created_at since the CSV timer restarts with the new UTXO — pass
+        the settlement/refund timestamp so sender and receiver agree.
         """
         conn = self._get_conn()
+        ts = created_at if created_at is not None else int(time.time())
         conn.execute("""
             UPDATE channels SET
                 funding_txid   = ?,
                 funding_vout   = ?,
                 locked_sats    = ?,
-                remainder_sats = ?
+                remainder_sats = ?,
+                created_at     = ?
             WHERE p2sh_address = ?
-        """, (funding_txid, funding_vout, locked_sats, locked_sats, p2sh_address))
+        """, (funding_txid, funding_vout, locked_sats, locked_sats,
+              ts, p2sh_address))
         conn.commit()
 
     # ── Competitions ───────────────────────────────────────────────
