@@ -865,6 +865,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 logging.warning(
                     f'Channel: could not parse prior commitment for '
                     f'{commitment.p2sh_address}: {e} — accepting new one')
+        # Cryptographically verify the sender's signature on the partial tx.
+        # Without this, a Nostr publisher who knows the sender's public EVR
+        # pubkey could forge a commitment (e.g. remainder=0) that passes the
+        # monotonicity check and overwrites the real pending commitment —
+        # broadcast would later fail, but the legit state is already lost.
+        if not self._channelVerifySenderSig(commitment, channel):
+            logging.warning(
+                f'Channel: rejecting commitment for {commitment.p2sh_address} — '
+                f'sender signature failed to verify against stored pubkey',
+                color='red')
+            return
         try:
             commitment_json = commitment.to_json()
             await asyncio.to_thread(
@@ -1426,6 +1437,43 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     def _channelTimeoutMinutes(self) -> int:
         """Return the configured channel lifetime in minutes (default 90 days)."""
         return int(config.get().get('channel_timeout_minutes', 129600))
+
+    @staticmethod
+    def _channelVerifySenderSig(commitment, channel: dict) -> bool:
+        """Verify the sender's ECDSA signature on the commitment's partial tx.
+
+        The commitment carries `sender_sigs[0]` — a DER signature with the
+        sighash-flag byte appended, covering vin[0] of `partial_tx_hex` under
+        the channel's redeem script. We recompute the sighash and check it
+        against the stored sender EVR pubkey. This closes the forgery path
+        where a third-party publisher fills in the correct-looking sender
+        pubkey fields but cannot sign for the real sender.
+        """
+        try:
+            from evrmore.core import CMutableTransaction
+            from evrmore.core.script import CScript, SignatureHash
+            from evrmore.core.key import CPubKey
+            sigs = getattr(commitment, 'sender_sigs', None) or []
+            if not sigs:
+                return False
+            raw_sig = bytes.fromhex(sigs[0])
+            if len(raw_sig) < 2:
+                return False
+            sighash_flag = raw_sig[-1]
+            der_sig = raw_sig[:-1]
+            tx = CMutableTransaction.deserialize(
+                bytes.fromhex(commitment.partial_tx_hex))
+            if not tx.vin:
+                return False
+            redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
+            sighash = SignatureHash(redeem_script, tx, 0, sighash_flag)
+            pubkey = CPubKey(bytes.fromhex(channel['sender_pubkey']))
+            return bool(pubkey.verify(sighash, der_sig))
+        except Exception as e:
+            logging.warning(
+                f'Channel: signature verification errored for '
+                f'{getattr(commitment, "p2sh_address", "?")}: {e}')
+            return False
 
     @staticmethod
     def _channelExpiresAt(channel: dict) -> int:
