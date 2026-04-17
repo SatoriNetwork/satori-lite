@@ -769,10 +769,11 @@ class NetworkDB:
         funding_vout: int,
         locked_sats: int,
     ) -> None:
-        """Update channel after a claim creates a new P2SH UTXO (Option A).
+        """Update channel after a claim or refund creates a new P2SH UTXO.
 
         Resets locked_sats and remainder_sats to the new UTXO value so
-        cumulative payment tracking restarts from zero.
+        cumulative payment tracking restarts from zero. Also resets
+        created_at since the CSV timer restarts with the new UTXO.
         """
         conn = self._get_conn()
         conn.execute("""
@@ -780,8 +781,10 @@ class NetworkDB:
                 funding_txid   = ?,
                 funding_vout   = ?,
                 locked_sats    = ?,
-                remainder_sats = ?
+                remainder_sats = ?,
+                created_at     = ?
             WHERE p2sh_address = ?
-        """, (funding_txid, funding_vout, locked_sats, locked_sats, p2sh_address))
+        """, (funding_txid, funding_vout, locked_sats, locked_sats,
+              int(time.time()), p2sh_address))
         conn.commit()
 

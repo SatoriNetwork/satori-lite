@@ -719,8 +719,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         existing = await asyncio.to_thread(
             self.networkDB.get_channel, co.p2sh_address)
-        if existing:
-            return  # already know about this channel
+        # Ignore replays: same P2SH + same funding_txid means we already have it.
+        # A new funding_txid means the sender refunded/reopened — accept the
+        # update so the CSV timer and state reflect the new on-chain UTXO.
+        if existing and existing.get('funding_txid') == co.funding_txid:
+            return
         await asyncio.to_thread(
             self.networkDB.save_channel,
             co.p2sh_address,
@@ -738,8 +741,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             receiver_nostr_pubkey=self.nostrPubkey or '',
         )
         logging.info(
-            f'Channel: registered inbound channel {co.p2sh_address} '
-            f'from {co.sender_pubkey[:16]}…',
+            f'Channel: {"updated" if existing else "registered inbound"} '
+            f'channel {co.p2sh_address} from {co.sender_pubkey[:16]}… '
+            f'txid={co.funding_txid[:12]}…',
             color='green')
 
     async def _channelListen(self, relay_url: str):
@@ -1397,6 +1401,32 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             f'Channel: refunded {p2sh_address} '
             f'amount={amount_sats} sats txid={txid}',
             color='green')
+        # Announce to receiver so they pick up the new funding UTXO and
+        # reset their CSV timer. Reuses the channel_open kind since the
+        # receiver's handler now upserts on funding_txid change.
+        receiver_nostr_pubkey = channel.get('receiver_nostr_pubkey')
+        if receiver_nostr_pubkey:
+            from satorilib.satori_nostr.models import ChannelOpen
+            channel_open = ChannelOpen(
+                p2sh_address=p2sh_address,
+                sender_pubkey=channel['sender_pubkey'],
+                receiver_pubkey=channel['receiver_pubkey'],
+                redeem_script=channel['redeem_script'],
+                funding_txid=txid,
+                funding_vout=funding_vout,
+                locked_sats=amount_sats,
+                blocks=channel.get('blocks'),
+                minutes=channel.get('minutes'),
+                timestamp=int(time.time()),
+                sender_nostr_pubkey=self.nostrPubkey or '',
+            )
+            for client in self._networkClients.values():
+                try:
+                    await client.publish_channel_open(
+                        channel_open, receiver_nostr_pubkey)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: failed to announce refund: {e}')
 
     async def sendChannelPayment(
         self,
