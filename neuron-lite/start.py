@@ -1496,6 +1496,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             script_payload['funding_txid'],
             funding_vout,
             amount_sats)
+        # Single shared timestamp for local DB + announcement so sender and
+        # receiver agree on the CSV-timer anchor (mirrors refundChannel).
+        open_ts = int(time.time())
         await asyncio.to_thread(
             self.networkDB.save_channel,
             p2sh_address,
@@ -1511,6 +1514,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             minutes,
             sender_nostr_pubkey=self.nostrPubkey or '',
             receiver_nostr_pubkey=receiver_nostr_pubkey or '',
+            created_at=open_ts,
         )
         logging.info(
             f'Channel: opened {p2sh_address} '
@@ -1529,7 +1533,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 locked_sats=actual_locked,
                 blocks=blocks,
                 minutes=minutes,
-                timestamp=int(time.time()),
+                timestamp=open_ts,
                 sender_nostr_pubkey=self.nostrPubkey or '',
             )
             for client in self._networkClients.values():
