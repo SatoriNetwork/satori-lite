@@ -1423,8 +1423,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The P2SH address of the new channel
         """
-        if self.wallet.unspentAssets is None or self.wallet.unspentCurrency is None:
-            await asyncio.to_thread(self.wallet.getUnspents)
+        await asyncio.to_thread(self.wallet.getUnspents)
         amount_satori = amount_sats / 1e8
         txid, script_payload = await asyncio.to_thread(
             self.wallet.producePaymentChannel,
