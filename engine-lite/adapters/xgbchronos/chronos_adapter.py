@@ -65,10 +65,10 @@ class PretrainedChronosAdapter(ModelAdapter):
         data = data.values  # Convert DataFrame to numpy array
         if self.model is None:
             return np.asarray(data[-1], dtype=np.float32)
-        # Squeeze only if the first dimension is 1
-        if len(data.shape) > 1 and data.shape[0] == 1:
-            data = np.squeeze(data, axis=0)
-        data = data[-self.contextLen:]  # Use the last `contextLen` rows
+        # Chronos expects a 1D tensor for a single series. Flatten to guarantee
+        # shape (T,) regardless of whether caller passed a Series, (T,), or (T,1).
+        data = np.asarray(data, dtype=np.float32).reshape(-1)
+        data = data[-self.contextLen:]
         context = torch.tensor(data)
         #t1_start = time.perf_counter_ns()
         forecast = self.model.predict(

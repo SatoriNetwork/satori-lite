@@ -698,6 +698,63 @@ def register_routes(app):
             'publications_count': len(startup.publications) if hasattr(startup, 'publications') and startup.publications else 0
         })
 
+    @app.route('/api/settings/adapter', methods=['GET', 'POST'])
+    def adapter_setting():
+        """
+        Get or set the prediction engine adapter.
+
+        GET  → {"adapter": "auto"|"ets"|"xgboost"|"xgb-chronos"|"starter",
+                "choices": [...], "default": "auto"}
+        POST {"adapter": "<choice>"} → persists to config and re-selects adapters
+                                        on every running StreamModel.
+        """
+        from satorineuron import config as neuronConfig
+        VALID = ['auto', 'ets', 'xgboost', 'xgb-chronos', 'starter']
+
+        if request.method == 'GET':
+            cfg = neuronConfig.get() or {}
+            return jsonify({
+                'adapter': cfg.get('preferred_adapter', 'auto'),
+                'choices': VALID,
+                'default': 'auto',
+            })
+
+        # POST
+        data = request.get_json(silent=True) or {}
+        choice = data.get('adapter')
+        if choice not in VALID:
+            return jsonify({'status': 'error',
+                            'message': f'adapter must be one of {VALID}'}), 400
+
+        # Persist
+        cfg = neuronConfig.get() or {}
+        cfg['preferred_adapter'] = choice
+        neuronConfig.put(data=cfg)
+
+        # Live re-apply to running streams
+        reapplied = 0
+        try:
+            startup = get_startup()
+            if startup is not None and hasattr(startup, 'aiengine') and startup.aiengine is not None:
+                from engine import buildPreferredAdapters
+                newAdapters = buildPreferredAdapters()
+                streamModels = getattr(startup.aiengine, 'streamModels', {}) or {}
+                for sm in streamModels.values():
+                    try:
+                        sm.preferredAdapters = newAdapters
+                        sm.defaultAdapters = newAdapters
+                        if hasattr(sm, 'chooseAdapter'):
+                            sm.chooseAdapter(inplace=True)
+                        reapplied += 1
+                    except Exception:
+                        pass
+        except Exception as e:
+            # Persistence succeeded; live reload failed — next training tick picks it up
+            return jsonify({'status': 'ok', 'adapter': choice, 'reapplied': reapplied,
+                            'warning': f'live reload partial: {e}'})
+
+        return jsonify({'status': 'ok', 'adapter': choice, 'reapplied': reapplied})
+
     @app.route('/api/system/stats', methods=['GET'])
     @login_required
     def get_system_stats():

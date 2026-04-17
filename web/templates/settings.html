@@ -260,6 +260,46 @@
                 </div>
             </div>
         </div>
+
+        <!-- Prediction Engine adapter selector -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">psychology</i>
+                        Prediction Engine
+                    </h5>
+                    <span class="mode-chip status-off" id="adapterCurrentChip">Loading…</span>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info mb-3">
+                        Choose the forecasting model used by this neuron. Benchmark: ETS beats XGBoost 3–15× on most stream types. Chronos is a foundation model (best on seasonal / outlier / noisy data). Selecting <strong>Auto</strong> lets Satori pick adaptively.
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="adapterSelect">Preferred Adapter</label>
+                            <select class="form-select" id="adapterSelect">
+                                <option value="auto">Auto — ETS → XGBoost → Starter (recommended)</option>
+                                <option value="ets">ETS — Exponential Smoothing (safe, fast, no extra deps)</option>
+                                <option value="xgboost">XGBoost — Gradient boosted trees (legacy default)</option>
+                                <option value="xgb-chronos">Chronos — Foundation model (best for seasonal/noisy)</option>
+                                <option value="starter">Starter — Linear / naive (minimal resources)</option>
+                            </select>
+                            <div class="mode-port-help mt-2">
+                                Change takes effect on the next training cycle (≤10 min). Active streams are notified immediately.
+                            </div>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="d-flex align-items-center gap-3 flex-wrap">
+                                <button class="btn btn-primary" id="adapterApplyBtn" onclick="applyAdapter()">Save Adapter</button>
+                                <span id="adapterApplyStatus" class="text-muted"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
 {% endblock %}
@@ -454,6 +494,53 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         renderRelayStatus(currentRelayStatus);
+        loadAdapter();
     });
+
+    // -------- Prediction Engine adapter --------
+    async function loadAdapter() {
+        const chip = document.getElementById('adapterCurrentChip');
+        try {
+            const resp = await fetch('/api/settings/adapter');
+            const data = await resp.json();
+            document.getElementById('adapterSelect').value = data.adapter || 'auto';
+            chip.textContent = `Active: ${data.adapter || 'auto'}`;
+            chip.className = 'mode-chip status-public';
+        } catch (err) {
+            chip.textContent = 'Unavailable';
+            chip.className = 'mode-chip status-error';
+        }
+    }
+
+    async function applyAdapter() {
+        const statusEl = document.getElementById('adapterApplyStatus');
+        const btn = document.getElementById('adapterApplyBtn');
+        const choice = document.getElementById('adapterSelect').value;
+        btn.disabled = true;
+        statusEl.className = 'text-info';
+        statusEl.textContent = 'Saving…';
+        try {
+            const resp = await fetch('/api/settings/adapter', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({adapter: choice})
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.status === 'error') {
+                throw new Error(data.message || 'Failed to save adapter');
+            }
+            statusEl.className = 'text-success';
+            const tail = typeof data.reapplied === 'number'
+                ? ` (${data.reapplied} stream${data.reapplied === 1 ? '' : 's'} updated live)`
+                : '';
+            statusEl.textContent = `Saved: ${data.adapter}${tail}`;
+            document.getElementById('adapterCurrentChip').textContent = `Active: ${data.adapter}`;
+        } catch (err) {
+            statusEl.className = 'text-danger';
+            statusEl.textContent = err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
 </script>
 {% endblock %}

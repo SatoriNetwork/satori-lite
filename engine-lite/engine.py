@@ -24,7 +24,54 @@ from satorilib.server import SatoriServerClient
 # )
 from satoriengine.veda import config
 from satoriengine.veda.data import StreamForecast, validate_single_entry
-from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter
+from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter, ETSAdapter
+
+
+# ---------------------------------------------------------------------------
+# Adapter selection
+# ---------------------------------------------------------------------------
+# Registry of all selectable adapters. Values may be None if the underlying
+# dependency isn't installed (e.g. XgbChronosAdapter requires torch).
+ADAPTER_REGISTRY = {
+    'ets':         ETSAdapter,
+    'xgboost':     XgbAdapter,
+    'xgb-chronos': XgbChronosAdapter,
+    'starter':     StarterAdapter,
+}
+
+# Default auto-selection order. ETS first (beats XGBoost 3-15x on most streams
+# per benchmark), XGBoost as fallback, Starter as last resort for tiny data.
+AUTO_ADAPTERS = [ETSAdapter, XgbAdapter, StarterAdapter]
+
+
+def _getPreferredAdapterSetting() -> str:
+    """Read preferred_adapter from neuron config; 'auto' if unavailable."""
+    try:
+        from satorineuron import config as _neuronConfig
+        return _neuronConfig.get().get('preferred_adapter', 'auto') or 'auto'
+    except Exception:
+        return 'auto'
+
+
+def buildPreferredAdapters() -> list:
+    """
+    Build the preferredAdapters list based on user config.
+    - 'auto' (default): ETS → XGBoost → Starter
+    - explicit key (e.g. 'xgboost'): user's pick first, Starter as safety net
+    """
+    choice = _getPreferredAdapterSetting()
+    auto = [a for a in AUTO_ADAPTERS if a is not None]
+    if choice == 'auto':
+        return auto
+    chosen = ADAPTER_REGISTRY.get(choice)
+    if chosen is None:
+        return auto
+    # User override: put their choice first, always keep Starter as safety net
+    result = [chosen]
+    if StarterAdapter is not None and StarterAdapter is not chosen:
+        result.append(StarterAdapter)
+    return result
+
 from satoriengine.veda.storage import EngineStorageManager
 
 warnings.filterwarnings('ignore')
@@ -455,8 +502,10 @@ class StreamModel:
         streamModel.cpu = getProcessorCount()
         streamModel.pauseAll = pauseAll
         streamModel.resumeAll = resumeAll
-        streamModel.preferredAdapters = [XgbAdapter, StarterAdapter]
-        streamModel.defaultAdapters = [XgbAdapter, XgbAdapter, StarterAdapter]
+        # Config-driven: reads `preferred_adapter` from neuron config
+        # ('auto' = [ETS, XGB, Starter]; explicit key forces that adapter)
+        streamModel.preferredAdapters = buildPreferredAdapters()
+        streamModel.defaultAdapters = buildPreferredAdapters()
         streamModel.failedAdapters = []
         streamModel.thread = None
         streamModel.streamUuid = streamUuid
@@ -495,9 +544,10 @@ class StreamModel:
         self.cpu = getProcessorCount()
         self.pauseAll = pauseAll
         self.resumeAll = resumeAll
-        # self.preferredAdapters: list[ModelAdapter] = [XgbChronosAdapter, XgbAdapter, StarterAdapter ]# SKAdapter #model[0] issue
-        self.preferredAdapters: list[ModelAdapter] = [ XgbAdapter, StarterAdapter ]# SKAdapter #model[0] issue
-        self.defaultAdapters: list[ModelAdapter] = [XgbAdapter, XgbAdapter, StarterAdapter]
+        # Config-driven: reads `preferred_adapter` from neuron config
+        # ('auto' = [ETS, XGB, Starter]; explicit key forces that adapter)
+        self.preferredAdapters: list[ModelAdapter] = buildPreferredAdapters()
+        self.defaultAdapters: list[ModelAdapter] = buildPreferredAdapters()
         self.failedAdapters = []
         self.thread: threading.Thread = None
         self.streamUuid: str = streamUuid
