@@ -24,6 +24,8 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
+from web.balance_cache import get_balance_snapshot
+
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
     """Call Mundo's request endpoint to get fee data for a partial transaction."""
@@ -1339,94 +1341,19 @@ def register_routes(app):
     @app.route('/api/wallet/balance/direct')
     @login_required
     def api_wallet_balance_direct():
-        """Get combined wallet and vault balance directly from electrumx.
+        """Combined wallet+vault balance, backed by an in-process TTL cache.
 
-        This bypasses the Satori API server and queries the blockchain directly
-        via the electromax server using the wallet objects.
+        A process-global WalletManager holds a persistent ElectrumX socket,
+        and the snapshot is cached for 30 s. Pass ?refresh=1 (wired to the
+        dashboard Refresh button and to post-send refreshes) to bypass cache.
         """
-        wallet_manager = get_or_create_session_vault()
-        if not wallet_manager:
-            return jsonify({'error': 'Wallet manager not initialized'}), 500
-
         try:
-            # Ensure electrumx connection with retry
-            logger.info("Attempting to connect to ElectrumX...")
-            connected = False
-            if hasattr(wallet_manager, 'connect'):
-                for attempt in range(5):
-                    connected = wallet_manager.connect()
-                    logger.info(f"ElectrumX connection attempt {attempt + 1}: {connected}")
-                    if connected:
-                        break
-                    time.sleep(2)  # Give more time for connection to establish
-                if not connected:
-                    logger.warning("Failed to connect to ElectrumX after retries")
-                    return jsonify({'error': 'Could not connect to electrumx'}), 500
-            else:
-                logger.warning("WalletManager has no connect method")
-
-            total_satori = 0.0
-            wallet_balance = 0.0
-            vault_balance = 0.0
-            total_evr = 0.0
-            wallet_evr = 0.0
-            vault_evr = 0.0
-
-            def _fetch_balances(wallet_obj, label):
-                """Fetch balances for a wallet/vault object.
-                Falls back to reconnecting if the server returns an empty response
-                (some servers don't support multi-asset balance queries).
-                """
-                satori = 0.0
-                evr = 0.0
-                if not wallet_obj or not hasattr(wallet_obj, 'getBalances'):
-                    return satori, evr
-                # Wait for electrumx connection
-                for _ in range(3):
-                    if wallet_obj.electrumx and wallet_obj.electrumx.connected():
-                        wallet_obj.getBalances()
-                        break
-                    time.sleep(1)
-                else:
-                    wallet_obj.getBalances()
-                # If the server returned an empty dict, it doesn't support multi-asset
-                # queries — force a reconnect and retry once
-                raw = getattr(wallet_obj, 'balances', None)
-                if not raw:
-                    logger.warning(f"{label}: empty balance response, reconnecting...")
-                    wallet_manager._electrumx = None  # force new server on next connect
-                    wallet_manager.connect()
-                    wallet_obj.getBalances()
-                    raw = getattr(wallet_obj, 'balances', None)
-                    logger.info(f"{label}: retry raw balances: {raw}")
-                satori = wallet_obj.balance.amount if hasattr(wallet_obj, 'balance') and wallet_obj.balance else 0.0
-                evr = wallet_obj.currency.amount if hasattr(wallet_obj, 'currency') and wallet_obj.currency else 0.0
-                logger.info(f"{label} balance: SATORI={satori}, EVR={evr}")
-                return satori, evr
-
-            # Get wallet (identity) balance
-            if wallet_manager.wallet:
-                wallet_balance, wallet_evr = _fetch_balances(wallet_manager.wallet, 'Wallet')
-
-            # Get vault balance
-            if wallet_manager.vault:
-                vault_balance, vault_evr = _fetch_balances(wallet_manager.vault, 'Vault')
-
-            total_satori = wallet_balance + vault_balance
-            total_evr = wallet_evr + vault_evr
-
-            return jsonify({
-                'total': total_satori,
-                'wallet_balance': wallet_balance,
-                'vault_balance': vault_balance,
-                'total_evr': total_evr,
-                'wallet_evr': wallet_evr,
-                'vault_evr': vault_evr
-            })
+            force = request.args.get('refresh', '0').lower() in ('1', 'true', 'yes')
+            return jsonify(get_balance_snapshot(force=force))
         except Exception as e:
             import traceback
-            logger.error(f"Failed to get direct balance: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"balance fetch failed: {e}")
+            logger.error(traceback.format_exc())
             return jsonify({'error': str(e)}), 500
 
     # AI Engine Training Delay Control

@@ -880,7 +880,7 @@
                         <button class="bal-tab" onclick="switchBalTab('identity', this)">Wallet (Identity)</button>
                     </div>
                     <div class="card-header-actions">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance()">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance(true)">
                             <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
                         </button>
                         <span class="text-muted drag-handle" title="Drag to reorder">
@@ -1741,16 +1741,17 @@
         }
     }
 
-    async function refreshBalance() {
-        // Get real-time balance from electrumx blockchain (wallet + vault)
-        // Fetches SATORI token and EVR balance
+    async function refreshBalance(force = false) {
+        // Fetches SATORI + EVR balance via the wallet-service proxy.
+        // `force=true` (wired to the Refresh button) bypasses the 30 s cache.
         setBalanceLoading('tokenBalance', true);
         setBalanceLoading('evrBalance', true);
         setBalanceLoading('identityWalletBalance', true);
         setBalanceLoading('identityEvrBalance', true);
 
         try {
-            const result = await apiCall('/wallet/balance/direct');
+            const endpoint = '/wallet/balance/direct' + (force ? '?refresh=1' : '');
+            const result = await apiCall(endpoint);
             if (result && !result.error) {
                 // Vault pane
                 document.getElementById('tokenBalance').textContent = result.vault_balance !== undefined ? formatBalance(result.vault_balance) : '--';
@@ -3792,8 +3793,9 @@
                 document.getElementById('sendAmount').value = '';
                 document.getElementById('sendSweep').checked = false;
                 toggleSweepAmount();
-                // Refresh balances to show updated amounts
-                refreshBalance();
+                // Refresh balances to show updated amounts — force, since a
+                // send just changed the UTXO set and the cache is now stale.
+                refreshBalance(true);
             } else {
                 const errorMsg = result ? (result.error || 'Transaction failed') : 'Transaction failed';
                 resultDiv.className = 'mt-3 alert alert-danger';
