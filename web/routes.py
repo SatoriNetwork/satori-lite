@@ -588,24 +588,20 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not derive eth_wallet_address: {e}")
 
-        # Get nostr pubkey and relay URL from startup instance
+        # Get nostr pubkey from startup instance
         nostr_pubkey = None
-        relay_url = None
         try:
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 nostr_pubkey = startup.nostrPubkey
-            if startup and hasattr(startup, 'server') and startup.server:
-                relay_url = getattr(startup.server, 'relayUrl', None)
         except Exception as e:
-            logger.warning(f"Could not get nostr/relay info: {e}")
+            logger.warning(f"Could not get nostr info: {e}")
 
         return render_template(
             'dashboard.html',
             version=VERSION,
             eth_wallet_address=eth_wallet_address,
             nostr_pubkey=nostr_pubkey,
-            relay_url=relay_url,
             page_mode='dashboard')
 
     @app.route('/p2p')
@@ -615,22 +611,18 @@ def register_routes(app):
         from satorineuron import VERSION
 
         nostr_pubkey = None
-        relay_url = None
         try:
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 nostr_pubkey = startup.nostrPubkey
-            if startup and hasattr(startup, 'server') and startup.server:
-                relay_url = getattr(startup.server, 'relayUrl', None)
         except Exception as e:
-            logger.warning(f"Could not get nostr/relay info: {e}")
+            logger.warning(f"Could not get nostr info: {e}")
 
         return render_template(
             'dashboard.html',
             version=VERSION,
             eth_wallet_address=None,
             nostr_pubkey=nostr_pubkey,
-            relay_url=relay_url,
             page_mode='p2p')
 
     @app.route('/settings')
@@ -2083,34 +2075,6 @@ def register_routes(app):
             logger.error(f"Wallet import error: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return jsonify({'error': str(e)}), 500
-
-    @app.route('/api/relay', methods=['POST'])
-    @login_required
-    def api_relay_register():
-        """Register relay URL with central server for NIP-11 verification."""
-        startup = get_startup()
-        if not startup or not hasattr(startup, 'server') or not startup.server:
-            return jsonify({'error': 'Server connection not initialized'}), 503
-
-        data = request.get_json()
-        if not data or 'relay_url' not in data:
-            return jsonify({'error': 'Missing relay_url'}), 400
-
-        relay_url = data['relay_url'].strip()
-        if not relay_url.startswith(('wss://', 'ws://')):
-            return jsonify({'error': 'Relay URL must start with wss:// or ws://'}), 400
-
-        try:
-            result = startup.server.registerRelay(relay_url)
-            if isinstance(result, requests.Response):
-                if result.status_code == 200:
-                    return jsonify(result.json())
-                else:
-                    return jsonify({'error': result.text}), result.status_code
-            return jsonify({'success': True, 'relay_url': relay_url})
-        except Exception as e:
-            logger.error(f"Relay registration error: {e}")
             return jsonify({'error': str(e)}), 500
 
     @app.route('/api/settings/relay/status', methods=['GET'])

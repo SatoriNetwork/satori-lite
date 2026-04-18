@@ -1,7 +1,7 @@
 # Nostr Relay Reward Migration
 
 **Date:** 2026-04-18
-**Status:** Proposal
+**Status:** Implemented (neuron + satorilib on `nostr-address` branch)
 
 
 ## Summary
