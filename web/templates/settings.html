@@ -260,6 +260,113 @@
                 </div>
             </div>
         </div>
+
+        <!-- Custom Relay Connections -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">dns</i>
+                        External Relay Connections
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">
+                        Add external Nostr relay URLs for this neuron to connect to.
+                        Your relay list is published as a NIP-65 event so the network
+                        can discover which relays carry Satori traffic.
+                    </p>
+                    <div class="d-flex gap-2 mb-3">
+                        <input type="text" class="form-control" id="customRelayInput"
+                               placeholder="wss://relay.example.com">
+                        <button class="btn btn-primary" onclick="addCustomRelay()" style="white-space:nowrap">
+                            Add Relay
+                        </button>
+                    </div>
+                    <div class="text-danger small mb-2 d-none" id="customRelayError"></div>
+                    <table class="table table-sm table-hover mb-0" id="customRelayTable">
+                        <thead>
+                            <tr>
+                                <th>Relay URL</th>
+                                <th style="width:60px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="customRelayBody">
+                            <tr><td colspan="2" class="text-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nostr-Evrmore Address -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">account_balance</i>
+                        Nostr-Derived Evrmore Address
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">
+                        This Evrmore address is derived from your Nostr public key
+                        using the even-y (0x02) convention. Relay rewards can be sent
+                        directly to this address.
+                    </p>
+                    <div class="settings-grid mb-4">
+                        <div class="settings-stat">
+                            <div class="settings-stat-label">Nostr Pubkey</div>
+                            <div class="settings-stat-value font-mono-small" id="evrNostrPubkey">-</div>
+                        </div>
+                        <div class="settings-stat">
+                            <div class="settings-stat-label">Evrmore Address</div>
+                            <div class="settings-stat-value font-mono-small" id="evrDerivedAddress">-</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-outline-light btn-sm" onclick="loadEvrAddress()">Refresh</button>
+
+                    <hr class="my-4">
+
+                    <h6>Key Normalization Tool</h6>
+                    <p class="text-muted mb-3">
+                        If you are a relay operator, enter your Nostr private key below
+                        to get the normalized version for importing into an Evrmore wallet.
+                        About half of all keys need normalization so the wallet address
+                        matches the one derived from the Nostr pubkey.
+                    </p>
+                    <div class="d-flex gap-2 mb-3">
+                        <input type="password" class="form-control" id="nostrSecretInput"
+                               placeholder="Nostr secret key (hex or nsec)">
+                        <button class="btn btn-primary" onclick="normalizeKey()" style="white-space:nowrap">
+                            Normalize
+                        </button>
+                    </div>
+                    <div class="text-danger small mb-2 d-none" id="normalizeError"></div>
+                    <div class="d-none" id="normalizeResult">
+                        <div class="settings-grid">
+                            <div class="settings-stat">
+                                <div class="settings-stat-label">Normalized Secret (hex)</div>
+                                <div class="settings-stat-value font-mono-small" id="normSecret"
+                                     style="user-select:all">-</div>
+                            </div>
+                            <div class="settings-stat">
+                                <div class="settings-stat-label">Evrmore Address</div>
+                                <div class="settings-stat-value font-mono-small" id="normAddress">-</div>
+                            </div>
+                            <div class="settings-stat">
+                                <div class="settings-stat-label">Was Negated?</div>
+                                <div class="settings-stat-value" id="normNegated">-</div>
+                            </div>
+                        </div>
+                        <div class="alert alert-info mt-3 mb-0">
+                            Import the normalized secret into any Evrmore-compatible wallet
+                            to spend rewards sent to the address above.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -452,8 +559,116 @@
         }
     }
 
+    // ── Custom Relays ──────────────────────────────────────────
+    async function loadCustomRelays() {
+        try {
+            const resp = await fetch('/api/relays/custom');
+            const data = await resp.json();
+            const tbody = document.getElementById('customRelayBody');
+            const relays = data.relays || [];
+            if (relays.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" class="text-muted">No custom relays added.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = relays.map(r => `
+                <tr>
+                    <td class="font-mono-small">${r.relay_url}</td>
+                    <td>
+                        <button class="btn btn-outline-danger btn-sm"
+                                onclick="removeCustomRelay('${r.relay_url}')">
+                            <i class="material-icons" style="font-size:16px">delete</i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        } catch (err) {
+            document.getElementById('customRelayBody').innerHTML =
+                '<tr><td colspan="2" class="text-danger">Failed to load relays.</td></tr>';
+        }
+    }
+
+    async function addCustomRelay() {
+        const input = document.getElementById('customRelayInput');
+        const errorEl = document.getElementById('customRelayError');
+        const url = input.value.trim();
+        errorEl.classList.add('d-none');
+        if (!url) return;
+        try {
+            const resp = await fetch('/api/relays/custom', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({relay_url: url})
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                errorEl.textContent = data.error || 'Failed to add relay';
+                errorEl.classList.remove('d-none');
+                return;
+            }
+            input.value = '';
+            loadCustomRelays();
+        } catch (err) {
+            errorEl.textContent = err.message;
+            errorEl.classList.remove('d-none');
+        }
+    }
+
+    async function removeCustomRelay(url) {
+        await fetch('/api/relays/custom', {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({relay_url: url})
+        });
+        loadCustomRelays();
+    }
+
+    // ── Nostr-Evrmore Address ───────────────────────────────────
+    async function loadEvrAddress() {
+        try {
+            const resp = await fetch('/api/nostr/evr-address');
+            const data = await resp.json();
+            document.getElementById('evrNostrPubkey').textContent = data.nostr_pubkey || '-';
+            document.getElementById('evrDerivedAddress').textContent = data.evr_address || '-';
+        } catch (err) {
+            document.getElementById('evrDerivedAddress').textContent = 'Error';
+        }
+    }
+
+    async function normalizeKey() {
+        const input = document.getElementById('nostrSecretInput');
+        const errorEl = document.getElementById('normalizeError');
+        const resultEl = document.getElementById('normalizeResult');
+        errorEl.classList.add('d-none');
+        resultEl.classList.add('d-none');
+        const secret = input.value.trim();
+        if (!secret) return;
+        try {
+            const resp = await fetch('/api/nostr/normalize-key', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({secret: secret})
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                errorEl.textContent = data.error || 'Normalization failed';
+                errorEl.classList.remove('d-none');
+                return;
+            }
+            document.getElementById('normSecret').textContent = data.secret_hex;
+            document.getElementById('normAddress').textContent = data.evr_address;
+            document.getElementById('normNegated').textContent =
+                data.was_negated ? 'Yes (key was negated for even-y)' : 'No (already even-y)';
+            resultEl.classList.remove('d-none');
+        } catch (err) {
+            errorEl.textContent = err.message;
+            errorEl.classList.remove('d-none');
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         renderRelayStatus(currentRelayStatus);
+        loadCustomRelays();
+        loadEvrAddress();
     });
 </script>
 {% endblock %}

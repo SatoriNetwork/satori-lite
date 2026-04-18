@@ -65,9 +65,17 @@ class NetworkDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 relay_url TEXT NOT NULL UNIQUE,
                 first_seen INTEGER NOT NULL,
-                last_active INTEGER NOT NULL
+                last_active INTEGER NOT NULL,
+                user_added INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # Migration: add user_added column if missing (existing DBs)
+        try:
+            conn.execute(
+                "ALTER TABLE relays ADD COLUMN user_added "
+                "INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # column already exists
         conn.execute("""
             CREATE TABLE IF NOT EXISTS publications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -516,15 +524,17 @@ class NetworkDB:
 
     # ── Relays ────────────────────────────────────────────────────
 
-    def upsert_relay(self, relay_url: str):
+    def upsert_relay(self, relay_url: str, user_added: bool = False):
         """Record a relay, updating last_active if it already exists."""
         now = int(time.time())
         conn = self._get_conn()
         conn.execute("""
-            INSERT INTO relays (relay_url, first_seen, last_active)
-            VALUES (?, ?, ?)
-            ON CONFLICT(relay_url) DO UPDATE SET last_active = ?
-        """, (relay_url, now, now, now))
+            INSERT INTO relays (relay_url, first_seen, last_active, user_added)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(relay_url) DO UPDATE SET
+                last_active = ?,
+                user_added = MAX(relays.user_added, ?)
+        """, (relay_url, now, now, int(user_added), now, int(user_added)))
         conn.commit()
 
     def get_relays(self) -> list[dict]:
@@ -532,6 +542,15 @@ class NetworkDB:
         conn = self._get_conn()
         rows = conn.execute(
             "SELECT * FROM relays ORDER BY last_active DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_user_added_relays(self) -> list[dict]:
+        """Return relays manually added by the user."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM relays WHERE user_added = 1 "
+            "ORDER BY last_active DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 

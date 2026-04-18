@@ -238,6 +238,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 await self._channelExpiryCheck()
             except Exception as e:
                 logging.error(f'Channel expiry check error: {e}')
+            try:
+                await self._networkPublishRelayList()
+            except Exception as e:
+                logging.error(f'NIP-65 relay list publish error: {e}')
             await asyncio.sleep(300)
 
     async def _networkEnsurePublisherConnections(self, ConfigClass):
@@ -271,6 +275,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if relay_url in self._networkClients:
                 self._networkEnsurePredictionListener(relay_url)
                 self._networkEnsureAccessRequestListener(relay_url)
+
+    async def _networkPublishRelayList(self):
+        """Publish a NIP-65 relay list (kind 10002) to all connected relays.
+
+        Advertises every relay URL this node is currently connected to.
+        The central server subscribes to these events from known neuron
+        pubkeys to build its relay directory — replacing the old
+        neuron-claims-relay model.
+        """
+        relay_urls = list(self._networkClients.keys())
+        if not relay_urls:
+            return
+        for client in list(self._networkClients.values()):
+            try:
+                await client.publish_relay_list(relay_urls)
+            except Exception as e:
+                logging.warning(f'Network: NIP-65 publish failed: {e}')
+                continue
+        logging.info(
+            f'Network: published NIP-65 relay list '
+            f'({len(relay_urls)} relays)', color='cyan')
 
     async def _networkConnect(self, relay_url: str, ConfigClass):
         """Connect to a relay if not already connected. Returns client or None."""
