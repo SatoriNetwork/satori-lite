@@ -1,7 +1,7 @@
 # Nostr Relay Reward Migration
 
 **Date:** 2026-04-18
-**Status:** Implemented (neuron + satorilib on `nostr-address` branch)
+**Status:** Code complete (all repos on `nostr-address` branch), pending deployment
 
 
 ## Summary
@@ -230,18 +230,73 @@ Relay operator imports normalized Nostr key into Evrmore wallet to spend
 ```
 
 
+## Implementation Summary
+
+All code is on the `nostr-address` branch across three repos.
+
+### neuron (satori-lite)
+- NIP-65 relay list publishing (kind 10002) in reconciliation loop
+- Custom relay management UI/API (Settings > External Relay Connections)
+- Nostr-derived Evrmore address display (Settings)
+- Key normalization tool (Settings)
+- Removed old relay claim UI, endpoint, and JS
+
+### satorilib
+- `publish_relay_list()` method on SatoriNostr client
+- Removed `registerRelay()` and `relayUrl` from SatoriServerClient
+
+### central (central-lite)
+- `discovered_relays` table and DiscoveredRelay model
+- NIP-65 subscriber (`relay_watcher/nip65.py`) — queries neuron pubkeys,
+  aggregates relay URLs, fetches NIP-11 for relay identity
+- Traffic signature verification — only counts observations from registered
+  neuron pubkeys
+- Nostr-to-Evrmore address derivation (`src/utils/nostr_evrmore.py`)
+- Reward distribution uses derived addresses from relay Nostr pubkeys
+- Removed `POST /api/v1/peer/relay`, `relay_url` from Peer model and all
+  response schemas
+- Migration SQL with rollback (`migrations/add_discovered_relays.sql`)
+- Tests: address derivation, traffic verification, NIP-65 parsing, models
+
+### satori-relay
+- Already configured correctly: NIP-11 document includes `pubkey` and `self`
+  fields from the `NOSTR_PUBKEY` environment variable. No changes needed.
+
+
+## Deployment Checklist
+
+- [ ] Run `migrations/add_discovered_relays.sql` on the production database.
+      This creates the `discovered_relays` table, migrates existing relay data
+      from `peers.relay_url`, updates FKs on `relay_daily_scores` and
+      `relays_audit`, and drops `peers.relay_url`. Back up the database first.
+      Rollback script: `migrations/rollback_discovered_relays.sql`.
+
+- [ ] Deploy central server (`nostr-address` branch). The relay watcher will
+      begin NIP-65 discovery and traffic verification on next restart.
+
+- [ ] Deploy satorilib (`nostr-address` branch). Neurons will pick up the
+      updated server client (no more `registerRelay` or `relayUrl`).
+
+- [ ] Deploy neuron (`nostr-address` branch). Neurons will begin publishing
+      NIP-65 relay lists and expose the new Settings UI.
+
+- [ ] Verify end-to-end: a neuron publishes NIP-65 → server discovers the
+      relay → relay watcher connects and counts verified traffic → daily
+      distribution pays the relay's derived Evrmore address.
+
+- [ ] Verify relay operators can use the key normalization tool to derive
+      their Evrmore private key and import it into a wallet to spend rewards.
+
+
 ## Open Questions
 
-- **Relay Nostr pubkey source:** NIP-11 info documents include the relay
-  operator's pubkey, but not all relays publish one. We may need to identify
-  the relay by its TLS certificate or connection-level identity instead.
-  Alternatively, the relay could sign a specific self-identification event.
-
-- **Reward formula:** How to weight traffic — by event count, by unique
-  neuron pubkeys served, by uptime, or some combination.
+- **Reward formula:** Currently relays split the pool equally if they meet
+  the 20-hour uptime threshold. Could weight by verified message count,
+  unique neuron pubkeys served, or some combination.
 
 - **Minimum traffic threshold:** Should there be a floor below which a relay
   does not receive rewards, to avoid dust payments.
 
-- **Transition period:** Run both systems (claim-based and NIP-65-based) in
-  parallel until the NIP-65 approach is validated, then deprecate claims.
+- **Relays without NIP-11 pubkey:** These get discovered and monitored but
+  cannot receive rewards (no pubkey → no derived address). Operators must
+  configure their relay's NIP-11 `pubkey` field.
