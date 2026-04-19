@@ -1,13 +1,9 @@
 """Process-global wallet balance cache.
 
-One long-lived WalletManager (persistent=True) + a 30 s TTL cache, shared by
-every request in this Flask process. Dashboards that refresh within the TTL
-return from memory in <10 ms; cache misses reuse the open ElectrumX socket
-rather than opening a new one, so they finish in ~0.5 s instead of the 5+ s
-the old retry-loop path used to take.
-
-A single threading.Lock serialises the fetch, so N concurrent cache-miss
-requests produce exactly one getBalances() call on ElectrumX.
+One long-lived WalletManager (persistent=True) + a cache that never
+auto-expires. The cache is populated on first load and only refreshed when
+the user clicks the Refresh button (force=True) or after a transaction
+(invalidate() is called). No periodic polling of ElectrumX.
 """
 from __future__ import annotations
 
@@ -21,12 +17,11 @@ from satorineuron.init.wallet import WalletManager
 
 log = logging.getLogger(__name__)
 
-BALANCE_TTL_SECONDS = float(os.environ.get("BALANCE_TTL_SECONDS", "30"))
 _BALANCE_KEY = "balance"
 
 _manager: Optional[WalletManager] = None
 _manager_lock = threading.Lock()
-_cache: Dict[str, Tuple[Any, float]] = {}
+_cache: Dict[str, Any] = {}
 _fetch_lock = threading.Lock()
 
 
@@ -81,28 +76,23 @@ def _fetch_snapshot() -> Dict[str, Any]:
 
 
 def get_balance_snapshot(force: bool = False) -> Dict[str, Any]:
-    """Return a balance snapshot, from cache if fresh.
+    """Return a balance snapshot, from cache unless force=True.
 
     force=True bypasses the cache (used by the dashboard Refresh button and
     after a successful send, where the UTXO set just changed).
     """
-    now = time.time()
-    if not force:
-        hit = _cache.get(_BALANCE_KEY)
-        if hit is not None and hit[1] > now:
-            snap = dict(hit[0])
-            snap["cache_hit"] = True
-            return snap
+    if not force and _BALANCE_KEY in _cache:
+        snap = dict(_cache[_BALANCE_KEY])
+        snap["cache_hit"] = True
+        return snap
 
     with _fetch_lock:
-        if not force:
-            hit = _cache.get(_BALANCE_KEY)
-            if hit is not None and hit[1] > time.time():
-                snap = dict(hit[0])
-                snap["cache_hit"] = True
-                return snap
+        if not force and _BALANCE_KEY in _cache:
+            snap = dict(_cache[_BALANCE_KEY])
+            snap["cache_hit"] = True
+            return snap
         snapshot = _fetch_snapshot()
-        _cache[_BALANCE_KEY] = (snapshot, time.time() + BALANCE_TTL_SECONDS)
+        _cache[_BALANCE_KEY] = snapshot
         out = dict(snapshot)
         out["cache_hit"] = False
         return out
