@@ -2316,6 +2316,17 @@ def register_routes(app):
             return jsonify({'error': f'Parse failed: {e}', 'raw': raw})
         return jsonify({'value': value, 'raw': raw})
 
+    @app.route('/api/network/classifications', methods=['GET'])
+    @login_required
+    def api_network_classifications():
+        """Return the canonical list of publication classifications."""
+        from satorineuron.classifications import CLASSIFICATIONS
+        return jsonify({
+            'classifications': [
+                {'value': v, 'label': l} for v, l in CLASSIFICATIONS
+            ]
+        })
+
     @app.route('/api/network/data-source', methods=['GET'])
     @login_required
     def api_network_data_source_get():
@@ -2329,16 +2340,20 @@ def register_routes(app):
         ds = startup.networkDB.get_data_source(stream_name)
         if not ds:
             return jsonify({'error': 'Not found'}), 404
-        # Merge price_per_obs from corresponding publication
+        # Merge price_per_obs and tags from corresponding publication
         pubs = startup.networkDB.get_all_publications()
         pub = next((p for p in pubs if p['stream_name'] == stream_name), None)
         ds['price_per_obs'] = pub['price_per_obs'] if pub else 0
+        tag_str = (pub or {}).get('tags') or ''
+        ds['tags'] = [t for t in tag_str.split(',') if t]
         return jsonify({'data_source': ds})
 
     @app.route('/api/network/data-source', methods=['POST'])
     @login_required
     def api_network_data_source_create():
         """Create a new data source and its corresponding publication."""
+        from satorineuron.classifications import (
+            CLASSIFICATIONS, CLASSIFICATION_VALUES)
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
@@ -2352,6 +2367,21 @@ def register_routes(app):
         # If URL is provided, parser config is required
         if url and not parser_config:
             return jsonify({'error': 'Parser config required when URL is set'}), 400
+        classification = (data.get('classification') or '').strip().lower()
+        if classification and classification not in CLASSIFICATION_VALUES:
+            return jsonify({
+                'error': f'Unknown classification: {classification}',
+                'allowed': sorted(CLASSIFICATION_VALUES),
+            }), 400
+        raw_tags = data.get('tags') or []
+        if isinstance(raw_tags, str):
+            raw_tags = raw_tags.split(',')
+        extra_tags = [
+            t.strip().lower() for t in raw_tags
+            if isinstance(t, str) and t.strip()
+            and t.strip().lower() != classification
+        ]
+        all_tags = ([classification] if classification else []) + extra_tags
         # Create the data source
         startup.networkDB.add_data_source(
             stream_name=data['stream_name'],
@@ -2375,7 +2405,8 @@ def register_routes(app):
             description=data.get('description', ''),
             cadence_seconds=cadence or None,
             price_per_obs=price_per_obs,
-            encrypted=encrypted)
+            encrypted=encrypted,
+            tags=all_tags)
         # If a URL is configured, immediately fetch and publish so the stream
         # is visible on relays without waiting for the next cadence cycle
         if url and parser_config:

@@ -1231,6 +1231,20 @@
                                 </div>
                             </div>
 
+                            <!-- Classification -->
+                            <div class="ds-field-group" style="grid-template-columns: 1fr 2fr;">
+                                <div class="ds-field">
+                                    <label>Classification</label>
+                                    <select id="dsClassification" class="form-select">
+                                        <option value="">— pick one —</option>
+                                    </select>
+                                </div>
+                                <div class="ds-field">
+                                    <label>Tags <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional, comma-separated)</span></label>
+                                    <input type="text" id="dsTags" class="form-control" placeholder="btc, usd, spot">
+                                </div>
+                            </div>
+
                             <!-- Fetch section -->
                             <div class="ds-section-sep">Data Fetch</div>
                             <div class="ds-field-group cols-url" id="dsMethodGroup">
@@ -1336,6 +1350,7 @@
                                 <thead>
                                     <tr>
                                         <th>Stream</th>
+                                        <th>Class</th>
                                         <th>Source</th>
                                         <th>Cadence</th>
                                         <th>Price</th>
@@ -1435,6 +1450,7 @@
                                     <button class="btn btn-sm btn-outline-secondary" onclick="closeRelayDrawer()">Close</button>
                                 </div>
                             </div>
+                            <div id="relayClassFilters" class="d-flex flex-wrap gap-1 mb-2"></div>
                             <div class="table-responsive">
                                 <table class="table table-sm table-hover mb-0">
                                     <thead>
@@ -2756,8 +2772,8 @@
 
     // ── Data Source Form ──────────────────────────────────────
     function downloadCsvTemplate() {
-        const header = 'stream_name,name,description,url,method,headers,cadence_minutes,parser_type,parser_config';
-        const example = 'btc-price,Bitcoin Price,BTC/USD spot price,https://api.example.com/price,GET,,60,json_path,data.price';
+        const header = 'stream_name,name,description,url,method,headers,cadence_minutes,parser_type,parser_config,classification,tags';
+        const example = 'btc-price,Bitcoin Price,BTC/USD spot price,https://api.example.com/price,GET,,60,json_path,data.price,crypto,btc usd';
         const csv = header + '\n' + example + '\n';
         const blob = new Blob([csv], {type: 'text/csv'});
         const a = document.createElement('a');
@@ -2808,6 +2824,8 @@
                 errors.push('Row ' + (i+1) + ': parser_config required when URL is set');
                 continue;
             }
+            const csvTags = (row.tags || '')
+                .split(/[\s,;]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
             try {
                 const resp = await fetch('/api/network/data-source', {
                     method: 'POST',
@@ -2822,6 +2840,8 @@
                         cadence_seconds: cadenceMin ? cadenceMin * 60 : 0,
                         parser_type: hasUrl ? (row.parser_type || 'json_path') : '',
                         parser_config: hasUrl ? (row.parser_config || '') : '',
+                        classification: (row.classification || '').trim().toLowerCase(),
+                        tags: csvTags,
                     })
                 });
                 const data = await resp.json();
@@ -2855,8 +2875,9 @@
     function resetDataSourceForm() {
         document.getElementById('dsFormTitle').textContent = 'New Data Source';
         document.getElementById('dsStreamName').readOnly = false;
-        ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython'].forEach(
+        ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython','dsTags'].forEach(
             id => document.getElementById(id).value = '');
+        document.getElementById('dsClassification').value = '';
         document.getElementById('dsCadenceMin').value = '';
         resetPriceUnit();
         document.getElementById('dsPricePerObs').value = '0';
@@ -2866,6 +2887,29 @@
         toggleParserInput();
         toggleFetchFields();
         document.getElementById('dsTestResults').style.display = 'none';
+    }
+
+    let CLASSIFICATIONS = [];
+    async function loadClassifications() {
+        if (CLASSIFICATIONS.length) return;
+        try {
+            const resp = await fetch('/api/network/classifications');
+            const data = await resp.json();
+            CLASSIFICATIONS = data.classifications || [];
+            const sel = document.getElementById('dsClassification');
+            CLASSIFICATIONS.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.value;
+                opt.textContent = c.label;
+                sel.appendChild(opt);
+            });
+        } catch(e) { /* dropdown stays with placeholder */ }
+    }
+    loadClassifications();
+
+    function classificationLabel(value) {
+        const c = CLASSIFICATIONS.find(c => c.value === value);
+        return c ? c.label : value;
     }
 
     async function editDataSource(streamName) {
@@ -2897,6 +2941,12 @@
             }
             resetPriceUnit();
             document.getElementById('dsPricePerObs').value = ds.price_per_obs || 0;
+            const tags = ds.tags || [];
+            const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
+            const classFromTags = tags.find(t => classValues.has(t)) || '';
+            document.getElementById('dsClassification').value = classFromTags;
+            document.getElementById('dsTags').value =
+                tags.filter(t => t !== classFromTags).join(', ');
             document.getElementById('dsParserType').value = ds.parser_type || 'json_path';
             toggleParserInput();
             if (ds.parser_type === 'python') {
@@ -3162,6 +3212,9 @@
                 try { JSON.parse(headers); } catch(e) { err.textContent = 'Headers must be valid JSON'; return; }
             }
         }
+        const classification = document.getElementById('dsClassification').value.trim();
+        const extraTags = document.getElementById('dsTags').value
+            .split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
         btnLoading(btn);
         const resp = await fetch('/api/network/data-source', {
             method: 'POST',
@@ -3177,6 +3230,8 @@
                 parser_type: parserType,
                 parser_config: parserConfig,
                 price_per_obs: getPriceInSats(),
+                classification: classification,
+                tags: extraTags,
             })
         });
         btnDone(btn);
@@ -3373,8 +3428,17 @@
                   p.stream_name.replace(/'/g, "\\'") + '\', this)">Stop</button>';
             row.style.cursor = 'pointer';
             row.onclick = function() { openPubDrawer(p); };
+            const tagList = (typeof p.tags === 'string')
+                ? p.tags.split(',').filter(Boolean)
+                : (p.tags || []);
+            const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
+            const cls = tagList.find(t => classValues.has(t));
+            const classCell = cls
+                ? '<span class="badge bg-secondary">' + classificationLabel(cls) + '</span>'
+                : '<span class="text-muted">—</span>';
             row.innerHTML =
                 '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
+                '<td>' + classCell + '</td>' +
                 '<td>' + source + '</td>' +
                 '<td>' + formatCadence(p.cadence_seconds) + '</td>' +
                 '<td>' + (p.price_per_obs > 0 ? p.price_per_obs + ' sats' : '<span class="text-muted">Free</span>') + '</td>' +
@@ -3432,6 +3496,39 @@
         if (!activeRelayDrawerUrl) return;
         delete cachedStreamsByRelay[activeRelayDrawerUrl];
         openRelayDrawer(activeRelayDrawerUrl);
+    }
+
+    let activeClassFilter = null;
+    let relayStreamsUnfiltered = [];
+
+    function streamMatchesClassFilter(g, filter) {
+        if (!filter) return true;
+        const tags = g.rep.tags || [];
+        const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
+        const cls = tags.find(t => classValues.has(t));
+        if (filter === 'other') return !cls || cls === 'other';
+        return cls === filter;
+    }
+
+    function renderClassFilters() {
+        const host = document.getElementById('relayClassFilters');
+        if (!host) return;
+        const chip = (val, label) => {
+            const active = (activeClassFilter || '') === (val || '');
+            const cls = active ? 'btn-primary' : 'btn-outline-secondary';
+            const v = val === null ? 'null' : "'" + val + "'";
+            return '<button class="btn btn-sm ' + cls + '" onclick="setClassFilter(' + v + ')">' + label + '</button>';
+        };
+        let html = chip(null, 'All');
+        CLASSIFICATIONS.forEach(c => { html += chip(c.value, c.label); });
+        host.innerHTML = html;
+    }
+
+    function setClassFilter(val) {
+        activeClassFilter = val;
+        renderClassFilters();
+        relayStreamsAllItems = relayStreamsUnfiltered.filter(g => streamMatchesClassFilter(g, activeClassFilter));
+        renderRelayStreamsPage(1);
     }
 
     function renderRelayStreamsPage(page) {
@@ -3519,8 +3616,10 @@
         }));
         grouped.sort((a, b) => (b.rep.subscribed ? 1 : 0) - (a.rep.subscribed ? 1 : 0));
 
-        relayStreamsAllItems = grouped;
+        relayStreamsUnfiltered = grouped;
+        relayStreamsAllItems = grouped.filter(g => streamMatchesClassFilter(g, activeClassFilter));
         relayStreamsCurrentPage = 1;
+        renderClassFilters();
         renderRelayStreamsPage(1);
         drawer.style.display = 'block';
     }
