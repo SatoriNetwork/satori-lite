@@ -487,6 +487,96 @@
         border-color: var(--border-color);
     }
 
+    /* Divergence warning */
+    .mkt-card-warn {
+        display: flex; align-items: center; gap: 0.4rem;
+        font-size: 0.72rem;
+        color: #ffc400;
+        background: rgba(255, 196, 0, 0.07);
+        border: 1px solid rgba(255, 196, 0, 0.25);
+        padding: 0.35rem 0.55rem;
+        border-radius: 7px;
+        margin-bottom: 0.6rem;
+        line-height: 1.25;
+    }
+    .mkt-card-warn .material-icons { font-size: 14px; }
+
+    /* Expandable per-publisher list */
+    .mkt-pubs-toggle {
+        background: transparent;
+        border: 0;
+        color: var(--text-secondary);
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0;
+        cursor: pointer;
+        display: inline-flex; align-items: center; gap: 0.2rem;
+    }
+    .mkt-pubs-toggle:hover { color: var(--text-primary); }
+    .mkt-pubs-toggle .material-icons {
+        font-size: 14px;
+        transition: transform .15s ease;
+    }
+    .mkt-pubs-toggle.is-open .material-icons { transform: rotate(90deg); }
+
+    .mkt-pubs-list {
+        margin-top: 0.6rem;
+        padding-top: 0.6rem;
+        border-top: 1px dashed var(--border-color);
+        display: flex; flex-direction: column; gap: 0.45rem;
+    }
+    .mkt-pub-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.4rem 0.5rem;
+        align-items: center;
+        padding: 0.5rem 0.55rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-input);
+    }
+    .mkt-pub-id {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .mkt-pub-meta {
+        grid-column: 1 / -1;
+        display: flex; flex-wrap: wrap; gap: 0.35rem 0.55rem;
+        font-size: 0.7rem; color: var(--text-secondary);
+        align-items: center;
+    }
+    .mkt-pub-meta .mkt-card-class,
+    .mkt-pub-meta .mkt-card-price {
+        font-size: 0.6rem;
+        padding: 0.16rem 0.4rem;
+    }
+    .mkt-pub-action {
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.3rem 0.65rem;
+        border-radius: 7px;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .mkt-pub-action.subscribe {
+        background: var(--accent-gradient);
+        border-color: transparent;
+        color: #fff;
+    }
+    .mkt-pub-action.subscribe:hover { filter: brightness(1.08); }
+    .mkt-pub-action.unsubscribe { color: var(--text-secondary); }
+    .mkt-pub-action.unsubscribe:hover {
+        color: #ff6b6b; border-color: rgba(220,53,69,0.4);
+    }
+    .mkt-pub-action[disabled] { cursor: not-allowed; opacity: 0.6; }
+
     /* ── Empty + loading states ──────────────────────────── */
     .mkt-empty {
         text-align: center;
@@ -746,33 +836,61 @@
     }
 
     // ── Filtering ───────────────────────────────────────
-    function streamMatchesClass(s, filter) {
-        if (!filter) return true;
+    // Filters operate on the GROUP — a card matches if ANY publisher in the
+    // group matches. This prevents one publisher's bogus metadata from hiding
+    // the legitimate publisher of the same stream name.
+    function publisherClass(s) {
         const tags = s.tags || [];
         const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
-        const cls = tags.find(t => classValues.has(t));
-        if (filter === 'other') return !cls || cls === 'other';
-        return cls === filter;
+        return tags.find(t => classValues.has(t)) || null;
     }
 
-    function streamMatchesPrice(s, filter) {
-        const price = s.price_per_obs || 0;
-        if (filter === 'free') return price === 0;
-        if (filter === 'paid') return price > 0;
-        return true;
+    function streamMatchesClass(g, filter) {
+        if (!filter) return true;
+        return g.pubs.some(p => {
+            const cls = publisherClass(p);
+            if (filter === 'other') return !cls || cls === 'other';
+            return cls === filter;
+        });
     }
 
-    function streamMatchesSearch(s, q) {
+    function streamMatchesPrice(g, filter) {
+        if (filter === 'all') return true;
+        return g.pubs.some(p => {
+            const price = p.price_per_obs || 0;
+            if (filter === 'free') return price === 0;
+            if (filter === 'paid') return price > 0;
+            return true;
+        });
+    }
+
+    function streamMatchesSearch(g, q) {
         if (!q) return true;
         q = q.toLowerCase();
-        const hay = [
-            s.stream_name || '',
-            s.name || '',
-            s.description || '',
-            (s.tags || []).join(' '),
-            s.nostr_pubkey || '',
-        ].join(' ').toLowerCase();
-        return hay.includes(q);
+        return g.pubs.some(p => {
+            const hay = [
+                p.stream_name || '',
+                p.name || '',
+                p.description || '',
+                (p.tags || []).join(' '),
+                p.nostr_pubkey || '',
+            ].join(' ').toLowerCase();
+            return hay.includes(q);
+        });
+    }
+
+    // Detect whether all publishers in a group agree on the public-facing
+    // metadata. If they don't, we surface a warning and recommend expanding.
+    function publishersAgree(pubs) {
+        if (pubs.length <= 1) return true;
+        const ref = pubs[0];
+        const refClass = publisherClass(ref);
+        const refPrice = ref.price_per_obs || 0;
+        return pubs.every(p =>
+            (p.name || '') === (ref.name || '') &&
+            (p.description || '') === (ref.description || '') &&
+            (p.price_per_obs || 0) === refPrice &&
+            publisherClass(p) === refClass);
     }
 
     // ── Rendering ───────────────────────────────────────
@@ -782,10 +900,37 @@
         const pager = document.getElementById('mktPager');
         const q = document.getElementById('mktSearch').value.trim();
 
-        // Group by stream_name (one card per stream, summarising publishers)
-        const byStream = new Map();
+        // Dedupe by (stream_name, nostr_pubkey): the same publisher announces
+        // the same stream on every relay it's connected to, so the API hands
+        // us one row per (stream, relay). Collapse them into one row per
+        // (stream, publisher), keeping the freshest observation timestamp
+        // and OR-ing the subscription/ownership flags.
+        const byStreamAndPub = new Map();
         for (const s of allStreams) {
             if (!s.active) continue;
+            const key = s.stream_name + '\x00' + s.nostr_pubkey;
+            const prev = byStreamAndPub.get(key);
+            if (!prev) {
+                byStreamAndPub.set(key, { ...s, relays: [s.relay_url].filter(Boolean) });
+                continue;
+            }
+            // Merge: keep the row with the most recent observation as the base
+            const winner = (s.last_observation_at || 0) > (prev.last_observation_at || 0) ? s : prev;
+            const merged = { ...winner };
+            merged.subscribed = prev.subscribed || s.subscribed;
+            merged.is_mine = prev.is_mine || s.is_mine;
+            merged.last_observation_at = Math.max(
+                prev.last_observation_at || 0, s.last_observation_at || 0) || null;
+            merged.relays = Array.from(new Set([
+                ...(prev.relays || []),
+                s.relay_url,
+            ].filter(Boolean)));
+            byStreamAndPub.set(key, merged);
+        }
+
+        // Group by stream_name (one card per stream, listing distinct publishers)
+        const byStream = new Map();
+        for (const s of byStreamAndPub.values()) {
             if (!byStream.has(s.stream_name)) byStream.set(s.stream_name, []);
             byStream.get(s.stream_name).push(s);
         }
@@ -800,9 +945,9 @@
         document.getElementById('mktTotal').textContent = groups.length;
 
         const filtered = groups.filter(g =>
-            streamMatchesClass(g.rep, activeClass) &&
-            streamMatchesPrice(g.rep, priceFilter) &&
-            streamMatchesSearch(g.rep, q));
+            streamMatchesClass(g, activeClass) &&
+            streamMatchesPrice(g, priceFilter) &&
+            streamMatchesSearch(g, q));
 
         const subbed = filtered.filter(g => g.rep.subscribed).length;
         document.getElementById('mktSubLine').textContent = subbed
@@ -887,12 +1032,34 @@
         pager.innerHTML = html;
     }
 
+    function renderPublisherChips(p) {
+        const cls = publisherClass(p);
+        const classBadge = cls
+            ? `<span class="mkt-card-class" title="${escapeHtml(classificationLabel(cls))}">${escapeHtml(classificationLabel(cls))}</span>`
+            : '<span class="mkt-card-class" style="background:var(--bg-card);color:var(--text-muted);border-color:var(--border-color);">Uncategorized</span>';
+        const priceChip = (p.price_per_obs > 0)
+            ? `<span class="mkt-card-price"><i class="material-icons">bolt</i>${p.price_per_obs} sats</span>`
+            : `<span class="mkt-card-price is-free"><i class="material-icons">check_circle</i>Free</span>`;
+        return classBadge + priceChip;
+    }
+
+    function renderPubAction(p) {
+        if (p.is_mine) return `<button class="mkt-pub-action" disabled>You publish this</button>`;
+        if (p.subscribed) return `<button class="mkt-pub-action unsubscribe"
+            onclick="doUnsubscribe('${escapeJs(p.stream_name)}','${escapeJs(p.nostr_pubkey)}', this)">
+            Unsubscribe</button>`;
+        return `<button class="mkt-pub-action subscribe"
+            onclick="doSubscribe(${escapeAttr(JSON.stringify(p))}, this)">
+            Subscribe</button>`;
+    }
+
     function renderCard(g, idx) {
         const s = g.rep;
         const tags = s.tags || [];
-        const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
-        const cls = tags.find(t => classValues.has(t));
+        const cls = publisherClass(s);
         const extras = tags.filter(t => t !== cls);
+        const multi = g.pubs.length > 1;
+        const diverges = !publishersAgree(g.pubs);
 
         const classBadge = cls
             ? `<span class="mkt-card-class" title="${escapeHtml(classificationLabel(cls))}">${escapeHtml(classificationLabel(cls))}</span>`
@@ -909,7 +1076,7 @@
             ? `<div class="mkt-card-tags">${extras.slice(0,5).map(t => `<span class="mkt-card-tag">#${escapeHtml(t)}</span>`).join('')}</div>`
             : '';
 
-        // Subscribe button state
+        // Subscribe action in the foot
         let actionHtml;
         if (s.is_mine) {
             actionHtml = `<button class="mkt-card-action" disabled>You publish this</button>`;
@@ -923,14 +1090,55 @@
                 Subscribe</button>`;
         }
 
-        const pubsCount = g.pubs.length;
-        const pubsLabel = pubsCount === 1
-            ? `${s.nostr_pubkey.slice(0,10)}…`
-            : `${pubsCount} publishers`;
-        const mineCls = s.is_mine ? ' is-mine' : '';
+        // Footer publisher label / toggle
+        const cardId = 'mkt-card-' + s.stream_name.replace(/[^a-z0-9]/gi, '_');
+        let pubsCell;
+        if (multi) {
+            pubsCell = `<button class="mkt-pubs-toggle" id="${cardId}-toggle"
+                onclick="togglePubs('${escapeJs(cardId)}', this)">
+                <i class="material-icons">chevron_right</i>${g.pubs.length} publishers</button>`;
+        } else {
+            pubsCell = `<div class="mkt-card-pubs">
+                <i class="material-icons" style="font-size:13px;">groups</i>
+                ${escapeHtml(s.nostr_pubkey.slice(0,10) + '…')}
+            </div>`;
+        }
 
+        // Optional divergence warning
+        const warnHtml = diverges
+            ? `<div class="mkt-card-warn">
+                <i class="material-icons">warning_amber</i>
+                <span>Publishers disagree on metadata — expand to compare.</span>
+              </div>`
+            : '';
+
+        // Per-publisher rows (hidden until expanded)
+        const pubRows = multi ? g.pubs.slice()
+            .sort((a, b) => {
+                // subscribed first, then mine, then most recent obs
+                const score = p => (p.subscribed?4:0) + (p.is_mine?2:0) + (p.last_observation_at?1:0);
+                return score(b) - score(a);
+            })
+            .map(p => `
+              <div class="mkt-pub-row">
+                <div class="mkt-pub-id" title="${escapeHtml(p.nostr_pubkey)}">
+                    ${escapeHtml(p.nostr_pubkey)}
+                </div>
+                ${renderPubAction(p)}
+                <div class="mkt-pub-meta">
+                    ${renderPublisherChips(p)}
+                    <span><i class="material-icons" style="font-size:12px;color:var(--text-muted);">schedule</i> ${formatCadence(p.cadence_seconds)}</span>
+                    <span><i class="material-icons" style="font-size:12px;color:var(--text-muted);">circle</i> ${p.last_observation_at ? formatTimeAgo(p.last_observation_at) : 'never'}</span>
+                </div>
+              </div>`).join('') : '';
+
+        const pubsListHtml = multi
+            ? `<div class="mkt-pubs-list" id="${cardId}-list" style="display:none;">${pubRows}</div>`
+            : '';
+
+        const mineCls = s.is_mine ? ' is-mine' : '';
         return `
-        <article class="mkt-card${mineCls}" style="animation-delay:${Math.min(idx,12)*40}ms">
+        <article class="mkt-card${mineCls}" id="${cardId}" style="animation-delay:${Math.min(idx,12)*40}ms">
             <div class="mkt-card-head">
                 <div class="mkt-card-head-text">
                     <div class="mkt-card-name" title="${escapeHtml(s.name || s.stream_name)}">${escapeHtml(s.name || s.stream_name)}</div>
@@ -945,14 +1153,21 @@
                 <span class="item"><i class="material-icons">circle</i>${lastSeen}</span>
             </div>
             ${tagBadges}
+            ${warnHtml}
             <div class="mkt-card-foot">
-                <div class="mkt-card-pubs">
-                    <i class="material-icons" style="font-size:13px;">groups</i>
-                    ${escapeHtml(pubsLabel)}
-                </div>
+                ${pubsCell}
                 ${actionHtml}
             </div>
+            ${pubsListHtml}
         </article>`;
+    }
+
+    function togglePubs(cardId, btn) {
+        const list = document.getElementById(cardId + '-list');
+        if (!list) return;
+        const open = list.style.display !== 'none';
+        list.style.display = open ? 'none' : 'flex';
+        btn.classList.toggle('is-open', !open);
     }
 
     // ── Subscribe / unsubscribe ─────────────────────────
