@@ -2179,6 +2179,12 @@ def register_routes(app):
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
+        # For paid streams, trigger an initial channel payment immediately so
+        # the provider grants access without waiting for observations first.
+        price = int(data.get('price_per_obs', 0) or 0)
+        if price > 0:
+            startup.scheduleChannelPay(
+                data['stream_name'], data['nostr_pubkey'], price)
         return jsonify({'success': True})
 
     @app.route('/api/network/unsubscribe', methods=['POST'])

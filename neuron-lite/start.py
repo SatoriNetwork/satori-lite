@@ -908,6 +908,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.error(
                 f'Channel: failed to store commitment '
                 f'{commitment.p2sh_address}: {e}')
+        # Grant provisional access immediately on commitment receipt so the
+        # subscriber can receive observations without waiting for an on-chain
+        # claim. The claim just settles funds; access is based on committed amt.
+        sender_nostr_pubkey = channel.get('sender_nostr_pubkey', '')
+        if sender_nostr_pubkey and commitment.pay_amount_sats > 0:
+            await self._grantChannelAccess(
+                sender_nostr_pubkey=sender_nostr_pubkey,
+                total_paid_sats=commitment.pay_amount_sats,
+                stream_name=commitment.stream_name)
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -2506,6 +2515,23 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """Return set of relay URLs that have active subscriptions."""
         subs = self.networkDB.get_active()
         return {s['relay_url'] for s in subs}
+
+    def scheduleChannelPay(
+        self, stream_name: str, provider_pubkey: str, price_sats: int
+    ):
+        """Trigger an initial channel payment from a sync context (e.g. Flask).
+
+        Called when subscribing to a paid stream so the subscriber pre-pays
+        before any observations arrive, breaking the circular dependency where
+        observations require payment and payment requires observations.
+        Fire-and-forget.
+        """
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._channelPayNow(stream_name, provider_pubkey, price_sats),
+            loop)
 
     def triggerNetworkDiscover(self):
         """Trigger on-demand discovery from a sync context (e.g. Flask route).
