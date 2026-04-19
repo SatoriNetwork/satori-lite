@@ -715,6 +715,7 @@
                     <div class="bal-tabs">
                         <button class="bal-tab bal-tab-active" onclick="switchWalletTab('vault', this)">Vault</button>
                         <button class="bal-tab" onclick="switchWalletTab('identity', this)">Wallet (Identity)</button>
+                        <button class="bal-tab" onclick="switchWalletTab('nostr', this)">Nostr</button>
                     </div>
                     <div class="card-header-actions">
                         <span class="text-muted drag-handle" title="Drag to reorder">
@@ -781,16 +782,6 @@
                             </div>
                             <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can open payment channels to you.</div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Nostr Public Key</label>
-                            <div class="input-group">
-                                <input type="text" class="form-control font-monospace" id="identityNostrPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
-                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityNostrPubkey')" title="Copy">
-                                    <i class="material-icons align-middle">content_copy</i>
-                                </button>
-                            </div>
-                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can send you channel open notifications.</div>
-                        </div>
                         <div class="mb-0">
                             <label class="form-label">Identity Private Key</label>
                             <div class="input-group">
@@ -802,6 +793,19 @@
                                     <i class="material-icons align-middle">content_copy</i>
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                    <!-- Nostr pane -->
+                    <div id="walletNostrPane" style="display: none;">
+                        <div class="mb-3">
+                            <label class="form-label">Nostr Public Key</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace" id="identityNostrPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityNostrPubkey')" title="Copy">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
+                            </div>
+                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can send you channel open notifications.</div>
                         </div>
                     </div>
                 </div>
@@ -1805,6 +1809,7 @@
     function switchWalletTab(tab, btn) {
         document.getElementById('walletVaultPane').style.display = tab === 'vault' ? 'block' : 'none';
         document.getElementById('walletIdentityPane').style.display = tab === 'identity' ? 'block' : 'none';
+        document.getElementById('walletNostrPane').style.display = tab === 'nostr' ? 'block' : 'none';
         btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
         btn.classList.add('bal-tab-active');
     }
