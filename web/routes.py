@@ -635,14 +635,43 @@ def register_routes(app):
             relay_url=relay_url,
             page_mode='p2p')
 
+    @app.route('/marketplace')
+    @login_required
+    def marketplace_page():
+        """Marketplace: browse all streams discovered across relays."""
+        from satorineuron import VERSION
+        nostr_pubkey = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+        except Exception:
+            pass
+        return render_template(
+            'marketplace.html',
+            version=VERSION,
+            nostr_pubkey=nostr_pubkey)
+
     @app.route('/settings')
     @login_required
     def relay_settings():
         """Settings page for local relay management."""
         from satorineuron import VERSION
+        nostr_pubkey = None
+        relay_url = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+            if startup and hasattr(startup, 'server') and startup.server:
+                relay_url = getattr(startup.server, 'relayUrl', None)
+        except Exception:
+            pass
         return render_template(
             'settings.html',
             version=VERSION,
+            nostr_pubkey=nostr_pubkey,
+            relay_url=relay_url,
             relay_status=build_local_relay_status_payload())
 
     @app.route('/stake')
@@ -2076,6 +2105,23 @@ def register_routes(app):
             status = build_local_relay_status_payload()
             return jsonify({'error': str(e), 'status': status}), 500
 
+    @app.route('/api/network/discover', methods=['POST'])
+    @login_required
+    def api_network_discover():
+        """Kick off global stream discovery in the background.
+
+        Returns 202 immediately. Clients should poll /api/network/streams
+        afterwards to see the cache populate.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        try:
+            startup.triggerNetworkDiscover()
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+        return jsonify({'success': True, 'pending': True}), 202
+
     @app.route('/api/network/streams', methods=['GET'])
     @login_required
     def api_network_streams():
@@ -2084,11 +2130,16 @@ def register_routes(app):
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
         connected = len(startup._networkClients) > 0
+        my_pub_names = {
+            p['stream_name']
+            for p in startup.networkDB.get_active_publications()
+        }
         streams = []
         for s in startup.networkStreams:
             s_copy = dict(s)
             s_copy['subscribed'] = startup.networkDB.is_subscribed(
                 s['stream_name'], s['nostr_pubkey'])
+            s_copy['is_mine'] = s['stream_name'] in my_pub_names
             streams.append(s_copy)
         return jsonify({
             'connected': connected,

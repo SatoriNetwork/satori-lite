@@ -2415,15 +2415,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not client:
                 continue
             try:
-                streams = await client.discover_datastreams()
-                for s in streams:
+                streams = await client.discover_datastreams(limit=1000)
+                # Run freshness checks concurrently — each is a network RTT.
+                results = await asyncio.gather(
+                    *[self._networkCheckFreshness(client, s.stream_name, s)
+                      for s in streams],
+                    return_exceptions=True)
+                for s, res in zip(streams, results):
                     d = s.to_dict()
                     d['relay_url'] = relay_url
-                    last_obs, is_active = await self._networkCheckFreshness(
-                        client, s.stream_name, s)
-                    d['last_observation_at'] = last_obs
-                    d['active'] = is_active
+                    if isinstance(res, Exception):
+                        d['last_observation_at'] = None
+                        d['active'] = False
+                    else:
+                        d['last_observation_at'], d['active'] = res
                     all_streams.append(d)
+                logging.info(
+                    f'Network discover: {len(streams)} streams from '
+                    f'{relay_url}', color='green')
             except Exception as e:
                 logging.warning(
                     f'Network discover: failed on {relay_url}: {e}')
@@ -2440,14 +2449,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return []
         result = []
         try:
-            streams = await client.discover_datastreams()
-            for s in streams:
+            streams = await client.discover_datastreams(limit=1000)
+            results = await asyncio.gather(
+                *[self._networkCheckFreshness(client, s.stream_name, s)
+                  for s in streams],
+                return_exceptions=True)
+            for s, res in zip(streams, results):
                 d = s.to_dict()
                 d['relay_url'] = relay_url
-                last_obs, is_active = await self._networkCheckFreshness(
-                    client, s.stream_name, s)
-                d['last_observation_at'] = last_obs
-                d['active'] = is_active
+                if isinstance(res, Exception):
+                    d['last_observation_at'] = None
+                    d['active'] = False
+                else:
+                    d['last_observation_at'], d['active'] = res
                 result.append(d)
         except Exception as e:
             logging.warning(
@@ -2477,18 +2491,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return {s['relay_url'] for s in subs}
 
     def triggerNetworkDiscover(self):
-        """Trigger on-demand discovery from a sync context (e.g. Flask route)."""
+        """Trigger on-demand discovery from a sync context (e.g. Flask route).
+
+        Schedules the coroutine on the live network event loop so it shares
+        the existing WS clients. Fire-and-forget.
+        """
         from satorilib.satori_nostr import SatoriNostrConfig
         if not hasattr(self, '_networkSecretHex'):
             return
-        loop = asyncio.new_event_loop()
-        def run():
-            try:
-                loop.run_until_complete(
-                    self._networkDiscover(SatoriNostrConfig))
-            finally:
-                loop.close()
-        threading.Thread(target=run, daemon=True).start()
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._networkDiscover(SatoriNostrConfig), loop)
 
     async def _networkReconcile(self, ConfigClass):
         """Single reconciliation pass.
