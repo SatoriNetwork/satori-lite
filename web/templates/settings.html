@@ -107,13 +107,100 @@
 {% block content %}
 {% include 'partials/navbar.html' %}
 <div class="container-fluid py-4">
+    <div class="row g-4 mb-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">rss_feed</i>
+                        Connected Relays
+                    </h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="input-group input-group-sm" style="width: 320px;">
+                            <input type="text" id="addRelayInput" class="form-control" placeholder="wss://relay.example.com">
+                            <button class="btn btn-outline-primary" onclick="addRelay()">Add</button>
+                        </div>
+                        <span id="networkStatus" class="badge bg-secondary">Checking...</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="relaysLoading" class="text-center text-muted py-3">
+                        Loading relays...
+                    </div>
+                    <div id="relaysEmpty" class="text-center text-muted py-3" style="display: none;">
+                        No relays found.
+                    </div>
+                    <div id="relaysTable" style="display: none;">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Relay URL</th>
+                                        <th>Last Active</th>
+                                        <th>Source</th>
+                                        <th></th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="relaysList"></tbody>
+                            </table>
+                        </div>
+                        <div id="relaysPagination" class="px-3 pb-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-2">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">cell_tower</i>
+                        Relay Registration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Nostr Public Key</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="nostrPubkey"
+                                   value="{{ nostr_pubkey or 'Not generated' }}" readonly
+                                   style="font-family: monospace; font-size: 0.85rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('nostrPubkey')" title="Copy">
+                                <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">
+                            Set this as NOSTR_PUBKEY in your relay's .env file
+                        </small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Relay URL</label>
+                        <input type="text" class="form-control" id="relayUrl"
+                               value="{{ relay_url or '' }}"
+                               placeholder="wss://your-relay.example.com">
+                        <small class="form-text text-muted">
+                            WebSocket URL of your Nostr relay (must have NIP-11 configured with your pubkey)
+                        </small>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-primary" onclick="registerRelay()">Register Relay</button>
+                        <span id="relayStatus" class="ms-3" style="display: none;"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="row g-4">
         <div class="col-12">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">settings_input_antenna</i>
-                        Nostr Relay Settings
+                        Local Relay Server
                     </h5>
                     <div class="d-flex gap-2 align-items-center">
                         <span class="mode-chip status-off" id="relayRunningChip">Relay Off</span>
@@ -495,6 +582,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         renderRelayStatus(currentRelayStatus);
         loadAdapter();
+        loadRelays();
     });
 
     // -------- Prediction Engine adapter --------
@@ -540,6 +628,167 @@
             statusEl.textContent = err.message;
         } finally {
             btn.disabled = false;
+        }
+    }
+
+    // ── Relay Registration ───────────────────────────────
+    function copyToClipboard(elId) {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        navigator.clipboard.writeText(el.value || el.textContent || '').catch(()=>{});
+    }
+
+    async function registerRelay() {
+        const relayUrl = document.getElementById('relayUrl').value.trim();
+        const statusEl = document.getElementById('relayStatus');
+
+        if (!relayUrl) {
+            statusEl.style.display = 'inline';
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'Please enter a relay URL';
+            return;
+        }
+        if (!relayUrl.startsWith('wss://') && !relayUrl.startsWith('ws://')) {
+            statusEl.style.display = 'inline';
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'URL must start with wss:// or ws://';
+            return;
+        }
+
+        statusEl.style.display = 'inline';
+        statusEl.className = 'ms-3 text-info';
+        statusEl.textContent = 'Verifying relay...';
+
+        try {
+            const resp = await fetch('/api/relay', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({relay_url: relayUrl})
+            });
+            const data = await resp.json();
+            if (resp.ok && (data.success || data.relay_url)) {
+                statusEl.className = 'ms-3 text-success';
+                statusEl.textContent = 'Relay verified and registered';
+            } else {
+                statusEl.className = 'ms-3 text-danger';
+                statusEl.textContent = data.error || data.detail || 'Verification failed';
+            }
+        } catch (err) {
+            statusEl.className = 'ms-3 text-danger';
+            statusEl.textContent = 'Connection error: ' + err.message;
+        }
+    }
+
+    // ── Connected Relays ─────────────────────────────────
+    const RELAYS_PAGE_SIZE = 10;
+    let relaysCurrentPage = 1, relaysAllItems = [];
+
+    function formatTimeAgo(ts) {
+        if (!ts) return '-';
+        const seconds = Math.floor(Date.now() / 1000) - ts;
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+        return Math.floor(seconds / 86400) + 'd ago';
+    }
+
+    function buildRelayPager(total, currentPage, pageSize) {
+        const container = document.getElementById('relaysPagination');
+        const totalPages = Math.ceil(total / pageSize);
+        if (totalPages <= 1) { container.innerHTML = ''; return; }
+        let html = '<nav class="mt-2"><ul class="pagination pagination-sm mb-0 justify-content-center">';
+        html += `<li class="page-item${currentPage === 1 ? ' disabled' : ''}"><a class="page-link" href="#" onclick="goToRelaysPage(${currentPage - 1}); return false;">&laquo;</a></li>`;
+        for (let p = 1; p <= totalPages; p++) {
+            html += `<li class="page-item${p === currentPage ? ' active' : ''}"><a class="page-link" href="#" onclick="goToRelaysPage(${p}); return false;">${p}</a></li>`;
+        }
+        html += `<li class="page-item${currentPage === totalPages ? ' disabled' : ''}"><a class="page-link" href="#" onclick="goToRelaysPage(${currentPage + 1}); return false;">&raquo;</a></li>`;
+        html += '</ul></nav>';
+        container.innerHTML = html;
+    }
+
+    async function addRelay() {
+        const input = document.getElementById('addRelayInput');
+        const url = input.value.trim();
+        if (!url) return;
+        if (!url.startsWith('wss://') && !url.startsWith('ws://')) {
+            input.classList.add('is-invalid');
+            return;
+        }
+        input.classList.remove('is-invalid');
+        input.disabled = true;
+        await fetch('/api/network/relay', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({relay_url: url})
+        });
+        input.value = '';
+        input.disabled = false;
+        loadRelays();
+    }
+
+    async function deleteRelay(relayUrl) {
+        await fetch('/api/network/relay', {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({relay_url: relayUrl})
+        });
+        loadRelays();
+    }
+
+    function renderRelaysPage(page) {
+        relaysCurrentPage = page;
+        const list = document.getElementById('relaysList');
+        list.innerHTML = '';
+        const start = (page - 1) * RELAYS_PAGE_SIZE;
+        const pageItems = relaysAllItems.slice(start, start + RELAYS_PAGE_SIZE);
+        pageItems.forEach(r => {
+            const row = document.createElement('tr');
+            const sourceBadge = r.source === 'both'
+                ? '<span class="badge bg-info">server + local</span>'
+                : r.source === 'server'
+                    ? '<span class="badge bg-secondary">server</span>'
+                    : '<span class="badge bg-outline-secondary border">local</span>';
+            const deleteBtn = r.source !== 'server'
+                ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')"><i class="material-icons align-middle" style="font-size: 16px;">delete</i></button>'
+                : '';
+            row.innerHTML =
+                '<td>' + r.relay_url + '</td>' +
+                '<td>' + formatTimeAgo(r.last_active) + '</td>' +
+                '<td>' + sourceBadge + '</td>' +
+                '<td>' + deleteBtn + '</td>' +
+                '<td><a class="btn btn-sm btn-outline-primary" href="/marketplace"><i class="material-icons align-middle" style="font-size:14px;vertical-align:-2px;">storefront</i> Browse marketplace</a></td>';
+            list.appendChild(row);
+        });
+        buildRelayPager(relaysAllItems.length, page, RELAYS_PAGE_SIZE);
+    }
+
+    function goToRelaysPage(p) { renderRelaysPage(p); }
+
+    async function loadRelays() {
+        try {
+            const resp = await fetch('/api/network/relays');
+            const data = await resp.json();
+            const loading = document.getElementById('relaysLoading');
+            const empty = document.getElementById('relaysEmpty');
+            const table = document.getElementById('relaysTable');
+            const status = document.getElementById('networkStatus');
+            loading.style.display = 'none';
+            status.className = 'badge bg-success';
+            status.textContent = (data.relays || []).length + ' relays';
+            const relays = data.relays || [];
+            if (relays.length === 0) {
+                empty.style.display = 'block';
+                table.style.display = 'none';
+                return;
+            }
+            empty.style.display = 'none';
+            table.style.display = 'block';
+            relaysAllItems = relays;
+            renderRelaysPage(relaysCurrentPage);
+        } catch (err) {
+            document.getElementById('relaysLoading').textContent = 'Error loading relays';
+            document.getElementById('networkStatus').className = 'badge bg-danger';
+            document.getElementById('networkStatus').textContent = 'Error';
         }
     }
 </script>

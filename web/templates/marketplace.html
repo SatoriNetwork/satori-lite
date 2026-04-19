@@ -1,0 +1,1241 @@
+{% extends "base.html" %}
+{% block title %}Satori — Marketplace{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ── Marketplace shell ───────────────────────────────── */
+    .mkt-page {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 1.75rem 1.5rem 4rem;
+    }
+
+    /* Hero header */
+    .mkt-hero {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1.5rem;
+        padding: 0 0.25rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 1.75rem;
+    }
+    .mkt-hero-title {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    .mkt-hero-eyebrow {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    .mkt-hero-h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin: 0;
+        line-height: 1.05;
+    }
+    .mkt-hero-h1 .mkt-accent {
+        background: var(--accent-gradient);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .mkt-hero-sub {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        max-width: 56ch;
+        margin-top: 0.4rem;
+    }
+    .mkt-hero-meta {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+    }
+    .mkt-hero-meta .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #28a745; box-shadow: 0 0 8px #28a745;
+    }
+    .mkt-hero-meta .dot.off { background: #888; box-shadow: none; }
+
+    /* ── Segment chooser (Streams / Predictions) ─────────── */
+    .mkt-segments {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+    .mkt-seg {
+        position: relative;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 1.5rem 1.5rem 1.4rem;
+        cursor: pointer;
+        text-align: left;
+        color: var(--text-secondary);
+        transition: transform .18s ease, border-color .18s ease, background .18s ease;
+        overflow: hidden;
+        min-height: 130px;
+    }
+    .mkt-seg::after {
+        /* subtle radial accent in top-right */
+        content: '';
+        position: absolute;
+        inset: -40% -40% auto auto;
+        width: 240px; height: 240px;
+        background: radial-gradient(closest-side, rgba(90,90,255,0.18), transparent 70%);
+        opacity: 0;
+        transition: opacity .25s ease;
+        pointer-events: none;
+    }
+    .mkt-seg:hover:not(.is-disabled) {
+        transform: translateY(-2px);
+        border-color: var(--border-color-focus);
+    }
+    .mkt-seg.is-active {
+        background: linear-gradient(140deg,
+            color-mix(in oklab, var(--accent-primary) 14%, var(--bg-card)) 0%,
+            var(--bg-card) 60%);
+        border-color: color-mix(in oklab, var(--accent-primary) 35%, var(--border-color));
+        color: var(--text-primary);
+    }
+    .mkt-seg.is-active::after { opacity: 1; }
+    .mkt-seg.is-disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
+    .mkt-seg-icon {
+        width: 42px; height: 42px;
+        border-radius: 11px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        display: inline-flex;
+        align-items: center; justify-content: center;
+        margin-bottom: 0.75rem;
+    }
+    .mkt-seg-icon .material-icons { font-size: 22px; color: var(--text-primary); }
+    .mkt-seg.is-active .mkt-seg-icon {
+        background: var(--accent-gradient);
+        border-color: transparent;
+    }
+    .mkt-seg.is-active .mkt-seg-icon .material-icons { color: #fff; }
+    .mkt-seg-title {
+        display: flex; align-items: center; gap: 0.6rem;
+        font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em;
+        color: var(--text-primary);
+    }
+    .mkt-seg-sub {
+        margin-top: 0.25rem;
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+    }
+    .mkt-seg-soon {
+        font-size: 0.6rem;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        padding: 0.25rem 0.55rem;
+        background: rgba(255, 196, 0, 0.12);
+        color: #ffc400;
+        border: 1px solid rgba(255, 196, 0, 0.35);
+        border-radius: 999px;
+    }
+
+    /* ── Filter bar ──────────────────────────────────────── */
+    .mkt-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem 0.75rem;
+        align-items: center;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 0.7rem 0.85rem;
+        margin-bottom: 1rem;
+    }
+    .mkt-search {
+        position: relative;
+        flex: 1 1 280px;
+        min-width: 220px;
+    }
+    .mkt-search .material-icons {
+        position: absolute;
+        left: 0.65rem; top: 50%;
+        transform: translateY(-50%);
+        font-size: 18px;
+        color: var(--text-muted);
+        pointer-events: none;
+    }
+    .mkt-search input {
+        width: 100%;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        border-radius: 10px;
+        padding: 0.5rem 0.75rem 0.5rem 2.1rem;
+        font-size: 0.88rem;
+        transition: border-color .15s ease, background .15s ease;
+    }
+    .mkt-search input:focus {
+        outline: none;
+        background: var(--bg-input-focus);
+        border-color: var(--border-color-focus);
+    }
+
+    /* Price segmented control */
+    .mkt-price {
+        display: inline-flex;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 3px;
+        gap: 2px;
+    }
+    .mkt-price button {
+        background: transparent;
+        border: 0;
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 0.32rem 0.7rem;
+        border-radius: 7px;
+        cursor: pointer;
+        transition: background .15s ease, color .15s ease;
+    }
+    .mkt-price button.is-active {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    }
+
+    .mkt-refresh {
+        margin-left: auto;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        padding: 0.4rem 0.7rem;
+        border-radius: 9px;
+        display: inline-flex; align-items: center; gap: 0.35rem;
+        cursor: pointer;
+        transition: border-color .15s ease, color .15s ease;
+    }
+    .mkt-refresh:hover {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
+    }
+    .mkt-refresh .material-icons { font-size: 16px; }
+    .mkt-refresh.is-loading .material-icons {
+        animation: mkt-spin 0.9s linear infinite;
+    }
+    @keyframes mkt-spin { to { transform: rotate(360deg); } }
+
+    /* Classification chip row */
+    .mkt-class-row {
+        display: flex; flex-wrap: wrap; gap: 0.35rem;
+        margin-bottom: 1.2rem;
+    }
+    .mkt-chip {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.76rem;
+        font-weight: 600;
+        padding: 0.32rem 0.7rem;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background .15s ease, color .15s ease, border-color .15s ease;
+    }
+    .mkt-chip:hover {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
+    }
+    .mkt-chip.is-active {
+        background: var(--accent-gradient);
+        border-color: transparent;
+        color: #fff;
+    }
+
+    /* Result-count strip */
+    .mkt-count {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin: 0 0.25rem 0.6rem;
+    }
+    .mkt-count strong {
+        color: var(--text-primary);
+        font-weight: 600;
+    }
+
+    /* Pagination */
+    .mkt-pager {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        margin: 1.5rem 0 0.5rem;
+        flex-wrap: wrap;
+    }
+    .mkt-pg-btn {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        font-weight: 600;
+        min-width: 32px;
+        padding: 0.32rem 0.55rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background .15s ease, color .15s ease, border-color .15s ease;
+    }
+    .mkt-pg-btn:hover:not(:disabled):not(.is-active) {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
+    }
+    .mkt-pg-btn.is-active {
+        background: var(--accent-gradient);
+        border-color: transparent;
+        color: #fff;
+    }
+    .mkt-pg-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    .mkt-pg-gap {
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        padding: 0 0.25rem;
+    }
+    .mkt-pg-size {
+        margin-left: 0.5rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        padding: 0.32rem 0.5rem;
+        border-radius: 8px;
+        cursor: pointer;
+    }
+
+    /* ── Card grid ───────────────────────────────────────── */
+    .mkt-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 0.85rem;
+    }
+    .mkt-card {
+        position: relative;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 1rem 1rem 0.85rem;
+        display: flex; flex-direction: column;
+        transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+        animation: mkt-fade-up 0.35s cubic-bezier(.2,.8,.2,1) both;
+    }
+    .mkt-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--border-color-focus);
+        box-shadow: var(--shadow-sm);
+    }
+    @keyframes mkt-fade-up {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .mkt-card-head {
+        display: flex; justify-content: space-between; align-items: flex-start;
+        gap: 0.5rem; margin-bottom: 0.4rem;
+    }
+    .mkt-card-head-text {
+        flex: 1;
+        min-width: 0;        /* lets the title shrink/wrap inside flex */
+    }
+    .mkt-card-name {
+        font-size: 0.98rem; font-weight: 700;
+        color: var(--text-primary);
+        letter-spacing: -0.015em;
+        line-height: 1.2;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .mkt-card-stream {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .mkt-card-class {
+        flex-shrink: 0;
+        max-width: 110px;
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 0.22rem 0.5rem;
+        border-radius: 6px;
+        background: rgba(90,90,255,0.10);
+        color: var(--accent-primary);
+        border: 1px solid rgba(90,90,255,0.28);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .mkt-card-desc {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        min-height: 2.4em;
+        margin: 0.35rem 0 0.7rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .mkt-card-meta {
+        display: flex; flex-wrap: wrap; gap: 0.4rem 0.7rem;
+        font-size: 0.75rem; color: var(--text-secondary);
+        margin-bottom: 0.6rem;
+    }
+    .mkt-card-meta .item { display: inline-flex; align-items: center; gap: 0.25rem; }
+    .mkt-card-meta .material-icons { font-size: 14px; color: var(--text-muted); }
+    .mkt-card-price {
+        display: inline-flex; align-items: center; gap: 0.3rem;
+        font-size: 0.75rem; font-weight: 700;
+        padding: 0.22rem 0.55rem;
+        border-radius: 999px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+    }
+    .mkt-card-price.is-free {
+        background: rgba(40,167,69,0.10);
+        color: #2bbd5a;
+        border-color: rgba(40,167,69,0.30);
+    }
+    .mkt-card-price .material-icons { font-size: 13px; }
+    .mkt-card-tags {
+        display: flex; flex-wrap: wrap; gap: 0.3rem;
+        margin-bottom: 0.7rem;
+    }
+    .mkt-card-tag {
+        font-size: 0.66rem;
+        padding: 0.18rem 0.45rem;
+        background: var(--bg-input);
+        color: var(--text-secondary);
+        border-radius: 5px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .mkt-card-foot {
+        margin-top: auto;
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 0.5rem;
+        padding-top: 0.7rem;
+        border-top: 1px dashed var(--border-color);
+    }
+    .mkt-card-pubs {
+        display: flex; align-items: center; gap: 0.25rem;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .mkt-card-action {
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 0.42rem 0.85rem;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .mkt-card-action.subscribe {
+        background: var(--accent-gradient);
+        border-color: transparent;
+        color: #fff;
+    }
+    .mkt-card-action.subscribe:hover { filter: brightness(1.08); }
+    .mkt-card-action.unsubscribe {
+        color: var(--text-secondary);
+    }
+    .mkt-card-action.unsubscribe:hover {
+        color: #ff6b6b; border-color: rgba(220,53,69,0.4);
+    }
+    .mkt-card-action[disabled] { cursor: not-allowed; opacity: 0.6; }
+
+    /* "Yours" ribbon */
+    .mkt-card.is-mine .mkt-card-action {
+        background: var(--bg-input);
+        color: var(--text-muted);
+        border-color: var(--border-color);
+    }
+
+    /* Divergence warning */
+    .mkt-card-warn {
+        display: flex; align-items: center; gap: 0.4rem;
+        font-size: 0.72rem;
+        color: #ffc400;
+        background: rgba(255, 196, 0, 0.07);
+        border: 1px solid rgba(255, 196, 0, 0.25);
+        padding: 0.35rem 0.55rem;
+        border-radius: 7px;
+        margin-bottom: 0.6rem;
+        line-height: 1.25;
+    }
+    .mkt-card-warn .material-icons { font-size: 14px; }
+
+    /* Expandable per-publisher list */
+    .mkt-pubs-toggle {
+        background: transparent;
+        border: 0;
+        color: var(--text-secondary);
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0;
+        cursor: pointer;
+        display: inline-flex; align-items: center; gap: 0.2rem;
+    }
+    .mkt-pubs-toggle:hover { color: var(--text-primary); }
+    .mkt-pubs-toggle .material-icons {
+        font-size: 14px;
+        transition: transform .15s ease;
+    }
+    .mkt-pubs-toggle.is-open .material-icons { transform: rotate(90deg); }
+
+    .mkt-pubs-list {
+        margin-top: 0.6rem;
+        padding-top: 0.6rem;
+        border-top: 1px dashed var(--border-color);
+        display: flex; flex-direction: column; gap: 0.45rem;
+    }
+    .mkt-pub-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.4rem 0.5rem;
+        align-items: center;
+        padding: 0.5rem 0.55rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-input);
+    }
+    .mkt-pub-id {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .mkt-pub-meta {
+        grid-column: 1 / -1;
+        display: flex; flex-wrap: wrap; gap: 0.35rem 0.55rem;
+        font-size: 0.7rem; color: var(--text-secondary);
+        align-items: center;
+    }
+    .mkt-pub-meta .mkt-card-class,
+    .mkt-pub-meta .mkt-card-price {
+        font-size: 0.6rem;
+        padding: 0.16rem 0.4rem;
+    }
+    .mkt-pub-action {
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.3rem 0.65rem;
+        border-radius: 7px;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .mkt-pub-action.subscribe {
+        background: var(--accent-gradient);
+        border-color: transparent;
+        color: #fff;
+    }
+    .mkt-pub-action.subscribe:hover { filter: brightness(1.08); }
+    .mkt-pub-action.unsubscribe { color: var(--text-secondary); }
+    .mkt-pub-action.unsubscribe:hover {
+        color: #ff6b6b; border-color: rgba(220,53,69,0.4);
+    }
+    .mkt-pub-action[disabled] { cursor: not-allowed; opacity: 0.6; }
+
+    /* ── Empty + loading states ──────────────────────────── */
+    .mkt-empty {
+        text-align: center;
+        padding: 3.5rem 1rem;
+        color: var(--text-muted);
+    }
+    .mkt-empty .material-icons {
+        font-size: 48px;
+        margin-bottom: 0.5rem;
+        color: var(--text-muted);
+    }
+    .mkt-empty-title {
+        font-size: 1rem; font-weight: 600;
+        color: var(--text-secondary);
+        margin-bottom: 0.25rem;
+    }
+    .mkt-skeleton {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        height: 180px;
+        position: relative;
+        overflow: hidden;
+    }
+    .mkt-skeleton::after {
+        content: '';
+        position: absolute; inset: 0;
+        background: linear-gradient(90deg,
+            transparent, rgba(255,255,255,0.04), transparent);
+        animation: mkt-shimmer 1.4s infinite;
+    }
+    @keyframes mkt-shimmer {
+        from { transform: translateX(-100%); }
+        to   { transform: translateX(100%); }
+    }
+
+    /* Responsive tweaks */
+    @media (max-width: 720px) {
+        .mkt-hero { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+        .mkt-hero-h1 { font-size: 1.5rem; }
+        .mkt-segments { grid-template-columns: 1fr; }
+        .mkt-refresh { margin-left: 0; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include 'partials/navbar.html' %}
+
+<main class="mkt-page">
+
+    <!-- Hero -->
+    <header class="mkt-hero">
+        <div class="mkt-hero-title">
+            <span class="mkt-hero-eyebrow">Network</span>
+            <h1 class="mkt-hero-h1">Data <span class="mkt-accent">Marketplace</span></h1>
+            <p class="mkt-hero-sub">
+                Browse every datastream announced across your connected nostr relays.
+                Filter by category, price, or search by name.
+            </p>
+        </div>
+        <div class="mkt-hero-meta">
+            <span class="dot off" id="mktConnDot"></span>
+            <span id="mktConnText">Disconnected</span>
+        </div>
+    </header>
+
+    <!-- Section chooser -->
+    <div class="mkt-segments" role="tablist" aria-label="Marketplace section">
+        <button class="mkt-seg is-active" role="tab" aria-selected="true" id="segStreams"
+                onclick="selectSegment('streams')">
+            <div class="mkt-seg-icon"><i class="material-icons">graphic_eq</i></div>
+            <div class="mkt-seg-title">Streams</div>
+            <div class="mkt-seg-sub">Live datastreams to subscribe to and consume.</div>
+        </button>
+        <button class="mkt-seg is-disabled" role="tab" aria-selected="false" disabled
+                title="Coming soon">
+            <div class="mkt-seg-icon"><i class="material-icons">insights</i></div>
+            <div class="mkt-seg-title">
+                Predictions
+                <span class="mkt-seg-soon">Coming soon</span>
+            </div>
+            <div class="mkt-seg-sub">Host competitions on your data streams. Predict accurately to earn rewards.</div>
+        </button>
+    </div>
+
+    <!-- Streams panel -->
+    <section id="streamsPanel">
+
+        <!-- Filter bar -->
+        <div class="mkt-filters">
+            <div class="mkt-search">
+                <i class="material-icons">search</i>
+                <input id="mktSearch" type="text" placeholder="Search streams, descriptions, tags…"
+                       autocomplete="off" oninput="currentPage=1; renderStreams()">
+            </div>
+            <div class="mkt-price" role="group" aria-label="Price filter">
+                <button class="is-active" data-price="all"  onclick="setPriceFilter('all', this)">All</button>
+                <button data-price="free" onclick="setPriceFilter('free', this)">Free</button>
+                <button data-price="paid" onclick="setPriceFilter('paid', this)">Paid</button>
+            </div>
+            <button class="mkt-refresh" id="mktRefreshBtn" onclick="refreshStreams({ discover: true })">
+                <i class="material-icons">refresh</i><span>Refresh</span>
+            </button>
+        </div>
+
+        <!-- Classification chips -->
+        <div class="mkt-class-row" id="mktClassRow"></div>
+
+        <!-- Result count -->
+        <div class="mkt-count">
+            <div>Showing <strong id="mktVisible">0</strong> of <span id="mktTotal">0</span> streams</div>
+            <div id="mktSubLine"></div>
+        </div>
+
+        <!-- Grid / states -->
+        <div id="mktGrid" class="mkt-grid"></div>
+        <div id="mktEmpty" class="mkt-empty" style="display:none;">
+            <i class="material-icons">manage_search</i>
+            <div class="mkt-empty-title" id="mktEmptyTitle">No streams match your filters</div>
+            <div id="mktEmptySub">Try clearing the search or selecting a different category.</div>
+        </div>
+        <div id="mktPager" class="mkt-pager"></div>
+    </section>
+
+</main>
+
+<input type="hidden" id="nostrPubkey" value="{{ nostr_pubkey or '' }}">
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // ── State ───────────────────────────────────────────
+    let allStreams = [];
+    let CLASSIFICATIONS = [];
+    let activeClass = null;          // null = All
+    let priceFilter = 'all';         // 'all' | 'free' | 'paid'
+    let activeSegment = 'streams';   // 'streams' | 'predictions' (disabled)
+    let currentPage = 1;
+    let pageSize = 24;
+
+    // ── Boot ────────────────────────────────────────────
+    (async function init() {
+        await loadClassifications();
+        renderClassChips();
+        await refreshStreams({ discover: true });
+    })();
+
+    function selectSegment(seg) {
+        if (seg === 'predictions') return; // disabled
+        activeSegment = seg;
+    }
+
+    async function loadClassifications() {
+        try {
+            const resp = await fetch('/api/network/classifications');
+            const data = await resp.json();
+            CLASSIFICATIONS = data.classifications || [];
+        } catch(e) { CLASSIFICATIONS = []; }
+    }
+
+    function classificationLabel(value) {
+        const c = CLASSIFICATIONS.find(c => c.value === value);
+        return c ? c.label : value;
+    }
+
+    function renderClassChips() {
+        const host = document.getElementById('mktClassRow');
+        const chip = (val, label) => {
+            const active = (activeClass || '') === (val || '');
+            const cls = 'mkt-chip' + (active ? ' is-active' : '');
+            const v = val === null ? 'null' : "'" + val + "'";
+            return `<button class="${cls}" onclick="setClass(${v})">${label}</button>`;
+        };
+        let html = chip(null, 'All');
+        CLASSIFICATIONS.forEach(c => { html += chip(c.value, c.label); });
+        host.innerHTML = html;
+    }
+
+    function setClass(val) {
+        activeClass = val;
+        currentPage = 1;
+        renderClassChips();
+        renderStreams();
+    }
+
+    function setPriceFilter(val, btn) {
+        priceFilter = val;
+        currentPage = 1;
+        document.querySelectorAll('.mkt-price button').forEach(b => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        renderStreams();
+    }
+
+    function goToPage(p) {
+        currentPage = p;
+        renderStreams();
+        // Scroll to top of grid so the user sees the new page
+        document.getElementById('mktGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function setPageSize(size) {
+        pageSize = parseInt(size, 10) || 24;
+        currentPage = 1;
+        renderStreams();
+    }
+
+    async function fetchStreamsOnce() {
+        const resp = await fetch('/api/network/streams');
+        const data = await resp.json();
+        allStreams = data.streams || [];
+        updateConnState(!!data.connected);
+    }
+
+    async function refreshStreams(opts = {}) {
+        const { discover = false } = opts;
+        const btn = document.getElementById('mktRefreshBtn');
+        btn.classList.add('is-loading');
+        showSkeleton();
+
+        try { await fetchStreamsOnce(); } catch(e) { allStreams = []; updateConnState(false); }
+        renderStreams();
+
+        if (discover) {
+            // Kick off background discovery, then poll a few times for fresh data.
+            try {
+                await fetch('/api/network/discover', { method: 'POST' });
+            } catch(e) { /* ignore — fall back to whatever cache yields */ }
+            // Poll while discovery completes (parallelized, but per-relay
+            // freshness across hundreds of streams still takes a few seconds).
+            const delays = [1500, 2000, 2500, 3000, 4000, 5000, 7000]; // ~25s total
+            for (const d of delays) {
+                await new Promise(r => setTimeout(r, d));
+                try {
+                    const before = allStreams.length;
+                    await fetchStreamsOnce();
+                    if (allStreams.length !== before) renderStreams();
+                } catch(e) { /* keep polling */ }
+            }
+        }
+
+        btn.classList.remove('is-loading');
+        renderStreams();
+    }
+
+    function updateConnState(isOn) {
+        document.getElementById('mktConnDot').classList.toggle('off', !isOn);
+        document.getElementById('mktConnText').textContent = isOn ? 'Live across relays' : 'Disconnected';
+    }
+
+    function showSkeleton() {
+        const grid = document.getElementById('mktGrid');
+        document.getElementById('mktEmpty').style.display = 'none';
+        let html = '';
+        for (let i = 0; i < 6; i++) html += '<div class="mkt-skeleton"></div>';
+        grid.innerHTML = html;
+    }
+
+    // ── Filtering ───────────────────────────────────────
+    // Filters operate on the GROUP — a card matches if ANY publisher in the
+    // group matches. This prevents one publisher's bogus metadata from hiding
+    // the legitimate publisher of the same stream name.
+    function publisherClass(s) {
+        const tags = s.tags || [];
+        const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
+        return tags.find(t => classValues.has(t)) || null;
+    }
+
+    function streamMatchesClass(g, filter) {
+        if (!filter) return true;
+        return g.pubs.some(p => {
+            const cls = publisherClass(p);
+            if (filter === 'other') return !cls || cls === 'other';
+            return cls === filter;
+        });
+    }
+
+    function streamMatchesPrice(g, filter) {
+        if (filter === 'all') return true;
+        return g.pubs.some(p => {
+            const price = p.price_per_obs || 0;
+            if (filter === 'free') return price === 0;
+            if (filter === 'paid') return price > 0;
+            return true;
+        });
+    }
+
+    function streamMatchesSearch(g, q) {
+        if (!q) return true;
+        q = q.toLowerCase();
+        return g.pubs.some(p => {
+            const hay = [
+                p.stream_name || '',
+                p.name || '',
+                p.description || '',
+                (p.tags || []).join(' '),
+                p.nostr_pubkey || '',
+            ].join(' ').toLowerCase();
+            return hay.includes(q);
+        });
+    }
+
+    // Detect whether all publishers in a group agree on the public-facing
+    // metadata. If they don't, we surface a warning and recommend expanding.
+    function publishersAgree(pubs) {
+        if (pubs.length <= 1) return true;
+        const ref = pubs[0];
+        const refClass = publisherClass(ref);
+        const refPrice = ref.price_per_obs || 0;
+        return pubs.every(p =>
+            (p.name || '') === (ref.name || '') &&
+            (p.description || '') === (ref.description || '') &&
+            (p.price_per_obs || 0) === refPrice &&
+            publisherClass(p) === refClass);
+    }
+
+    // ── Rendering ───────────────────────────────────────
+    function renderStreams() {
+        const grid = document.getElementById('mktGrid');
+        const empty = document.getElementById('mktEmpty');
+        const pager = document.getElementById('mktPager');
+        const q = document.getElementById('mktSearch').value.trim();
+
+        // Dedupe by (stream_name, nostr_pubkey): the same publisher announces
+        // the same stream on every relay it's connected to, so the API hands
+        // us one row per (stream, relay). Collapse them into one row per
+        // (stream, publisher), keeping the freshest observation timestamp
+        // and OR-ing the subscription/ownership flags.
+        const byStreamAndPub = new Map();
+        for (const s of allStreams) {
+            // Always show your own publications even if the relay can't
+            // confirm freshness (e.g. paid streams with zero paying
+            // subscribers — there are no observation events for the
+            // freshness check to find).
+            if (!s.active && !s.is_mine) continue;
+            const key = s.stream_name + '\x00' + s.nostr_pubkey;
+            const prev = byStreamAndPub.get(key);
+            if (!prev) {
+                byStreamAndPub.set(key, { ...s, relays: [s.relay_url].filter(Boolean) });
+                continue;
+            }
+            // Merge: keep the row with the most recent observation as the base
+            const winner = (s.last_observation_at || 0) > (prev.last_observation_at || 0) ? s : prev;
+            const merged = { ...winner };
+            merged.subscribed = prev.subscribed || s.subscribed;
+            merged.is_mine = prev.is_mine || s.is_mine;
+            merged.last_observation_at = Math.max(
+                prev.last_observation_at || 0, s.last_observation_at || 0) || null;
+            merged.relays = Array.from(new Set([
+                ...(prev.relays || []),
+                s.relay_url,
+            ].filter(Boolean)));
+            byStreamAndPub.set(key, merged);
+        }
+
+        // Group by stream_name (one card per stream, listing distinct publishers)
+        const byStream = new Map();
+        for (const s of byStreamAndPub.values()) {
+            if (!byStream.has(s.stream_name)) byStream.set(s.stream_name, []);
+            byStream.get(s.stream_name).push(s);
+        }
+        // Pick representative per group: prefer subscribed → mine → has-recent obs
+        const score = s => (s.subscribed?4:0) + (s.is_mine?2:0) + (s.last_observation_at?1:0);
+        const groups = [];
+        for (const [name, pubs] of byStream.entries()) {
+            const rep = pubs.slice().sort((a,b) => score(b) - score(a))[0];
+            groups.push({ stream_name: name, rep, pubs });
+        }
+
+        document.getElementById('mktTotal').textContent = groups.length;
+
+        const filtered = groups.filter(g =>
+            streamMatchesClass(g, activeClass) &&
+            streamMatchesPrice(g, priceFilter) &&
+            streamMatchesSearch(g, q));
+
+        const subbed = filtered.filter(g => g.rep.subscribed).length;
+        document.getElementById('mktSubLine').textContent = subbed
+            ? subbed + ' subscribed' : '';
+
+        if (filtered.length === 0) {
+            grid.innerHTML = '';
+            pager.innerHTML = '';
+            document.getElementById('mktVisible').textContent = '0';
+            const title = document.getElementById('mktEmptyTitle');
+            const sub = document.getElementById('mktEmptySub');
+            const btn = document.getElementById('mktRefreshBtn');
+            const isDiscovering = btn && btn.classList.contains('is-loading');
+            if (groups.length === 0 && isDiscovering) {
+                title.textContent = 'Discovering streams across relays…';
+                sub.textContent = 'This usually takes a few seconds.';
+            } else if (groups.length === 0) {
+                title.textContent = 'No streams found yet';
+                sub.textContent = 'Hit Refresh to scan your connected relays.';
+            } else {
+                title.textContent = 'No streams match your filters';
+                sub.textContent = 'Try clearing the search or selecting a different category.';
+            }
+            empty.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+
+        // Stable sort: subscribed first, then mine, then has-recent-obs, then name
+        filtered.sort((a, b) => {
+            const d = score(b.rep) - score(a.rep);
+            if (d !== 0) return d;
+            return (a.rep.name || a.stream_name).localeCompare(b.rep.name || b.stream_name);
+        });
+
+        // Paginate
+        const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+        if (currentPage > totalPages) currentPage = totalPages;
+        const start = (currentPage - 1) * pageSize;
+        const end = Math.min(start + pageSize, filtered.length);
+        const pageItems = filtered.slice(start, end);
+
+        document.getElementById('mktVisible').textContent =
+            (start + 1) + '–' + end;
+
+        grid.innerHTML = pageItems.map((g, idx) => renderCard(g, idx)).join('');
+        renderPager(totalPages);
+    }
+
+    function renderPager(totalPages) {
+        const pager = document.getElementById('mktPager');
+        if (totalPages <= 1) { pager.innerHTML = ''; return; }
+
+        const btn = (label, page, opts = {}) => {
+            const cls = 'mkt-pg-btn' + (opts.active ? ' is-active' : '');
+            const dis = opts.disabled ? ' disabled' : '';
+            return `<button class="${cls}" onclick="goToPage(${page})"${dis}>${label}</button>`;
+        };
+        const gap = () => `<span class="mkt-pg-gap">…</span>`;
+
+        // Build a compact page list: 1 … (cur-1) cur (cur+1) … N
+        const pages = new Set([1, totalPages, currentPage,
+            currentPage - 1, currentPage + 1]);
+        const sorted = [...pages].filter(p => p >= 1 && p <= totalPages).sort((a,b)=>a-b);
+
+        let html = btn('‹', currentPage - 1, { disabled: currentPage === 1 });
+        let prev = 0;
+        for (const p of sorted) {
+            if (p - prev > 1) html += gap();
+            html += btn(String(p), p, { active: p === currentPage });
+            prev = p;
+        }
+        html += btn('›', currentPage + 1, { disabled: currentPage === totalPages });
+
+        // Page-size selector
+        html += `<select class="mkt-pg-size" onchange="setPageSize(this.value)">
+            ${[12, 24, 48, 96].map(n =>
+                `<option value="${n}"${n === pageSize ? ' selected' : ''}>${n} / page</option>`
+            ).join('')}
+        </select>`;
+
+        pager.innerHTML = html;
+    }
+
+    function renderPublisherChips(p) {
+        const cls = publisherClass(p);
+        const classBadge = cls
+            ? `<span class="mkt-card-class" title="${escapeHtml(classificationLabel(cls))}">${escapeHtml(classificationLabel(cls))}</span>`
+            : '<span class="mkt-card-class" style="background:var(--bg-card);color:var(--text-muted);border-color:var(--border-color);">Uncategorized</span>';
+        const priceChip = (p.price_per_obs > 0)
+            ? `<span class="mkt-card-price"><i class="material-icons">bolt</i>${p.price_per_obs} sats</span>`
+            : `<span class="mkt-card-price is-free"><i class="material-icons">check_circle</i>Free</span>`;
+        return classBadge + priceChip;
+    }
+
+    function renderPubAction(p) {
+        if (p.is_mine) return `<button class="mkt-pub-action" disabled>You publish this</button>`;
+        if (p.subscribed) return `<button class="mkt-pub-action unsubscribe"
+            onclick="doUnsubscribe('${escapeJs(p.stream_name)}','${escapeJs(p.nostr_pubkey)}', this)">
+            Unsubscribe</button>`;
+        return `<button class="mkt-pub-action subscribe"
+            onclick="doSubscribe(${escapeAttr(JSON.stringify(p))}, this)">
+            Subscribe</button>`;
+    }
+
+    function renderCard(g, idx) {
+        const s = g.rep;
+        const tags = s.tags || [];
+        const cls = publisherClass(s);
+        const extras = tags.filter(t => t !== cls);
+        const multi = g.pubs.length > 1;
+        const diverges = !publishersAgree(g.pubs);
+
+        const classBadge = cls
+            ? `<span class="mkt-card-class" title="${escapeHtml(classificationLabel(cls))}">${escapeHtml(classificationLabel(cls))}</span>`
+            : '';
+
+        const priceChip = (s.price_per_obs > 0)
+            ? `<span class="mkt-card-price"><i class="material-icons">bolt</i>${s.price_per_obs} sats</span>`
+            : `<span class="mkt-card-price is-free"><i class="material-icons">check_circle</i>Free</span>`;
+
+        const cadence = formatCadence(s.cadence_seconds);
+        const lastSeen = s.last_observation_at ? formatTimeAgo(s.last_observation_at) : 'never';
+
+        const tagBadges = extras.length
+            ? `<div class="mkt-card-tags">${extras.slice(0,5).map(t => `<span class="mkt-card-tag">#${escapeHtml(t)}</span>`).join('')}</div>`
+            : '';
+
+        // Subscribe action in the foot
+        let actionHtml;
+        if (s.is_mine) {
+            actionHtml = `<button class="mkt-card-action" disabled>You publish this</button>`;
+        } else if (s.subscribed) {
+            actionHtml = `<button class="mkt-card-action unsubscribe"
+                onclick="doUnsubscribe('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}', this)">
+                Unsubscribe</button>`;
+        } else {
+            actionHtml = `<button class="mkt-card-action subscribe"
+                onclick="doSubscribe(${escapeAttr(JSON.stringify(s))}, this)">
+                Subscribe</button>`;
+        }
+
+        // Footer publisher label / toggle
+        const cardId = 'mkt-card-' + s.stream_name.replace(/[^a-z0-9]/gi, '_');
+        let pubsCell;
+        if (multi) {
+            pubsCell = `<button class="mkt-pubs-toggle" id="${cardId}-toggle"
+                onclick="togglePubs('${escapeJs(cardId)}', this)">
+                <i class="material-icons">chevron_right</i>${g.pubs.length} publishers</button>`;
+        } else {
+            pubsCell = `<div class="mkt-card-pubs">
+                <i class="material-icons" style="font-size:13px;">groups</i>
+                ${escapeHtml(s.nostr_pubkey.slice(0,10) + '…')}
+            </div>`;
+        }
+
+        // Optional divergence warning
+        const warnHtml = diverges
+            ? `<div class="mkt-card-warn">
+                <i class="material-icons">warning_amber</i>
+                <span>Publishers disagree on metadata — expand to compare.</span>
+              </div>`
+            : '';
+
+        // Per-publisher rows (hidden until expanded)
+        const pubRows = multi ? g.pubs.slice()
+            .sort((a, b) => {
+                // subscribed first, then mine, then most recent obs
+                const score = p => (p.subscribed?4:0) + (p.is_mine?2:0) + (p.last_observation_at?1:0);
+                return score(b) - score(a);
+            })
+            .map(p => `
+              <div class="mkt-pub-row">
+                <div class="mkt-pub-id" title="${escapeHtml(p.nostr_pubkey)}">
+                    ${escapeHtml(p.nostr_pubkey)}
+                </div>
+                ${renderPubAction(p)}
+                <div class="mkt-pub-meta">
+                    ${renderPublisherChips(p)}
+                    <span><i class="material-icons" style="font-size:12px;color:var(--text-muted);">schedule</i> ${formatCadence(p.cadence_seconds)}</span>
+                    <span><i class="material-icons" style="font-size:12px;color:var(--text-muted);">circle</i> ${p.last_observation_at ? formatTimeAgo(p.last_observation_at) : 'never'}</span>
+                </div>
+              </div>`).join('') : '';
+
+        const pubsListHtml = multi
+            ? `<div class="mkt-pubs-list" id="${cardId}-list" style="display:none;">${pubRows}</div>`
+            : '';
+
+        const mineCls = s.is_mine ? ' is-mine' : '';
+        return `
+        <article class="mkt-card${mineCls}" id="${cardId}" style="animation-delay:${Math.min(idx,12)*40}ms">
+            <div class="mkt-card-head">
+                <div class="mkt-card-head-text">
+                    <div class="mkt-card-name" title="${escapeHtml(s.name || s.stream_name)}">${escapeHtml(s.name || s.stream_name)}</div>
+                    <div class="mkt-card-stream" title="${escapeHtml(s.stream_name)}">${escapeHtml(s.stream_name)}</div>
+                </div>
+                ${classBadge}
+            </div>
+            <div class="mkt-card-desc">${escapeHtml(s.description || 'No description provided.')}</div>
+            <div class="mkt-card-meta">
+                ${priceChip}
+                <span class="item"><i class="material-icons">schedule</i>${cadence}</span>
+                <span class="item"><i class="material-icons">circle</i>${lastSeen}</span>
+            </div>
+            ${tagBadges}
+            ${warnHtml}
+            <div class="mkt-card-foot">
+                ${pubsCell}
+                ${actionHtml}
+            </div>
+            ${pubsListHtml}
+        </article>`;
+    }
+
+    function togglePubs(cardId, btn) {
+        const list = document.getElementById(cardId + '-list');
+        if (!list) return;
+        const open = list.style.display !== 'none';
+        list.style.display = open ? 'none' : 'flex';
+        btn.classList.toggle('is-open', !open);
+    }
+
+    // ── Subscribe / unsubscribe ─────────────────────────
+    async function doSubscribe(stream, btn) {
+        btn.disabled = true; btn.textContent = '…';
+        try {
+            const resp = await fetch('/api/network/subscribe', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(stream)
+            });
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error);
+            // Optimistic flip
+            for (const s of allStreams) {
+                if (s.stream_name === stream.stream_name && s.nostr_pubkey === stream.nostr_pubkey) {
+                    s.subscribed = true;
+                }
+            }
+        } catch (e) { /* fall through to render */ }
+        renderStreams();
+    }
+
+    async function doUnsubscribe(name, pubkey, btn) {
+        btn.disabled = true; btn.textContent = '…';
+        try {
+            await fetch('/api/network/unsubscribe', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({stream_name: name, nostr_pubkey: pubkey})
+            });
+            for (const s of allStreams) {
+                if (s.stream_name === name && s.nostr_pubkey === pubkey) {
+                    s.subscribed = false;
+                }
+            }
+        } catch (e) { /* */ }
+        renderStreams();
+    }
+
+    // ── Helpers ─────────────────────────────────────────
+    function formatCadence(sec) {
+        if (!sec) return 'on-demand';
+        const m = Math.round(sec / 60);
+        if (m < 60) return `every ${m}m`;
+        const h = Math.round(m / 60);
+        if (h < 24) return `every ${h}h`;
+        const d = Math.round(h / 24);
+        return `every ${d}d`;
+    }
+    function formatTimeAgo(ts) {
+        if (!ts) return '-';
+        const seconds = Math.floor(Date.now() / 1000) - ts;
+        if (seconds < 60) return 'just now';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+        return Math.floor(seconds / 86400) + 'd ago';
+    }
+    function escapeHtml(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => (
+            {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+        ));
+    }
+    function escapeJs(s) { return String(s).replace(/'/g, "\\'"); }
+    function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+</script>
+{% endblock %}

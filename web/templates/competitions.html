@@ -1,0 +1,803 @@
+{% extends "base.html" %}
+{% block title %}Competitions — Satori{% endblock %}
+
+{% block content %}
+{% include "partials/navbar.html" %}
+
+<div class="container-fluid py-4" style="max-width: 960px;">
+
+  <div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+      <h4 class="mb-1">Prediction Competitions</h4>
+      <p class="text-muted small mb-0">
+        Host a competition on any data stream, or browse and join competitions hosted by others.
+      </p>
+    </div>
+  </div>
+
+  <div id="alertArea"></div>
+
+  <!-- Tabs -->
+  <ul class="nav nav-tabs mb-4" id="competitionTabs">
+    <li class="nav-item">
+      <button class="nav-link active" id="browseTab" onclick="showTab('browse')">
+        <i class="material-icons align-middle" style="font-size:16px;">search</i>
+        Browse
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="mineTab" onclick="showTab('mine')">
+        <i class="material-icons align-middle" style="font-size:16px;">emoji_events</i>
+        My Competitions
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="leaderboardTab" onclick="showTab('leaderboard')">
+        <i class="material-icons align-middle" style="font-size:16px;">leaderboard</i>
+        Leaderboard
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="accessTab" onclick="showTab('access')">
+        <i class="material-icons align-middle" style="font-size:16px;">lock_open</i>
+        Access Requests
+        <span class="badge bg-warning text-dark ms-1" id="pendingBadge" style="display:none;">0</span>
+      </button>
+    </li>
+  </ul>
+
+  <!-- ── Browse Tab ───────────────────────────────────────────── -->
+  <div id="browsePanel">
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span class="fw-600">Available Competitions <span class="badge bg-secondary ms-1" id="browseCount">0</span></span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadBrowse()">
+          <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Stream</th>
+                <th>Host</th>
+                <th>Scoring</th>
+                <th class="text-end">Total Pay / Obs</th>
+                <th class="text-end">Pays</th>
+                <th class="text-end">Channels</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="browseTable">
+              <tr><td colspan="7" class="text-muted text-center py-4">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Leaderboard Tab ────────────────────────────────────── -->
+  <div id="leaderboardPanel" style="display:none;">
+    <div class="card mb-3">
+      <div class="card-header">
+        <span class="fw-600">Leaderboard</span>
+        <span class="text-muted small ms-2" id="leaderboardSubtitle"></span>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col">
+            <input type="text" class="form-control form-control-sm" id="lb_stream" placeholder="Stream name">
+          </div>
+          <div class="col">
+            <input type="text" class="form-control form-control-sm font-monospace" id="lb_provider" placeholder="Provider pubkey">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-sm btn-primary" onclick="loadLeaderboard()">Load</button>
+          </div>
+        </div>
+        <!-- Stats summary -->
+        <div id="lb_stats" style="display:none;" class="alert alert-secondary py-2 small mb-3">
+          <span id="lb_stats_text"></span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Predictor</th>
+                <th class="text-end">Predictions</th>
+                <th class="text-end">Total Earned (sats)</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboardTable">
+              <tr><td colspan="4" class="text-muted text-center py-4">Enter a stream name and provider pubkey above.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── My Competitions Tab ──────────────────────────────────── -->
+  <div id="minePanel" style="display:none;">
+    <div class="d-flex justify-content-end mb-3">
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newCompetitionModal">
+        <i class="material-icons align-middle" style="font-size:16px;">add</i>
+        New Competition
+      </button>
+    </div>
+    <div class="card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span class="fw-600">Competitions I Host <span class="badge bg-secondary ms-1" id="mineCount">0</span></span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadMine()">
+          <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Stream</th>
+                <th>Scoring</th>
+                <th class="text-end">Total Pay / Obs</th>
+                <th class="text-end">Pays</th>
+                <th class="text-end">Channels</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="mineTable">
+              <tr><td colspan="7" class="text-muted text-center py-4">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Access Requests Tab ──────────────────────────────────── -->
+  <div id="accessPanel" style="display:none;">
+
+    <!-- Pending requests (producer side) -->
+    <div class="card mb-4">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span class="fw-600">Pending Access Requests <span class="badge bg-warning text-dark ms-1" id="pendingCount">0</span></span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadPendingRequests()">
+          <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Stream</th>
+                <th>Requester</th>
+                <th>Message</th>
+                <th>Requested</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="pendingTable">
+              <tr><td colspan="5" class="text-muted text-center py-4">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Approved subscribers (producer side) -->
+    <div class="card mb-4">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span class="fw-600">Approved Subscribers</span>
+        <div class="d-flex gap-2 align-items-center">
+          <select class="form-select form-select-sm" id="approvedStreamSelect" style="width:auto;" onchange="loadApproved()">
+            <option value="">— select stream —</option>
+          </select>
+          <button class="btn btn-outline-secondary btn-sm" onclick="loadApproved()">
+            <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Subscriber</th>
+                <th>Approved</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="approvedTable">
+              <tr><td colspan="3" class="text-muted text-center py-4">Select a stream above.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Request access (subscriber side) -->
+    <div class="card">
+      <div class="card-header">
+        <span class="fw-600">Request Access to a Private Stream</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <div class="col">
+            <input type="text" class="form-control form-control-sm" id="ra_stream" placeholder="Stream name">
+          </div>
+          <div class="col">
+            <input type="text" class="form-control form-control-sm font-monospace" id="ra_producer" placeholder="Producer pubkey (hex)">
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col">
+            <input type="text" class="form-control form-control-sm" id="ra_message" placeholder="Optional message to the producer">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-sm btn-primary" onclick="requestAccess()">
+              <i class="material-icons align-middle" style="font-size:14px;">lock_open</i>
+              Request Access
+            </button>
+          </div>
+        </div>
+        <div id="ra_alert"></div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ── New Competition Modal ──────────────────────────────────── -->
+<div class="modal fade" id="newCompetitionModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content" style="background:var(--bg-card);border:1px solid var(--border-color);">
+      <div class="modal-header" style="border-color:var(--border-color);">
+        <h5 class="modal-title">New Competition</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Stream</label>
+          <select class="form-select" id="nc_stream_select">
+            <option value="">— loading subscribed streams… —</option>
+          </select>
+          <input type="hidden" id="nc_stream_name">
+          <input type="hidden" id="nc_provider_pubkey">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Total Pay per Observation (sats)</label>
+          <input type="number" class="form-control" id="nc_pay" min="1" placeholder="100">
+          <div class="form-text">Total sats paid out each time the stream ticks, distributed however you choose.</div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col">
+            <label class="form-label">Predictors to Pay</label>
+            <input type="number" class="form-control" id="nc_paid" min="1" placeholder="3">
+            <div class="form-text">Intent — how many you plan to pay per observation.</div>
+          </div>
+          <div class="col">
+            <label class="form-label">Channels to Open</label>
+            <input type="number" class="form-control" id="nc_competing" min="1" placeholder="5">
+            <div class="form-text">Intent — how many channels you plan to maintain.</div>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Scoring Module</label>
+          <input type="text" class="form-control" id="nc_scoring" placeholder="mae" value="mae">
+          <div class="form-text">Filename (without .py) from the scoring/ folder.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Prediction Horizon</label>
+          <input type="number" class="form-control" id="nc_horizon" min="1" value="1">
+          <div class="form-text">How many steps ahead predictors are predicting (usually 1).</div>
+        </div>
+        <div id="newCompModal_alert"></div>
+      </div>
+      <div class="modal-footer" style="border-color:var(--border-color);">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="createCompetition()">Announce</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Tab switching ─────────────────────────────────────────────
+function showTab(tab) {
+  document.getElementById('browsePanel').style.display      = tab === 'browse'      ? '' : 'none';
+  document.getElementById('minePanel').style.display        = tab === 'mine'        ? '' : 'none';
+  document.getElementById('leaderboardPanel').style.display = tab === 'leaderboard' ? '' : 'none';
+  document.getElementById('accessPanel').style.display      = tab === 'access'      ? '' : 'none';
+  document.getElementById('browseTab').classList.toggle('active', tab === 'browse');
+  document.getElementById('mineTab').classList.toggle('active', tab === 'mine');
+  document.getElementById('leaderboardTab').classList.toggle('active', tab === 'leaderboard');
+  document.getElementById('accessTab').classList.toggle('active', tab === 'access');
+  if (tab === 'browse') loadBrowse();
+  if (tab === 'mine')   loadMine();
+  if (tab === 'access') { loadPendingRequests(); loadApprovedStreamList(); }
+}
+
+// ── Alert ─────────────────────────────────────────────────────
+function showAlert(msg, type='danger') {
+  document.getElementById('alertArea').innerHTML =
+    `<div class="alert alert-${type} alert-dismissible fade show" role="alert">
+      ${msg}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>`;
+}
+
+function modalAlert(msg, type='danger') {
+  document.getElementById('newCompModal_alert').innerHTML =
+    `<div class="alert alert-${type} py-2 small">${msg}</div>`;
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function shortKey(key) {
+  if (!key || key.length < 12) return key || '—';
+  return key.slice(0, 8) + '…' + key.slice(-4);
+}
+
+// ── Browse ────────────────────────────────────────────────────
+async function loadBrowse() {
+  try {
+    const resp = await fetch('/api/competitions/discover');
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    renderBrowse(data.competitions || []);
+  } catch(e) {
+    showAlert('Failed to load competitions: ' + e);
+  }
+}
+
+function renderBrowse(comps) {
+  const tbody = document.getElementById('browseTable');
+  document.getElementById('browseCount').textContent = comps.length;
+  if (!comps.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">No active competitions found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = comps.map(c => `
+    <tr>
+      <td>
+        <div class="fw-500">${c.stream_name}</div>
+        <div class="text-muted small">${shortKey(c.stream_provider_pubkey)}</div>
+      </td>
+      <td><span class="text-muted small font-monospace">${shortKey(c.host_pubkey)}</span></td>
+      <td><span class="badge bg-secondary">${c.scoring_metric}</span></td>
+      <td class="text-end">${(c.pay_per_obs_sats || 0).toLocaleString()} sats</td>
+      <td class="text-end">${c.paid_predictors ?? '—'}</td>
+      <td class="text-end">${c.competing_predictors ?? '—'}</td>
+      <td class="text-end">
+        ${c.is_mine
+          ? '<span class="badge bg-secondary">Your competition</span>'
+          : c.joined
+            ? '<span class="badge bg-success">Joined</span>'
+            : `<button class="btn btn-outline-primary btn-sm"
+                onclick="joinCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
+                Join
+               </button>`
+        }
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function joinCompetition(streamName, providerPubkey, hostPubkey) {
+  // Joining = subscribing to the stream so the neuron starts predicting it
+  try {
+    const resp = await fetch('/api/network/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        stream_name: streamName,
+        nostr_pubkey: providerPubkey,
+        competition_host_pubkey: hostPubkey,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Joined — your neuron will now predict this stream.', 'success');
+    loadBrowse();
+  } catch(e) {
+    showAlert('Failed to join: ' + e);
+  }
+}
+
+// ── My Competitions ───────────────────────────────────────────
+async function loadMine() {
+  try {
+    const resp = await fetch('/api/competitions/mine');
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    renderMine(data.competitions || []);
+  } catch(e) {
+    showAlert('Failed to load my competitions: ' + e);
+  }
+}
+
+function renderMine(comps) {
+  const tbody = document.getElementById('mineTable');
+  document.getElementById('mineCount').textContent = comps.length;
+  if (!comps.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">No competitions yet. Click "New Competition" to announce one.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = comps.map(c => `
+    <tr>
+      <td>
+        <div class="fw-500">${c.stream_name}</div>
+        <div class="text-muted small">${shortKey(c.stream_provider_pubkey)}</div>
+      </td>
+      <td><span class="badge bg-secondary">${c.scoring_metric}</span></td>
+      <td class="text-end">${(c.pay_per_obs_sats || 0).toLocaleString()} sats</td>
+      <td class="text-end">${c.paid_predictors ?? '—'}</td>
+      <td class="text-end">${c.competing_predictors ?? '—'}</td>
+      <td>
+        ${c.active
+          ? '<span class="badge bg-success">Active</span>'
+          : '<span class="badge bg-secondary">Closed</span>'}
+      </td>
+      <td class="text-end d-flex gap-1 justify-content-end">
+        <button class="btn btn-outline-secondary btn-sm"
+          onclick="viewLeaderboard('${c.stream_name}', '${c.stream_provider_pubkey}')">
+          <i class="material-icons align-middle" style="font-size:14px;">leaderboard</i>
+        </button>
+        ${c.active ? `
+          <button class="btn btn-outline-danger btn-sm"
+            onclick="closeCompetition('${c.stream_name}', '${c.stream_provider_pubkey}')">
+            Close
+          </button>` : ''}
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function closeCompetition(streamName, providerPubkey) {
+  if (!confirm(`Close the competition on "${streamName}"?`)) return;
+  try {
+    const resp = await fetch('/api/competition/close', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        stream_name: streamName,
+        stream_provider_pubkey: providerPubkey,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Competition closed.', 'success');
+    loadMine();
+  } catch(e) {
+    showAlert('Failed to close: ' + e);
+  }
+}
+
+// ── Populate stream dropdown from own publications ────────────
+async function loadPublishedStreams() {
+  const sel = document.getElementById('nc_stream_select');
+  sel.innerHTML = '<option value="">— loading… —</option>';
+  try {
+    const [pubResp, statusResp] = await Promise.all([
+      fetch('/api/network/publications'),
+      fetch('/api/settings/relay/status'),
+    ]);
+    const pubData = await pubResp.json();
+    const statusData = await statusResp.json();
+    const myPubkey = statusData.nostr_pubkey || '';
+    const streams = (pubData.publications || []).filter(
+      s => !s.stream_name.endsWith('_pred')
+    );
+    sel.innerHTML = '<option value="">— select a stream —</option>';
+    streams.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = JSON.stringify({stream_name: s.stream_name, provider_pubkey: myPubkey});
+      opt.textContent = s.stream_name;
+      sel.appendChild(opt);
+    });
+    if (streams.length === 0) {
+      sel.innerHTML = '<option value="">— no published streams found —</option>';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">— failed to load streams —</option>';
+  }
+}
+
+document.getElementById('newCompetitionModal').addEventListener('show.bs.modal', loadPublishedStreams);
+
+// ── Create competition ────────────────────────────────────────
+async function createCompetition() {
+  const selected = document.getElementById('nc_stream_select').value;
+  if (!selected) {
+    modalAlert('Please select a stream.'); return;
+  }
+  const {stream_name, provider_pubkey} = JSON.parse(selected);
+  const payload = {
+    stream_name:             stream_name,
+    stream_provider_pubkey:  provider_pubkey,
+    pay_per_obs_sats:        parseInt(document.getElementById('nc_pay').value) || 0,
+    paid_predictors:         parseInt(document.getElementById('nc_paid').value) || 0,
+    competing_predictors:    parseInt(document.getElementById('nc_competing').value) || 0,
+    scoring_metric:          document.getElementById('nc_scoring').value.trim(),
+    horizon:                 parseInt(document.getElementById('nc_horizon').value) || 1,
+  };
+  if (!payload.scoring_metric) {
+    modalAlert('Scoring module is required.'); return;
+  }
+  if (payload.pay_per_obs_sats < 1) {
+    modalAlert('Pay per observation must be at least 1 sat.'); return;
+  }
+  try {
+    const resp = await fetch('/api/competition', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.error) { modalAlert(data.error); return; }
+    bootstrap.Modal.getInstance(document.getElementById('newCompetitionModal')).hide();
+    showAlert('Competition announced.', 'success');
+    loadMine();
+  } catch(e) {
+    modalAlert('Failed: ' + e);
+  }
+}
+
+// ── Leaderboard ───────────────────────────────────────────────
+function viewLeaderboard(streamName, providerPubkey) {
+  document.getElementById('lb_stream').value = streamName;
+  document.getElementById('lb_provider').value = providerPubkey;
+  showTab('leaderboard');
+  loadLeaderboard();
+}
+
+async function loadLeaderboard() {
+  const stream = document.getElementById('lb_stream').value.trim();
+  const provider = document.getElementById('lb_provider').value.trim();
+  if (!stream || !provider) {
+    showAlert('Enter a stream name and provider pubkey.'); return;
+  }
+  const tbody = document.getElementById('leaderboardTable');
+  tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">Loading…</td></tr>';
+  document.getElementById('lb_stats').style.display = 'none';
+  try {
+    const [boardResp, statsResp] = await Promise.all([
+      fetch(`/api/competition/leaderboard?stream_name=${encodeURIComponent(stream)}&provider_pubkey=${encodeURIComponent(provider)}`),
+      fetch(`/api/competition/stats?stream_name=${encodeURIComponent(stream)}&provider_pubkey=${encodeURIComponent(provider)}&host_pubkey=self`),
+    ]);
+    const board = await boardResp.json();
+    document.getElementById('leaderboardSubtitle').textContent = stream;
+    if (!board.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-4">No payments recorded yet.</td></tr>';
+    } else {
+      tbody.innerHTML = board.map((r, i) => `
+        <tr>
+          <td><span class="badge bg-secondary">#${i+1}</span></td>
+          <td class="font-monospace small">${shortKey(r.predictor_pubkey)}</td>
+          <td class="text-end">${r.prediction_count}</td>
+          <td class="text-end fw-500">${r.total_sats.toLocaleString()} sats</td>
+        </tr>
+      `).join('');
+    }
+    if (statsResp.ok) {
+      const stats = await statsResp.json();
+      if (!stats.error) {
+        const ratio = stats.announced_per_obs > 0
+          ? (stats.avg_paid_per_obs / stats.announced_per_obs * 100).toFixed(1)
+          : '—';
+        document.getElementById('lb_stats_text').innerHTML =
+          `<strong>Host stats:</strong> ` +
+          `${stats.scored_observations} observations scored · ` +
+          `${stats.total_paid_sats.toLocaleString()} sats total paid · ` +
+          `avg ${Math.round(stats.avg_paid_per_obs).toLocaleString()} / ` +
+          `${stats.announced_per_obs.toLocaleString()} announced (${ratio}% follow-through)`;
+        document.getElementById('lb_stats').style.display = '';
+      }
+    }
+  } catch(e) {
+    showAlert('Failed to load leaderboard: ' + e);
+  }
+}
+
+// ── Access Requests ──────────────────────────────────────────
+function formatTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString();
+}
+
+async function loadPendingRequests() {
+  const tbody = document.getElementById('pendingTable');
+  try {
+    const resp = await fetch('/api/access/requests/pending');
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    const reqs = data.requests || [];
+    document.getElementById('pendingCount').textContent = reqs.length;
+    const badge = document.getElementById('pendingBadge');
+    if (reqs.length > 0) {
+      badge.textContent = reqs.length;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+    if (!reqs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4">No pending requests.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = reqs.map(r => `
+      <tr>
+        <td class="fw-500">${r.stream_name}</td>
+        <td class="font-monospace small">${shortKey(r.requester_pubkey)}</td>
+        <td class="small">${r.message || '—'}</td>
+        <td class="small text-muted">${formatTime(r.requested_at)}</td>
+        <td class="text-end d-flex gap-1 justify-content-end">
+          <button class="btn btn-outline-success btn-sm"
+            onclick="approveRequest('${r.stream_name}', '${r.requester_pubkey}')">Approve</button>
+          <button class="btn btn-outline-danger btn-sm"
+            onclick="rejectRequest('${r.stream_name}', '${r.requester_pubkey}')">Reject</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    showAlert('Failed to load pending requests: ' + e);
+  }
+}
+
+async function approveRequest(streamName, requesterPubkey) {
+  try {
+    const resp = await fetch('/api/access/approve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stream_name: streamName, requester_pubkey: requesterPubkey }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Access approved.', 'success');
+    loadPendingRequests();
+  } catch(e) {
+    showAlert('Failed to approve: ' + e);
+  }
+}
+
+async function rejectRequest(streamName, requesterPubkey) {
+  try {
+    const resp = await fetch('/api/access/reject', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stream_name: streamName, requester_pubkey: requesterPubkey }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Access rejected.', 'success');
+    loadPendingRequests();
+  } catch(e) {
+    showAlert('Failed to reject: ' + e);
+  }
+}
+
+async function loadApprovedStreamList() {
+  // Populate the stream dropdown from published streams
+  const sel = document.getElementById('approvedStreamSelect');
+  try {
+    const resp = await fetch('/api/network/publications');
+    const data = await resp.json();
+    const pubs = data.publications || [];
+    sel.innerHTML = '<option value="">— select stream —</option>';
+    pubs.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.stream_name;
+      opt.textContent = p.stream_name;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    sel.innerHTML = '<option value="">— failed to load —</option>';
+  }
+}
+
+async function loadApproved() {
+  const streamName = document.getElementById('approvedStreamSelect').value;
+  const tbody = document.getElementById('approvedTable');
+  if (!streamName) {
+    tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-4">Select a stream above.</td></tr>';
+    return;
+  }
+  try {
+    const resp = await fetch(`/api/access/approved?stream_name=${encodeURIComponent(streamName)}`);
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    const subs = data.subscribers || [];
+    if (!subs.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="text-muted text-center py-4">No approved subscribers.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = subs.map(s => `
+      <tr>
+        <td class="font-monospace small">${shortKey(s.subscriber_pubkey)}</td>
+        <td class="small text-muted">${formatTime(s.approved_at)}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-danger btn-sm"
+            onclick="revokeSubscriber('${streamName}', '${s.subscriber_pubkey}')">Revoke</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    showAlert('Failed to load approved subscribers: ' + e);
+  }
+}
+
+async function revokeSubscriber(streamName, subscriberPubkey) {
+  if (!confirm(`Revoke access for ${shortKey(subscriberPubkey)}?`)) return;
+  try {
+    const resp = await fetch('/api/access/revoke', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ stream_name: streamName, subscriber_pubkey: subscriberPubkey }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Access revoked.', 'success');
+    loadApproved();
+  } catch(e) {
+    showAlert('Failed to revoke: ' + e);
+  }
+}
+
+async function requestAccess() {
+  const streamName = document.getElementById('ra_stream').value.trim();
+  const producerPubkey = document.getElementById('ra_producer').value.trim();
+  const message = document.getElementById('ra_message').value.trim();
+  const alertEl = document.getElementById('ra_alert');
+  if (!streamName || !producerPubkey) {
+    alertEl.innerHTML = '<div class="alert alert-danger py-2 small">Stream name and producer pubkey are required.</div>';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/access/request', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        stream_name: streamName,
+        producer_pubkey: producerPubkey,
+        message: message,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alertEl.innerHTML = `<div class="alert alert-danger py-2 small">${data.error}</div>`;
+      return;
+    }
+    alertEl.innerHTML = '<div class="alert alert-success py-2 small">Access request sent. The producer will review your request.</div>';
+    document.getElementById('ra_stream').value = '';
+    document.getElementById('ra_producer').value = '';
+    document.getElementById('ra_message').value = '';
+  } catch(e) {
+    alertEl.innerHTML = `<div class="alert alert-danger py-2 small">Failed: ${e}</div>`;
+  }
+}
+
+// Check for pending requests on page load (badge update)
+async function checkPendingBadge() {
+  try {
+    const resp = await fetch('/api/access/requests/pending');
+    const data = await resp.json();
+    const count = (data.requests || []).length;
+    const badge = document.getElementById('pendingBadge');
+    if (count > 0) {
+      badge.textContent = count;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+// ── Init ──────────────────────────────────────────────────────
+loadBrowse();
+checkPendingBadge();
+</script>
+{% endblock %}
