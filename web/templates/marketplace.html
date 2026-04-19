@@ -907,7 +907,11 @@
         // and OR-ing the subscription/ownership flags.
         const byStreamAndPub = new Map();
         for (const s of allStreams) {
-            if (!s.active) continue;
+            // Always show your own publications even if the relay can't
+            // confirm freshness (e.g. paid streams with zero paying
+            // subscribers — there are no observation events for the
+            // freshness check to find).
+            if (!s.active && !s.is_mine) continue;
             const key = s.stream_name + '\x00' + s.nostr_pubkey;
             const prev = byStreamAndPub.get(key);
             if (!prev) {

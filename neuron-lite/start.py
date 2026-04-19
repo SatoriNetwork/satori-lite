@@ -482,17 +482,34 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
 
-        Also saves the latest observation to the DB if it's new.
+        Also saves the latest observation to the DB if it's new (only when
+        the observation content can be decrypted, i.e. for free streams or
+        paid streams to which we are a paying subscriber).
+
+        For paid streams we are NOT a subscriber to, decryption fails — but
+        we can still infer freshness from the public event header timestamp.
         """
+        # First try a full parse. Successful for free streams; also gives us
+        # the observation to cache for streams we're a subscriber to.
         try:
             obs = await client.get_last_observation(stream_name)
             if obs and obs.observation:
                 last_obs = obs.observation.timestamp
                 await self._networkProcessObservation(obs)
                 return last_obs, metadata.is_likely_active(last_obs)
-            return None, False
         except Exception:
-            return None, False
+            pass
+        # Fallback: read just the event header timestamp. Works for paid
+        # streams as long as the publisher has at least one paying subscriber
+        # — the relay still holds the (encrypted) event whose created_at we
+        # can read without any key.
+        try:
+            ts = await client.get_last_observation_event_time(stream_name)
+            if ts:
+                return ts, metadata.is_likely_active(ts)
+        except Exception:
+            pass
+        return None, False
 
     async def _networkListen(self, relay_url: str):
         """Listen for observations on a relay and save them to the DB.
