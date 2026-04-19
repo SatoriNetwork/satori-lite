@@ -721,17 +721,34 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
 
-        Also saves the latest observation to the DB if it's new.
+        Also saves the latest observation to the DB if it's new (only when
+        the observation content can be decrypted, i.e. for free streams or
+        paid streams to which we are a paying subscriber).
+
+        For paid streams we are NOT a subscriber to, decryption fails — but
+        we can still infer freshness from the public event header timestamp.
         """
+        # First try a full parse. Successful for free streams; also gives us
+        # the observation to cache for streams we're a subscriber to.
         try:
             obs = await client.get_last_observation(stream_name)
             if obs and obs.observation:
                 last_obs = obs.observation.timestamp
                 await self._networkProcessObservation(obs)
                 return last_obs, metadata.is_likely_active(last_obs)
-            return None, False
         except Exception:
-            return None, False
+            pass
+        # Fallback: read just the event header timestamp. Works for paid
+        # streams as long as the publisher has at least one paying subscriber
+        # — the relay still holds the (encrypted) event whose created_at we
+        # can read without any key.
+        try:
+            ts = await client.get_last_observation_event_time(stream_name)
+            if ts:
+                return ts, metadata.is_likely_active(ts)
+        except Exception:
+            pass
+        return None, False
 
     async def _networkListen(self, relay_url: str):
         """Listen for observations on a relay and save them to the DB.
@@ -1189,6 +1206,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.error(
                 f'Channel: failed to store commitment '
                 f'{commitment.p2sh_address}: {e}')
+        # Grant provisional access immediately on commitment receipt so the
+        # subscriber can receive observations without waiting for an on-chain
+        # claim. The claim just settles funds; access is based on committed amt.
+        sender_nostr_pubkey = channel.get('sender_nostr_pubkey', '')
+        if sender_nostr_pubkey and commitment.pay_amount_sats > 0:
+            await self._grantChannelAccess(
+                sender_nostr_pubkey=sender_nostr_pubkey,
+                total_paid_sats=commitment.pay_amount_sats,
+                stream_name=commitment.stream_name)
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -2722,15 +2748,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not client:
                 continue
             try:
-                streams = await client.discover_datastreams()
-                for s in streams:
+                streams = await client.discover_datastreams(limit=1000)
+                # Run freshness checks concurrently — each is a network RTT.
+                results = await asyncio.gather(
+                    *[self._networkCheckFreshness(client, s.stream_name, s)
+                      for s in streams],
+                    return_exceptions=True)
+                for s, res in zip(streams, results):
                     d = s.to_dict()
                     d['relay_url'] = relay_url
-                    last_obs, is_active = await self._networkCheckFreshness(
-                        client, s.stream_name, s)
-                    d['last_observation_at'] = last_obs
-                    d['active'] = is_active
+                    if isinstance(res, Exception):
+                        d['last_observation_at'] = None
+                        d['active'] = False
+                    else:
+                        d['last_observation_at'], d['active'] = res
                     all_streams.append(d)
+                logging.info(
+                    f'Network discover: {len(streams)} streams from '
+                    f'{relay_url}', color='green')
             except Exception as e:
                 logging.warning(
                     f'Network discover: failed on {relay_url}: {e}')
@@ -2747,14 +2782,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return []
         result = []
         try:
-            streams = await client.discover_datastreams()
-            for s in streams:
+            streams = await client.discover_datastreams(limit=1000)
+            results = await asyncio.gather(
+                *[self._networkCheckFreshness(client, s.stream_name, s)
+                  for s in streams],
+                return_exceptions=True)
+            for s, res in zip(streams, results):
                 d = s.to_dict()
                 d['relay_url'] = relay_url
-                last_obs, is_active = await self._networkCheckFreshness(
-                    client, s.stream_name, s)
-                d['last_observation_at'] = last_obs
-                d['active'] = is_active
+                if isinstance(res, Exception):
+                    d['last_observation_at'] = None
+                    d['active'] = False
+                else:
+                    d['last_observation_at'], d['active'] = res
                 result.append(d)
         except Exception as e:
             logging.warning(
@@ -3060,20 +3100,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 except Exception as e:
                     logging.warning(f'AccessGate: request failed: {e}')
         asyncio.run_coroutine_threadsafe(_request(), loop)
-
     def triggerNetworkDiscover(self):
-        """Trigger on-demand discovery from a sync context (e.g. Flask route)."""
+        """Trigger on-demand discovery from a sync context (e.g. Flask route).
+
+        Schedules the coroutine on the live network event loop so it shares
+        the existing WS clients. Fire-and-forget.
+        """
         from satorilib.satori_nostr import SatoriNostrConfig
         if not hasattr(self, '_networkSecretHex'):
             return
-        loop = asyncio.new_event_loop()
-        def run():
-            try:
-                loop.run_until_complete(
-                    self._networkDiscover(SatoriNostrConfig))
-            finally:
-                loop.close()
-        threading.Thread(target=run, daemon=True).start()
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._networkDiscover(SatoriNostrConfig), loop)
 
     async def _networkReconcile(self, ConfigClass):
         """Single reconciliation pass.

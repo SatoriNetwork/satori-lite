@@ -24,6 +24,8 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
+from web.balance_cache import get_balance_snapshot
+
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
     """Call Mundo's request endpoint to get fee data for a partial transaction."""
@@ -633,14 +635,43 @@ def register_routes(app):
             relay_url=relay_url,
             page_mode='p2p')
 
+    @app.route('/marketplace')
+    @login_required
+    def marketplace_page():
+        """Marketplace: browse all streams discovered across relays."""
+        from satorineuron import VERSION
+        nostr_pubkey = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+        except Exception:
+            pass
+        return render_template(
+            'marketplace.html',
+            version=VERSION,
+            nostr_pubkey=nostr_pubkey)
+
     @app.route('/settings')
     @login_required
     def relay_settings():
         """Settings page for local relay management."""
         from satorineuron import VERSION
+        nostr_pubkey = None
+        relay_url = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+            if startup and hasattr(startup, 'server') and startup.server:
+                relay_url = getattr(startup.server, 'relayUrl', None)
+        except Exception:
+            pass
         return render_template(
             'settings.html',
             version=VERSION,
+            nostr_pubkey=nostr_pubkey,
+            relay_url=relay_url,
             relay_status=build_local_relay_status_payload())
 
     @app.route('/stake')
@@ -1339,94 +1370,19 @@ def register_routes(app):
     @app.route('/api/wallet/balance/direct')
     @login_required
     def api_wallet_balance_direct():
-        """Get combined wallet and vault balance directly from electrumx.
+        """Combined wallet+vault balance, backed by an in-process TTL cache.
 
-        This bypasses the Satori API server and queries the blockchain directly
-        via the electromax server using the wallet objects.
+        A process-global WalletManager holds a persistent ElectrumX socket,
+        and the snapshot is cached for 30 s. Pass ?refresh=1 (wired to the
+        dashboard Refresh button and to post-send refreshes) to bypass cache.
         """
-        wallet_manager = get_or_create_session_vault()
-        if not wallet_manager:
-            return jsonify({'error': 'Wallet manager not initialized'}), 500
-
         try:
-            # Ensure electrumx connection with retry
-            logger.info("Attempting to connect to ElectrumX...")
-            connected = False
-            if hasattr(wallet_manager, 'connect'):
-                for attempt in range(5):
-                    connected = wallet_manager.connect()
-                    logger.info(f"ElectrumX connection attempt {attempt + 1}: {connected}")
-                    if connected:
-                        break
-                    time.sleep(2)  # Give more time for connection to establish
-                if not connected:
-                    logger.warning("Failed to connect to ElectrumX after retries")
-                    return jsonify({'error': 'Could not connect to electrumx'}), 500
-            else:
-                logger.warning("WalletManager has no connect method")
-
-            total_satori = 0.0
-            wallet_balance = 0.0
-            vault_balance = 0.0
-            total_evr = 0.0
-            wallet_evr = 0.0
-            vault_evr = 0.0
-
-            def _fetch_balances(wallet_obj, label):
-                """Fetch balances for a wallet/vault object.
-                Falls back to reconnecting if the server returns an empty response
-                (some servers don't support multi-asset balance queries).
-                """
-                satori = 0.0
-                evr = 0.0
-                if not wallet_obj or not hasattr(wallet_obj, 'getBalances'):
-                    return satori, evr
-                # Wait for electrumx connection
-                for _ in range(3):
-                    if wallet_obj.electrumx and wallet_obj.electrumx.connected():
-                        wallet_obj.getBalances()
-                        break
-                    time.sleep(1)
-                else:
-                    wallet_obj.getBalances()
-                # If the server returned an empty dict, it doesn't support multi-asset
-                # queries — force a reconnect and retry once
-                raw = getattr(wallet_obj, 'balances', None)
-                if not raw:
-                    logger.warning(f"{label}: empty balance response, reconnecting...")
-                    wallet_manager._electrumx = None  # force new server on next connect
-                    wallet_manager.connect()
-                    wallet_obj.getBalances()
-                    raw = getattr(wallet_obj, 'balances', None)
-                    logger.info(f"{label}: retry raw balances: {raw}")
-                satori = wallet_obj.balance.amount if hasattr(wallet_obj, 'balance') and wallet_obj.balance else 0.0
-                evr = wallet_obj.currency.amount if hasattr(wallet_obj, 'currency') and wallet_obj.currency else 0.0
-                logger.info(f"{label} balance: SATORI={satori}, EVR={evr}")
-                return satori, evr
-
-            # Get wallet (identity) balance
-            if wallet_manager.wallet:
-                wallet_balance, wallet_evr = _fetch_balances(wallet_manager.wallet, 'Wallet')
-
-            # Get vault balance
-            if wallet_manager.vault:
-                vault_balance, vault_evr = _fetch_balances(wallet_manager.vault, 'Vault')
-
-            total_satori = wallet_balance + vault_balance
-            total_evr = wallet_evr + vault_evr
-
-            return jsonify({
-                'total': total_satori,
-                'wallet_balance': wallet_balance,
-                'vault_balance': vault_balance,
-                'total_evr': total_evr,
-                'wallet_evr': wallet_evr,
-                'vault_evr': vault_evr
-            })
+            force = request.args.get('refresh', '0').lower() in ('1', 'true', 'yes')
+            return jsonify(get_balance_snapshot(force=force))
         except Exception as e:
             import traceback
-            logger.error(f"Failed to get direct balance: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"balance fetch failed: {e}")
+            logger.error(traceback.format_exc())
             return jsonify({'error': str(e)}), 500
 
     # AI Engine Training Delay Control
@@ -2149,6 +2105,23 @@ def register_routes(app):
             status = build_local_relay_status_payload()
             return jsonify({'error': str(e), 'status': status}), 500
 
+    @app.route('/api/network/discover', methods=['POST'])
+    @login_required
+    def api_network_discover():
+        """Kick off global stream discovery in the background.
+
+        Returns 202 immediately. Clients should poll /api/network/streams
+        afterwards to see the cache populate.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        try:
+            startup.triggerNetworkDiscover()
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+        return jsonify({'success': True, 'pending': True}), 202
+
     @app.route('/api/network/streams', methods=['GET'])
     @login_required
     def api_network_streams():
@@ -2157,11 +2130,16 @@ def register_routes(app):
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
         connected = len(startup._networkClients) > 0
+        my_pub_names = {
+            p['stream_name']
+            for p in startup.networkDB.get_active_publications()
+        }
         streams = []
         for s in startup.networkStreams:
             s_copy = dict(s)
             s_copy['subscribed'] = startup.networkDB.is_subscribed(
                 s['stream_name'], s['nostr_pubkey'])
+            s_copy['is_mine'] = s['stream_name'] in my_pub_names
             streams.append(s_copy)
         return jsonify({
             'connected': connected,
@@ -2501,6 +2479,17 @@ def register_routes(app):
             return jsonify({'error': f'Parse failed: {e}', 'raw': raw})
         return jsonify({'value': value, 'raw': raw})
 
+    @app.route('/api/network/classifications', methods=['GET'])
+    @login_required
+    def api_network_classifications():
+        """Return the canonical list of publication classifications."""
+        from satorineuron.classifications import CLASSIFICATIONS
+        return jsonify({
+            'classifications': [
+                {'value': v, 'label': l} for v, l in CLASSIFICATIONS
+            ]
+        })
+
     @app.route('/api/network/data-source', methods=['GET'])
     @login_required
     def api_network_data_source_get():
@@ -2514,16 +2503,20 @@ def register_routes(app):
         ds = startup.networkDB.get_data_source(stream_name)
         if not ds:
             return jsonify({'error': 'Not found'}), 404
-        # Merge price_per_obs from corresponding publication
+        # Merge price_per_obs and tags from corresponding publication
         pubs = startup.networkDB.get_all_publications()
         pub = next((p for p in pubs if p['stream_name'] == stream_name), None)
         ds['price_per_obs'] = pub['price_per_obs'] if pub else 0
+        tag_str = (pub or {}).get('tags') or ''
+        ds['tags'] = [t for t in tag_str.split(',') if t]
         return jsonify({'data_source': ds})
 
     @app.route('/api/network/data-source', methods=['POST'])
     @login_required
     def api_network_data_source_create():
         """Create a new data source and its corresponding publication."""
+        from satorineuron.classifications import (
+            CLASSIFICATIONS, CLASSIFICATION_VALUES)
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
@@ -2537,6 +2530,21 @@ def register_routes(app):
         # If URL is provided, parser config is required
         if url and not parser_config:
             return jsonify({'error': 'Parser config required when URL is set'}), 400
+        classification = (data.get('classification') or '').strip().lower()
+        if classification and classification not in CLASSIFICATION_VALUES:
+            return jsonify({
+                'error': f'Unknown classification: {classification}',
+                'allowed': sorted(CLASSIFICATION_VALUES),
+            }), 400
+        raw_tags = data.get('tags') or []
+        if isinstance(raw_tags, str):
+            raw_tags = raw_tags.split(',')
+        extra_tags = [
+            t.strip().lower() for t in raw_tags
+            if isinstance(t, str) and t.strip()
+            and t.strip().lower() != classification
+        ]
+        all_tags = ([classification] if classification else []) + extra_tags
         # Create the data source
         startup.networkDB.add_data_source(
             stream_name=data['stream_name'],
@@ -2560,7 +2568,8 @@ def register_routes(app):
             description=data.get('description', ''),
             cadence_seconds=cadence or None,
             price_per_obs=price_per_obs,
-            encrypted=encrypted)
+            encrypted=encrypted,
+            tags=all_tags)
         # If a URL is configured, immediately fetch and publish so the stream
         # is visible on relays without waiting for the next cadence cycle
         if url and parser_config:

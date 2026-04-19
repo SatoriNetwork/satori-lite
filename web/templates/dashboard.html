@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Satori - {{ 'P2P' if page_mode == 'p2p' else 'Dashboard' }}{% endblock %}
+{% block title %}Satori - {{ 'Pub/Sub' if page_mode == 'p2p' else 'Dashboard' }}{% endblock %}
 {% block extra_css %}
 {% if page_mode == 'dashboard' %}
 <style>
@@ -266,7 +266,7 @@
     }
 
     /* ── Drawer borders ─────────────────────────────────── */
-    #obsDrawer, #pubDrawer, #relayDrawer {
+    #obsDrawer, #pubDrawer {
         border-top: 1px solid var(--border-color) !important;
     }
 
@@ -715,6 +715,7 @@
                     <div class="bal-tabs">
                         <button class="bal-tab bal-tab-active" onclick="switchWalletTab('vault', this)">Vault</button>
                         <button class="bal-tab" onclick="switchWalletTab('identity', this)">Wallet (Identity)</button>
+                        <button class="bal-tab" onclick="switchWalletTab('nostr', this)">Nostr</button>
                     </div>
                     <div class="card-header-actions">
                         <span class="text-muted drag-handle" title="Drag to reorder">
@@ -781,16 +782,6 @@
                             </div>
                             <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can open payment channels to you.</div>
                         </div>
-                        <div class="mb-3">
-                            <label class="form-label">Nostr Public Key</label>
-                            <div class="input-group">
-                                <input type="text" class="form-control font-monospace" id="identityNostrPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
-                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityNostrPubkey')" title="Copy">
-                                    <i class="material-icons align-middle">content_copy</i>
-                                </button>
-                            </div>
-                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can send you channel open notifications.</div>
-                        </div>
                         <div class="mb-0">
                             <label class="form-label">Identity Private Key</label>
                             <div class="input-group">
@@ -802,6 +793,19 @@
                                     <i class="material-icons align-middle">content_copy</i>
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                    <!-- Nostr pane -->
+                    <div id="walletNostrPane" style="display: none;">
+                        <div class="mb-3">
+                            <label class="form-label">Nostr Public Key</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control font-monospace" id="identityNostrPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityNostrPubkey')" title="Copy">
+                                    <i class="material-icons align-middle">content_copy</i>
+                                </button>
+                            </div>
+                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can send you channel open notifications.</div>
                         </div>
                     </div>
                 </div>
@@ -880,7 +884,7 @@
                         <button class="bal-tab" onclick="switchBalTab('identity', this)">Wallet (Identity)</button>
                     </div>
                     <div class="card-header-actions">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance()">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance(true)">
                             <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
                         </button>
                         <span class="text-muted drag-handle" title="Drag to reorder">
@@ -1026,51 +1030,9 @@
 
     <div id="p2p"></div>
 
-    <div class="row g-4" id="p2pLayoutRow">
-        <!-- Relay Settings Section -->
-        <div class="col-12 p2p-widget-col" data-widget-id="relay-settings" draggable="true">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">cell_tower</i>
-                        Relay Settings
-                    </h5>
-                    <span class="text-muted drag-handle" title="Drag to reorder">
-                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
-                    </span>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Nostr Public Key</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="nostrPubkey"
-                                   value="{{ nostr_pubkey or 'Not generated' }}" readonly
-                                   style="font-family: monospace; font-size: 0.85rem;">
-                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('nostrPubkey')" title="Copy">
-                                <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
-                            </button>
-                        </div>
-                        <small class="form-text text-muted">
-                            Set this as NOSTR_PUBKEY in your relay's .env file
-                        </small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Relay URL</label>
-                        <input type="text" class="form-control" id="relayUrl"
-                               value="{{ relay_url or '' }}"
-                               placeholder="wss://your-relay.example.com">
-                        <small class="form-text text-muted">
-                            WebSocket URL of your Nostr relay (must have NIP-11 configured with your pubkey)
-                        </small>
-                    </div>
-                    <div class="d-flex align-items-center">
-                        <button class="btn btn-primary" onclick="registerRelay()">Register Relay</button>
-                        <span id="relayStatus" class="ms-3" style="display: none;"></span>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <input type="hidden" id="nostrPubkey" value="{{ nostr_pubkey or '' }}">
 
+    <div class="row g-4" id="p2pLayoutRow">
         <!-- Active Subscriptions Section -->
         <div class="col-12 p2p-widget-col" data-widget-id="subscriptions" draggable="true">
             <div class="card">
@@ -1227,6 +1189,20 @@
                                 </div>
                             </div>
 
+                            <!-- Classification -->
+                            <div class="ds-field-group" style="grid-template-columns: 1fr 2fr;">
+                                <div class="ds-field">
+                                    <label>Classification</label>
+                                    <select id="dsClassification" class="form-select">
+                                        <option value="">— pick one —</option>
+                                    </select>
+                                </div>
+                                <div class="ds-field">
+                                    <label>Tags <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional, comma-separated)</span></label>
+                                    <input type="text" id="dsTags" class="form-control" placeholder="btc, usd, spot">
+                                </div>
+                            </div>
+
                             <!-- Fetch section -->
                             <div class="ds-section-sep">Data Fetch</div>
                             <div class="ds-field-group cols-url" id="dsMethodGroup">
@@ -1332,6 +1308,7 @@
                                 <thead>
                                     <tr>
                                         <th>Stream</th>
+                                        <th>Class</th>
                                         <th>Source</th>
                                         <th>Cadence</th>
                                         <th>Price</th>
@@ -1378,81 +1355,6 @@
             </div>
         </div>
 
-        <!-- Relays Section -->
-        <div class="col-12 p2p-widget-col" data-widget-id="relays" draggable="true">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">rss_feed</i>
-                        Relays
-                    </h5>
-                    <div class="d-flex align-items-center gap-2">
-                        <div class="input-group input-group-sm" style="width: 320px;">
-                            <input type="text" id="addRelayInput" class="form-control" placeholder="wss://relay.example.com">
-                            <button class="btn btn-outline-primary" onclick="addRelay()">Add</button>
-                        </div>
-                        <span id="networkStatus" class="badge bg-secondary">Checking...</span>
-                        <span class="text-muted drag-handle" title="Drag to reorder">
-                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
-                        </span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="relaysLoading" class="text-center text-muted py-3">
-                        Loading relays...
-                    </div>
-                    <div id="relaysEmpty" class="text-center text-muted py-3" style="display: none;">
-                        No relays found.
-                    </div>
-                    <div id="relaysTable" style="display: none;">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Relay URL</th>
-                                        <th>Last Active</th>
-                                        <th>Source</th>
-                                        <th></th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="relaysList"></tbody>
-                            </table>
-                        </div>
-                        <div id="relaysPagination" class="px-3 pb-2"></div>
-                    </div>
-                    <!-- Streams drawer -->
-                    <div id="relayDrawer" style="display: none; border-top: 1px solid var(--bs-border-color);">
-                        <div class="p-3">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <h6 class="mb-0" id="relayDrawerTitle">Streams</h6>
-                                <div>
-                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="refreshRelayDrawer()">Refresh</button>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="closeRelayDrawer()">Close</button>
-                                </div>
-                            </div>
-                            <div class="table-responsive">
-                                <table class="table table-sm table-hover mb-0">
-                                    <thead>
-                                        <tr>
-                                            <th>Stream</th>
-                                            <th>Description</th>
-                                            <th>Cadence</th>
-                                            <th>Price</th>
-                                            <th>Tags</th>
-                                            <th>Publishers</th>
-                                            <th></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="relayDrawerStreams"></tbody>
-                                </table>
-                            </div>
-                            <div id="relayDrawerPagination" class="px-3 pb-2"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
 </div>
@@ -1741,16 +1643,17 @@
         }
     }
 
-    async function refreshBalance() {
-        // Get real-time balance from electrumx blockchain (wallet + vault)
-        // Fetches SATORI token and EVR balance
+    async function refreshBalance(force = false) {
+        // Fetches SATORI + EVR balance via the wallet-service proxy.
+        // `force=true` (wired to the Refresh button) bypasses the 30 s cache.
         setBalanceLoading('tokenBalance', true);
         setBalanceLoading('evrBalance', true);
         setBalanceLoading('identityWalletBalance', true);
         setBalanceLoading('identityEvrBalance', true);
 
         try {
-            const result = await apiCall('/wallet/balance/direct');
+            const endpoint = '/wallet/balance/direct' + (force ? '?refresh=1' : '');
+            const result = await apiCall(endpoint);
             if (result && !result.error) {
                 // Vault pane
                 document.getElementById('tokenBalance').textContent = result.vault_balance !== undefined ? formatBalance(result.vault_balance) : '--';
@@ -1804,6 +1707,7 @@
     function switchWalletTab(tab, btn) {
         document.getElementById('walletVaultPane').style.display = tab === 'vault' ? 'block' : 'none';
         document.getElementById('walletIdentityPane').style.display = tab === 'identity' ? 'block' : 'none';
+        document.getElementById('walletNostrPane').style.display = tab === 'nostr' ? 'block' : 'none';
         btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
         btn.classList.add('bal-tab-active');
     }
@@ -2299,48 +2203,6 @@
     }
 
     // Relay Registration
-    async function registerRelay() {
-        const relayUrl = document.getElementById('relayUrl').value.trim();
-        const statusEl = document.getElementById('relayStatus');
-
-        if (!relayUrl) {
-            statusEl.style.display = 'inline';
-            statusEl.className = 'ms-3 text-danger';
-            statusEl.textContent = 'Please enter a relay URL';
-            return;
-        }
-
-        if (!relayUrl.startsWith('wss://') && !relayUrl.startsWith('ws://')) {
-            statusEl.style.display = 'inline';
-            statusEl.className = 'ms-3 text-danger';
-            statusEl.textContent = 'URL must start with wss:// or ws://';
-            return;
-        }
-
-        statusEl.style.display = 'inline';
-        statusEl.className = 'ms-3 text-info';
-        statusEl.textContent = 'Verifying relay...';
-
-        try {
-            const resp = await fetch('/api/relay', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({relay_url: relayUrl})
-            });
-            const data = await resp.json();
-            if (resp.ok && (data.success || data.relay_url)) {
-                statusEl.className = 'ms-3 text-success';
-                statusEl.textContent = 'Relay verified and registered';
-            } else {
-                statusEl.className = 'ms-3 text-danger';
-                statusEl.textContent = data.error || data.detail || 'Verification failed';
-            }
-        } catch (err) {
-            statusEl.className = 'ms-3 text-danger';
-            statusEl.textContent = 'Connection error: ' + err.message;
-        }
-    }
-
     // Network Datastreams & Subscriptions
     function formatCadence(s) {
         if (!s) return '-';
@@ -2364,11 +2226,6 @@
             body: JSON.stringify(stream)
         });
         loadNetworkSubscriptions();
-        if (activeRelayDrawerUrl && cachedStreamsByRelay[activeRelayDrawerUrl]) {
-            const s = cachedStreamsByRelay[activeRelayDrawerUrl].find(s => s.stream_name === stream.stream_name);
-            if (s) s.subscribed = true;
-            renderDrawerStreams(cachedStreamsByRelay[activeRelayDrawerUrl], activeRelayDrawerUrl);
-        }
     }
 
     async function networkResubscribe(streamName, pubkey, relayUrl, btn) {
@@ -2389,11 +2246,6 @@
             body: JSON.stringify({stream_name: streamName, nostr_pubkey: pubkey})
         });
         loadNetworkSubscriptions();
-        if (activeRelayDrawerUrl && cachedStreamsByRelay[activeRelayDrawerUrl]) {
-            const s = cachedStreamsByRelay[activeRelayDrawerUrl].find(s => s.stream_name === streamName);
-            if (s) s.subscribed = false;
-            renderDrawerStreams(cachedStreamsByRelay[activeRelayDrawerUrl], activeRelayDrawerUrl);
-        }
     }
 
     async function networkPredict(streamName, pubkey, btn) {
@@ -2427,8 +2279,6 @@
     const PAGE_SIZE = 10;
     let subsCurrentPage = 1, subsAllItems = [];
     let pubsCurrentPage = 1, pubsAllItems = [];
-    let relaysCurrentPage = 1, relaysAllItems = [];
-    let relayStreamsCurrentPage = 1, relayStreamsAllItems = [];
     let obsObsCurrentPage = 1, obsPredCurrentPage = 1;
     let pubObsCurrentPage = 1, pubPredCurrentPage = 1;
 
@@ -2750,8 +2600,8 @@
 
     // ── Data Source Form ──────────────────────────────────────
     function downloadCsvTemplate() {
-        const header = 'stream_name,name,description,url,method,headers,cadence_minutes,parser_type,parser_config';
-        const example = 'btc-price,Bitcoin Price,BTC/USD spot price,https://api.example.com/price,GET,,60,json_path,data.price';
+        const header = 'stream_name,name,description,url,method,headers,cadence_minutes,parser_type,parser_config,classification,tags';
+        const example = 'btc-price,Bitcoin Price,BTC/USD spot price,https://api.example.com/price,GET,,60,json_path,data.price,crypto,btc usd';
         const csv = header + '\n' + example + '\n';
         const blob = new Blob([csv], {type: 'text/csv'});
         const a = document.createElement('a');
@@ -2802,6 +2652,8 @@
                 errors.push('Row ' + (i+1) + ': parser_config required when URL is set');
                 continue;
             }
+            const csvTags = (row.tags || '')
+                .split(/[\s,;]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
             try {
                 const resp = await fetch('/api/network/data-source', {
                     method: 'POST',
@@ -2816,6 +2668,8 @@
                         cadence_seconds: cadenceMin ? cadenceMin * 60 : 0,
                         parser_type: hasUrl ? (row.parser_type || 'json_path') : '',
                         parser_config: hasUrl ? (row.parser_config || '') : '',
+                        classification: (row.classification || '').trim().toLowerCase(),
+                        tags: csvTags,
                     })
                 });
                 const data = await resp.json();
@@ -2849,8 +2703,9 @@
     function resetDataSourceForm() {
         document.getElementById('dsFormTitle').textContent = 'New Data Source';
         document.getElementById('dsStreamName').readOnly = false;
-        ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython'].forEach(
+        ['dsStreamName','dsName','dsDescription','dsUrl','dsHeaders','dsParserJsonPath','dsParserPython','dsTags'].forEach(
             id => document.getElementById(id).value = '');
+        document.getElementById('dsClassification').value = '';
         document.getElementById('dsCadenceMin').value = '';
         resetPriceUnit();
         document.getElementById('dsPricePerObs').value = '0';
@@ -2860,6 +2715,29 @@
         toggleParserInput();
         toggleFetchFields();
         document.getElementById('dsTestResults').style.display = 'none';
+    }
+
+    let CLASSIFICATIONS = [];
+    async function loadClassifications() {
+        if (CLASSIFICATIONS.length) return;
+        try {
+            const resp = await fetch('/api/network/classifications');
+            const data = await resp.json();
+            CLASSIFICATIONS = data.classifications || [];
+            const sel = document.getElementById('dsClassification');
+            CLASSIFICATIONS.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.value;
+                opt.textContent = c.label;
+                sel.appendChild(opt);
+            });
+        } catch(e) { /* dropdown stays with placeholder */ }
+    }
+    loadClassifications();
+
+    function classificationLabel(value) {
+        const c = CLASSIFICATIONS.find(c => c.value === value);
+        return c ? c.label : value;
     }
 
     async function editDataSource(streamName) {
@@ -2891,6 +2769,12 @@
             }
             resetPriceUnit();
             document.getElementById('dsPricePerObs').value = ds.price_per_obs || 0;
+            const tags = ds.tags || [];
+            const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
+            const classFromTags = tags.find(t => classValues.has(t)) || '';
+            document.getElementById('dsClassification').value = classFromTags;
+            document.getElementById('dsTags').value =
+                tags.filter(t => t !== classFromTags).join(', ');
             document.getElementById('dsParserType').value = ds.parser_type || 'json_path';
             toggleParserInput();
             if (ds.parser_type === 'python') {
@@ -3156,6 +3040,9 @@
                 try { JSON.parse(headers); } catch(e) { err.textContent = 'Headers must be valid JSON'; return; }
             }
         }
+        const classification = document.getElementById('dsClassification').value.trim();
+        const extraTags = document.getElementById('dsTags').value
+            .split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
         btnLoading(btn);
         const resp = await fetch('/api/network/data-source', {
             method: 'POST',
@@ -3171,6 +3058,8 @@
                 parser_type: parserType,
                 parser_config: parserConfig,
                 price_per_obs: getPriceInSats(),
+                classification: classification,
+                tags: extraTags,
             })
         });
         btnDone(btn);
@@ -3367,8 +3256,17 @@
                   p.stream_name.replace(/'/g, "\\'") + '\', this)">Stop</button>';
             row.style.cursor = 'pointer';
             row.onclick = function() { openPubDrawer(p); };
+            const tagList = (typeof p.tags === 'string')
+                ? p.tags.split(',').filter(Boolean)
+                : (p.tags || []);
+            const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
+            const cls = tagList.find(t => classValues.has(t));
+            const classCell = cls
+                ? '<span class="badge bg-secondary">' + classificationLabel(cls) + '</span>'
+                : '<span class="text-muted">—</span>';
             row.innerHTML =
                 '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
+                '<td>' + classCell + '</td>' +
                 '<td>' + source + '</td>' +
                 '<td>' + formatCadence(p.cadence_seconds) + '</td>' +
                 '<td>' + (p.price_per_obs > 0 ? p.price_per_obs + ' sats' : '<span class="text-muted">Free</span>') + '</td>' +
@@ -3415,134 +3313,6 @@
         loadNetworkSubscriptions();
     }
 
-    let cachedStreamsByRelay = {};
-    let activeRelayDrawerUrl = null;
-
-    function closeRelayDrawer() {
-        document.getElementById('relayDrawer').style.display = 'none';
-    }
-
-    function refreshRelayDrawer() {
-        if (!activeRelayDrawerUrl) return;
-        delete cachedStreamsByRelay[activeRelayDrawerUrl];
-        openRelayDrawer(activeRelayDrawerUrl);
-    }
-
-    function renderRelayStreamsPage(page) {
-        relayStreamsCurrentPage = page;
-        const list = document.getElementById('relayDrawerStreams');
-        list.innerHTML = '';
-        const start = (page - 1) * PAGE_SIZE;
-        const pageItems = relayStreamsAllItems.slice(start, start + PAGE_SIZE);
-        if (pageItems.length === 0) {
-            list.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No active streams</td></tr>';
-        } else {
-            pageItems.forEach(g => {
-                const s = g.rep;
-                const tags = (s.tags || []).map(t => '<span class="badge bg-secondary me-1">' + t + '</span>').join('');
-                const row = document.createElement('tr');
-                if (!s.subscribed) row.classList.add('text-muted');
-
-                const pubId = 'pubs-' + s.stream_name.replace(/[^a-z0-9]/gi, '_');
-                const toggleAction = "var el=document.getElementById('" + pubId + "'),open=el.style.display==='none';el.style.display=open?'block':'none';this.textContent=open?'Close':'Subscribe'";
-
-                const btnClass = s.is_mine ? 'btn-outline-secondary' : (s.subscribed ? 'btn-outline-danger' : 'btn-outline-success');
-                const btnText = s.is_mine ? 'Publishing' : (s.subscribed ? 'Unsubscribe' : 'Subscribe');
-                const btnDisabled = s.is_mine ? ' disabled' : '';
-                const btnAction = g.pubs.length > 1
-                    ? toggleAction
-                    : (s.is_mine ? '' : (s.subscribed
-                        ? "networkUnsubscribe('" + s.stream_name.replace(/'/g, "\\'") + "', '" + s.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
-                        : "networkSubscribe(" + JSON.stringify(s).replace(/"/g, '&quot;') + ", this)"));
-                let pubsCell;
-                if (g.pubs.length === 1) {
-                    pubsCell = '<small class="text-muted font-monospace">' + s.nostr_pubkey.slice(0, 12) + '…</small>' +
-                        (s.last_observation_at ? '<br><small class="text-muted">' + formatTimeAgo(s.last_observation_at) + '</small>' : '');
-                } else {
-                    const pubRows = g.pubs.map(p => {
-                        const pc = p.is_mine ? 'btn-outline-secondary' : (p.subscribed ? 'btn-outline-danger' : 'btn-outline-success');
-                        const pt = p.is_mine ? 'Publishing' : (p.subscribed ? 'Unsubscribe' : 'Subscribe');
-                        const pd = p.is_mine ? ' disabled' : '';
-                        const pa = p.is_mine ? '' : (p.subscribed
-                            ? "networkUnsubscribe('" + p.stream_name.replace(/'/g, "\\'") + "', '" + p.nostr_pubkey.replace(/'/g, "\\'") + "', this)"
-                            : "networkSubscribe(" + JSON.stringify(p).replace(/"/g, '&quot;') + ", this)");
-                        return '<tr><td class="ps-3 font-monospace" style="font-size:0.75em">' + p.nostr_pubkey + '</td>' +
-                            '<td class="text-muted" style="font-size:0.75em">' + (p.last_observation_at ? formatTimeAgo(p.last_observation_at) : '-') + '</td>' +
-                            '<td><button class="btn btn-xs btn-sm ' + pc + '"' + pd + (pa ? ' onclick="' + pa + '"' : '') + '>' + pt + '</button></td></tr>';
-                    }).join('');
-                    pubsCell = '<button class="btn btn-sm btn-outline-secondary btn-xs" onclick="var el=document.getElementById(\'' + pubId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\'">' +
-                        g.pubs.length + ' publishers</button>' +
-                        '<div id="' + pubId + '" style="display:none;margin-top:4px"><table class="table table-sm mb-0">' + pubRows + '</table></div>';
-                }
-
-                row.innerHTML =
-                    '<td><strong>' + (s.name || s.stream_name) + '</strong><br><small class="text-muted">' + s.stream_name + '</small></td>' +
-                    '<td>' + (s.description || '-') + '</td>' +
-                    '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
-                    '<td>' + (s.price_per_obs > 0 ? s.price_per_obs + ' sats' : 'Free') + '</td>' +
-                    '<td>' + tags + '</td>' +
-                    '<td>' + pubsCell + '</td>' +
-                    '<td><button class="btn btn-sm ' + btnClass + '"' + btnDisabled + (btnAction ? ' onclick="' + btnAction + '"' : '') + '>' + btnText + '</button></td>';
-                list.appendChild(row);
-            });
-        }
-        buildPaginationUI('relayDrawerPagination', relayStreamsAllItems.length, page, PAGE_SIZE, 'goToRelayStreamsPage');
-    }
-
-    function goToRelayStreamsPage(p) { renderRelayStreamsPage(p); }
-
-    function renderDrawerStreams(streams, relayUrl) {
-        const drawer = document.getElementById('relayDrawer');
-        const title = document.getElementById('relayDrawerTitle');
-        title.textContent = relayUrl;
-
-        const active = streams.filter(s => s.active);
-
-        // Group all publishers by stream_name
-        const groups = new Map();
-        active.forEach(s => {
-            if (!groups.has(s.stream_name)) groups.set(s.stream_name, []);
-            groups.get(s.stream_name).push(s);
-        });
-
-        const score = s => (s.subscribed ? 4 : 0) + (s.is_mine ? 2 : 0) + (s.last_observation_at ? 1 : 0);
-        const grouped = Array.from(groups.entries()).map(([name, pubs]) => ({
-            stream_name: name,
-            rep: pubs.slice().sort((a, b) => score(b) - score(a))[0],
-            pubs,
-        }));
-        grouped.sort((a, b) => (b.rep.subscribed ? 1 : 0) - (a.rep.subscribed ? 1 : 0));
-
-        relayStreamsAllItems = grouped;
-        relayStreamsCurrentPage = 1;
-        renderRelayStreamsPage(1);
-        drawer.style.display = 'block';
-    }
-
-    async function openRelayDrawer(relayUrl) {
-        activeRelayDrawerUrl = relayUrl;
-        const cached = cachedStreamsByRelay[relayUrl];
-        if (cached && cached.length > 0) {
-            renderDrawerStreams(cached, relayUrl);
-            return;
-        }
-        // No cached data — discover this relay
-        const drawer = document.getElementById('relayDrawer');
-        const title = document.getElementById('relayDrawerTitle');
-        const list = document.getElementById('relayDrawerStreams');
-        title.textContent = relayUrl;
-        list.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Discovering streams...</td></tr>';
-        drawer.style.display = 'block';
-        try {
-            const resp = await fetch('/api/network/streams/relay?url=' + encodeURIComponent(relayUrl));
-            const data = await resp.json();
-            cachedStreamsByRelay[relayUrl] = data.streams || [];
-            renderDrawerStreams(cachedStreamsByRelay[relayUrl], relayUrl);
-        } catch (err) {
-            list.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Discovery failed</td></tr>';
-        }
-    }
-
     function formatTimeAgo(ts) {
         if (!ts) return '-';
         const seconds = Math.floor(Date.now() / 1000) - ts;
@@ -3552,96 +3322,6 @@
         return Math.floor(seconds / 86400) + 'd ago';
     }
 
-    async function addRelay() {
-        const input = document.getElementById('addRelayInput');
-        const url = input.value.trim();
-        if (!url) return;
-        if (!url.startsWith('wss://') && !url.startsWith('ws://')) {
-            input.classList.add('is-invalid');
-            return;
-        }
-        input.classList.remove('is-invalid');
-        input.disabled = true;
-        await fetch('/api/network/relay', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({relay_url: url})
-        });
-        input.value = '';
-        input.disabled = false;
-        loadRelays();
-    }
-
-    async function deleteRelay(relayUrl) {
-        await fetch('/api/network/relay', {
-            method: 'DELETE',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({relay_url: relayUrl})
-        });
-        closeRelayDrawer();
-        loadRelays();
-    }
-
-    function renderRelaysPage(page) {
-        relaysCurrentPage = page;
-        const list = document.getElementById('relaysList');
-        list.innerHTML = '';
-        const start = (page - 1) * PAGE_SIZE;
-        const pageItems = relaysAllItems.slice(start, start + PAGE_SIZE);
-        pageItems.forEach(r => {
-            const row = document.createElement('tr');
-            const sourceBadge = r.source === 'both'
-                ? '<span class="badge bg-info">server + local</span>'
-                : r.source === 'server'
-                    ? '<span class="badge bg-secondary">server</span>'
-                    : '<span class="badge bg-outline-secondary border">local</span>';
-            const deleteBtn = r.source !== 'server'
-                ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')"><i class="material-icons align-middle" style="font-size: 16px;">delete</i></button>'
-                : '';
-            row.innerHTML =
-                '<td>' + r.relay_url + '</td>' +
-                '<td>' + formatTimeAgo(r.last_active) + '</td>' +
-                '<td>' + sourceBadge + '</td>' +
-                '<td>' + deleteBtn + '</td>' +
-                '<td><button class="btn btn-sm btn-outline-primary" onclick="openRelayDrawer(\'' + r.relay_url.replace(/'/g, "\\'") + '\')">Show active streams</button></td>';
-            list.appendChild(row);
-        });
-        buildPaginationUI('relaysPagination', relaysAllItems.length, page, PAGE_SIZE, 'goToRelaysPage');
-    }
-
-    function goToRelaysPage(p) { renderRelaysPage(p); }
-
-    async function loadRelays() {
-        try {
-            const resp = await fetch('/api/network/relays');
-            const data = await resp.json();
-
-            const loading = document.getElementById('relaysLoading');
-            const empty = document.getElementById('relaysEmpty');
-            const table = document.getElementById('relaysTable');
-            const status = document.getElementById('networkStatus');
-
-            loading.style.display = 'none';
-            status.className = 'badge bg-success';
-            status.textContent = (data.relays || []).length + ' relays';
-
-            const relays = data.relays || [];
-            if (relays.length === 0) {
-                empty.style.display = 'block';
-                table.style.display = 'none';
-                return;
-            }
-
-            empty.style.display = 'none';
-            table.style.display = 'block';
-            relaysAllItems = relays;
-            renderRelaysPage(relaysCurrentPage);
-        } catch (err) {
-            document.getElementById('relaysLoading').textContent = 'Error loading relays';
-            document.getElementById('networkStatus').className = 'badge bg-danger';
-            document.getElementById('networkStatus').textContent = 'Error';
-        }
-    }
     // Wallet Card Functions
     let privateKeyLoaded = false;
 
@@ -3792,8 +3472,9 @@
                 document.getElementById('sendAmount').value = '';
                 document.getElementById('sendSweep').checked = false;
                 toggleSweepAmount();
-                // Refresh balances to show updated amounts
-                refreshBalance();
+                // Refresh balances to show updated amounts — force, since a
+                // send just changed the UTXO set and the cache is now stale.
+                refreshBalance(true);
             } else {
                 const errorMsg = result ? (result.error || 'Transaction failed') : 'Transaction failed';
                 resultDiv.className = 'mt-3 alert alert-danger';
@@ -4650,7 +4331,6 @@
         if (pageMode === 'p2p') {
             applySavedP2pLayout();
             initP2pDragDrop();
-            loadRelays();
             loadNetworkSubscriptions();
             loadPublications();
         } else {

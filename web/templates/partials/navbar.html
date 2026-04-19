@@ -39,7 +39,12 @@
         <a href="{{ url_for('p2p_page') }}"
            class="snp-item {{ 'snp-active' if request.endpoint == 'p2p_page' else '' }}">
             <i class="material-icons">hub</i>
-            <span>P2P</span>
+            <span>Pub/Sub</span>
+        </a>
+        <a href="{{ url_for('marketplace_page') }}"
+           class="snp-item {{ 'snp-active' if request.endpoint == 'marketplace_page' else '' }}">
+            <i class="material-icons">storefront</i>
+            <span>Marketplace</span>
         </a>
         <a href="{{ url_for('channels_page') }}"
            class="snp-item {{ 'snp-active' if request.endpoint == 'channels_page' else '' }}">
