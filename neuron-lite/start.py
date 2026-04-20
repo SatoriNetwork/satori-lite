@@ -284,10 +284,56 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkEnsureChannelOpenListener(relay_url)
             self._networkEnsureSettlementListener(relay_url)
             self._networkEnsureTombstoneListener(relay_url)
+            asyncio.ensure_future(
+                self._channelPublishStaleTombstones(relay_url))
             return client
         except Exception as e:
             logging.warning(f'Network: failed to connect to {relay_url}: {e}')
             return None
+
+    async def _channelPublishStaleTombstones(self, relay_url: str) -> None:
+        """On reconnect, tombstone relay commitments whose UTXO is outdated.
+
+        If a prior session claimed a channel but was killed before publishing
+        the tombstone, the relay retains the stale commitment event. We detect
+        this by comparing each stored pending_commitment's UTXO against the
+        channel's current funding_txid (which was updated by the claim). A
+        mismatch means the commitment is stale: clear it from the DB and publish
+        a tombstone so the relay drops it and won't replay it again.
+        """
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            channels = await asyncio.to_thread(
+                self.networkDB.get_channels_as_receiver)
+            for channel in channels:
+                prior_json = channel.get('pending_commitment')
+                if not prior_json:
+                    continue
+                try:
+                    from satorilib.satori_nostr.models import ChannelCommitment
+                    prior = ChannelCommitment.from_json(prior_json)
+                    raw = bytes.fromhex(prior.partial_tx_hex)
+                    commitment_txid = raw[5:37][::-1].hex()
+                    if commitment_txid == channel['funding_txid']:
+                        continue
+                    p2sh = channel['p2sh_address']
+                    logging.warning(
+                        f'Channel: stale commitment detected for {p2sh} on '
+                        f'reconnect — clearing DB and tombstoning relay '
+                        f'({commitment_txid[:12]}… != {channel["funding_txid"][:12]}…)',
+                        color='yellow')
+                    await asyncio.to_thread(
+                        self.networkDB.clear_pending_commitment, p2sh)
+                    await client.remove_commitment(p2sh)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: stale tombstone check failed for '
+                        f'{channel.get("p2sh_address", "?")}: {e}')
+        except Exception as e:
+            logging.warning(
+                f'Channel: stale tombstone scan failed on {relay_url}: {e}')
 
     async def _networkDisconnect(self, relay_url: str):
         """Disconnect from a relay and cancel its listeners."""
@@ -835,6 +881,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, commitment.p2sh_address)
         if not channel:
+            # Channel open event may still be in-flight — retry once after a
+            # short delay before dropping (open and commit arrive simultaneously)
+            await asyncio.sleep(3)
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, commitment.p2sh_address)
+        if not channel:
             logging.warning(
                 f'Channel: commitment for unknown channel '
                 f'{commitment.p2sh_address} — ignoring')
@@ -862,6 +914,30 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'receiver_pubkey mismatch',
                 color='yellow')
             return
+        # Verify the commitment references the current funding UTXO. After a
+        # successful claim the DB funding_txid advances to the claim tx output;
+        # a relay-replayed commitment still pointing at the old UTXO is stale.
+        try:
+            raw = bytes.fromhex(commitment.partial_tx_hex)
+            # version (4 bytes) + input count varint (1 byte) + txid LE (32 bytes)
+            commitment_txid = raw[5:37][::-1].hex()
+            if commitment_txid != channel['funding_txid']:
+                logging.warning(
+                    f'Channel: rejecting stale commitment for '
+                    f'{commitment.p2sh_address} — references old UTXO '
+                    f'{commitment_txid[:12]}… (current: '
+                    f'{channel["funding_txid"][:12]}…); tombstoning relay',
+                    color='yellow')
+                for client in self._networkClients.values():
+                    try:
+                        await client.remove_commitment(commitment.p2sh_address)
+                    except Exception:
+                        pass
+                return
+        except Exception as e:
+            logging.warning(
+                f'Channel: could not verify commitment UTXO for '
+                f'{commitment.p2sh_address}: {e} — accepting')
         # Bounds + monotonicity. remainder_sats tracks what's still locked in
         # the channel; each new commitment must not exceed what was originally
         # locked, and must not *increase* vs the prior pending commitment (that
@@ -981,6 +1057,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     for v in tx.vout]
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
         sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
+        # ── Pre-compute change_vout from partial_tx (independent of claim path) ──
+        # Done here so DB can be updated immediately after broadcast, before any
+        # Nostr ops — minimises the crash window between broadcast and DB update.
+        redeem_bytes = bytes.fromhex(channel['redeem_script'])
+        script_hash = hashlib.new(
+            'ripemd160', hashlib.sha256(redeem_bytes).digest()).digest()
+        p2sh_script = bytes([0xa9, 0x14]) + script_hash + bytes([0x87])
+        change_vout = -1
+        change_sats = commitment.remainder_sats
+        for i, out in enumerate(tx.vout):
+            spk = bytes(out.scriptPubKey)
+            if spk == p2sh_script or spk.startswith(p2sh_script):
+                change_vout = i
+                break
         # ── Fee estimation ──────────────────────────────────────────────────
         # Size of the serialised partial tx (P2SH vin has empty scriptSig yet)
         # plus the space the completed 2-of-2+CSV scriptSig will occupy.
@@ -1095,38 +1185,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     f'Channel: PATH C claimed {p2sh_address} via Mundo '
                     f'({commitment.pay_amount_sats} sats) — txid={txid}',
                     color='green')
-        # ── Grant access for exactly this payment, not cumulative total ───────
-        await self._grantChannelAccess(
-            sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
-            total_paid_sats=commitment.pay_amount_sats,
-            stream_name=commitment.stream_name)
-        # ── Post-broadcast: update DB ───────────────────────────────────────
-        logging.info(
-            f'Channel: claimed {commitment.pay_amount_sats} sats '
-            f'from {p2sh_address} — txid={txid}',
-            color='green')
-        # Find the P2SH change output (change goes back to P2SH for next round)
-        redeem_bytes = bytes.fromhex(channel['redeem_script'])
-        script_hash = hashlib.new(
-            'ripemd160', hashlib.sha256(redeem_bytes).digest()).digest()
-        p2sh_script = bytes([0xa9, 0x14]) + script_hash + bytes([0x87])
-        change_vout = -1
-        # SATORI outputs have nValue=0 in the Python Evrmore library;
-        # use commitment.remainder_sats for the canonical SATORI amount.
-        change_sats = commitment.remainder_sats
-        # Determine which vout carries the P2SH change. SATORI asset outputs
-        # are `<p2sh_script><asset_data>` — i.e. the scriptPubKey STARTS with
-        # the P2SH locking bytes. Exact equality would miss those, so we
-        # check the prefix.
-        check_tx = CMutableTransaction.deserialize(
-            bytes.fromhex(commitment.partial_tx_hex))
-        for i, out in enumerate(check_tx.vout):
-            spk = bytes(out.scriptPubKey)
-            if spk == p2sh_script or spk.startswith(p2sh_script):
-                change_vout = i
-                break
-        # Single timestamp shared between local DB update and settlement publish
-        # so sender and receiver agree on when the CSV timer reset.
+        # ── DB update: must happen before Nostr ops to survive a crash ─────────
+        # If the process is killed after broadcast but before this block, the
+        # relay still has the old commitment. On restart, Part 1/2 of the stale
+        # tombstone fix will detect the UTXO mismatch and clean it up. By doing
+        # DB writes here (before Nostr), we minimise that window.
         settlement_ts = int(time.time())
         if change_vout >= 0 and change_sats > 0:
             await asyncio.to_thread(
@@ -1138,12 +1201,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{txid[:12]}…:{change_vout} ({change_sats} sats)',
                 color='cyan')
         else:
-            # No change output — channel fully drained on receiver side
             logging.info(
                 f'Channel: {p2sh_address} fully drained, awaiting refund',
                 color='yellow')
         await asyncio.to_thread(
             self.networkDB.clear_pending_commitment, p2sh_address)
+        # ── Grant access for exactly this payment, not cumulative total ───────
+        await self._grantChannelAccess(
+            sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
+            total_paid_sats=commitment.pay_amount_sats,
+            stream_name=commitment.stream_name)
+        logging.info(
+            f'Channel: claimed {commitment.pay_amount_sats} sats '
+            f'from {p2sh_address} — txid={txid}',
+            color='green')
         # Notify sender so they can update their funding UTXO
         sender_nostr_pubkey = channel.get('sender_nostr_pubkey')
         if sender_nostr_pubkey:
@@ -1385,6 +1456,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if paid_count <= 0:
                 continue
             current_seq = pub.get('last_seq_num', 0)
+            grant_to_seq = current_seq + paid_count
             for client in self._networkClients.values():
                 # Ensure the subscriber is registered before granting access.
                 # record_payment is a no-op if they aren't in _subscribers,
