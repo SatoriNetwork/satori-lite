@@ -1567,7 +1567,26 @@ def register_routes(app):
 
                 # Compute 24h prediction count. Active-model predictions live
                 # on the per-model storage; stored-prediction tables live on
-                # the global engine storage.
+                # the global engine storage. Timestamps may be stored as
+                # epoch seconds; auto-detect unit to avoid ns-misparsing.
+                def _parse_ts_series_24h(ts_series):
+                    parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                    numeric = pd.to_numeric(ts_series, errors='coerce')
+                    numeric_mask = numeric.notna()
+                    if numeric_mask.any():
+                        median_abs = float(numeric[numeric_mask].abs().median())
+                        if median_abs < 1e11:
+                            unit = 's'
+                        elif median_abs < 1e14:
+                            unit = 'ms'
+                        else:
+                            unit = 'ns'
+                        parsed.loc[numeric_mask] = pd.to_datetime(
+                            numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                        )
+                    return parsed
+
+                cutoff_24h = now_utc - pd.Timedelta(hours=24)
                 for item in streams:
                     pred_uuid = item.get('prediction_stream_uuid') or item.get('stream_uuid')
                     if not pred_uuid:
@@ -1579,17 +1598,35 @@ def register_routes(app):
                         pdf = None
                     if pdf is None or pdf.empty:
                         continue
-                    for ts in pdf.index:
-                        try:
-                            ts_dt = pd.to_datetime(ts, utc=True)
-                        except Exception:
-                            continue
-                        if ts_dt >= now_utc - pd.Timedelta(hours=24):
-                            predictions_24h_total += 1
+                    try:
+                        ts_series = pdf['ts'] if 'ts' in pdf.columns else pdf.index.to_series()
+                        parsed = _parse_ts_series_24h(ts_series)
+                        predictions_24h_total += int((parsed >= cutoff_24h).sum())
+                    except Exception:
+                        continue
 
             # Find most recent observation across all active models so the UI
             # can distinguish "engine idle waiting for data" from "engine
             # actively receiving observations".
+            def _parse_ts_series(ts_series):
+                """Parse a ts column/index, auto-detecting s/ms/ns from magnitude.
+                Mirrors the normalize_ts_column logic in the performance endpoint."""
+                parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                numeric = pd.to_numeric(ts_series, errors='coerce')
+                numeric_mask = numeric.notna()
+                if numeric_mask.any():
+                    median_abs = float(numeric[numeric_mask].abs().median())
+                    if median_abs < 1e11:
+                        unit = 's'
+                    elif median_abs < 1e14:
+                        unit = 'ms'
+                    else:
+                        unit = 'ns'
+                    parsed.loc[numeric_mask] = pd.to_datetime(
+                        numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                    )
+                return parsed
+
             last_obs_ts = None
             try:
                 import pandas as pd  # ensure available even if storage is None
@@ -1605,7 +1642,7 @@ def register_routes(app):
                         continue
                     try:
                         ts_series = df['ts'] if 'ts' in df.columns else df.index.to_series()
-                        parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                        parsed = _parse_ts_series(ts_series)
                         max_ts = parsed.max()
                         if pd.notna(max_ts) and (last_obs_ts is None or max_ts > last_obs_ts):
                             last_obs_ts = max_ts
@@ -1614,6 +1651,16 @@ def register_routes(app):
             except Exception:
                 last_obs_ts = None
 
+            try:
+                logger.info(
+                    "engine/streams debug: active_models=%s pred24h=%s last_obs=%s stream_uuids=%s",
+                    len(stream_models),
+                    predictions_24h_total,
+                    last_obs_ts.isoformat() if last_obs_ts is not None else None,
+                    [s.get('stream_uuid')[:8] for s in streams if s.get('stream_uuid')],
+                )
+            except Exception:
+                pass
             return jsonify({
                 'streams': sorted(streams, key=lambda x: (x.get('stream_name') or '').lower()),
                 'count': len(streams),

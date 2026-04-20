@@ -1147,11 +1147,14 @@ function updateObservationStatus(lastObsIsoString, activeStreamsCount) {
     obsTile?.classList.remove('is-waiting');
 
     if (!isFresh) {
-        // Until new observations arrive, show only the status pill.
+        // Until fresh observations arrive, show only the status pill and
+        // the 24h prediction count. Hide active-streams and last-obs pills.
         statusPill.classList.add('is-stale');
-        statusLabel.textContent = 'Observations stale';
+        statusLabel.textContent = parsed === null
+            ? 'Awaiting observations'
+            : 'Observations stale';
         activePill.style.display  = 'none';
-        preds24Pill.style.display = 'none';
+        preds24Pill.style.display = '';
         obsPill.style.display     = 'none';
         if (activeStreamsCount > 0) {
             predTile?.classList.add('is-waiting');
@@ -1160,7 +1163,7 @@ function updateObservationStatus(lastObsIsoString, activeStreamsCount) {
         return;
     }
 
-    // Fresh observations — reveal the rest of the hero stats.
+    // Fresh observations — full "engine receiving" state.
     statusLabel.textContent   = 'Engine receiving';
     activePill.style.display  = '';
     preds24Pill.style.display = '';

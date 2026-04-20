@@ -14,6 +14,252 @@
     #dashboardLayoutRow {
         display: none !important;
     }
+
+    /* ── P2P page shell (same family as /local-predictions & /stake) ── */
+    .dash-container {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 1.75rem 1.5rem 4rem !important;
+    }
+
+    /* ── Hero ─────────────────────────────────────────────── */
+    .p2p-hero {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        padding: 0 0.25rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 1.5rem;
+    }
+    .p2p-hero-title { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+    .p2p-hero-eyebrow {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    .p2p-hero-h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin: 0;
+        line-height: 1.05;
+    }
+    .p2p-hero-h1 .p2p-accent {
+        background: var(--accent-gradient);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .p2p-hero-sub {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        max-width: 62ch;
+        margin: 0.4rem 0 0;
+    }
+    .p2p-hero-meta {
+        display: flex; flex-wrap: wrap;
+        align-items: center; gap: 0.4rem;
+    }
+    .p2p-meta-pill {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 999px;
+        padding: 0.32rem 0.75rem;
+        font-size: 0.76rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+    .p2p-meta-pill strong { color: var(--text-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .p2p-meta-pill .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.6);
+    }
+    .p2p-meta-pill .material-icons { font-size: 14px; opacity: 0.7; }
+
+    /* ── Card header rhythm (overrides dashboard's h5 style inside p2p widgets) ── */
+    #p2pLayoutRow .p2p-widget-col > .card { overflow: hidden; }
+    #p2pLayoutRow .card-header {
+        padding: 0.9rem 1.15rem !important;
+    }
+    #p2pLayoutRow .card-header h5 {
+        font-size: 0.72rem !important;
+        letter-spacing: 0.08em !important;
+        color: var(--text-secondary) !important;
+        font-weight: 600 !important;
+        text-transform: uppercase !important;
+        margin: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+    }
+    #p2pLayoutRow .card-header h5 .material-icons {
+        font-size: 15px !important;
+        opacity: 0.55 !important;
+        color: var(--text-primary) !important;
+        margin: 0 !important;
+    }
+    #p2pLayoutRow .drag-handle {
+        opacity: 0.25;
+        transition: opacity 0.12s;
+    }
+    #p2pLayoutRow .drag-handle:hover { opacity: 0.6; }
+
+    /* ── Pill-style action buttons in the p2p card headers ─── */
+    #p2pLayoutRow .card-header .btn {
+        font-size: 0.74rem;
+        font-weight: 600;
+        padding: 0.35rem 0.7rem;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        letter-spacing: 0;
+    }
+    #p2pLayoutRow .card-header .btn-outline-secondary,
+    #p2pLayoutRow .card-header .btn-outline-success,
+    #p2pLayoutRow .card-header .btn-outline-primary {
+        background: transparent;
+        color: var(--text-secondary);
+        border-color: var(--border-color);
+    }
+    #p2pLayoutRow .card-header .btn-outline-secondary:hover,
+    #p2pLayoutRow .card-header .btn-outline-success:hover,
+    #p2pLayoutRow .card-header .btn-outline-primary:hover {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
+        background: rgba(255,255,255,0.04);
+    }
+    [data-theme="light"] #p2pLayoutRow .card-header .btn-outline-secondary:hover,
+    [data-theme="light"] #p2pLayoutRow .card-header .btn-outline-success:hover,
+    [data-theme="light"] #p2pLayoutRow .card-header .btn-outline-primary:hover {
+        background: rgba(0,0,0,0.04);
+    }
+    /* Primary-styled "new data source" button stands out */
+    #p2pLayoutRow .card-header .btn-outline-primary[onclick*="resetDataSourceForm"] {
+        background: var(--accent-gradient);
+        color: #fff;
+        border-color: transparent;
+    }
+    #p2pLayoutRow .card-header .btn-outline-primary[onclick*="resetDataSourceForm"]:hover {
+        filter: brightness(1.08);
+        color: #fff;
+    }
+
+    /* ── Cleaner tables inside p2p widgets ─────────────────── */
+    #p2pLayoutRow .card-body > .table-responsive,
+    #p2pLayoutRow #subsTable > .table-responsive,
+    #p2pLayoutRow #pubsTable > .table-responsive {
+        border-top: 1px solid var(--border-color);
+    }
+    #p2pLayoutRow .card-body .table {
+        margin: 0;
+        color: var(--text-primary);
+    }
+    #p2pLayoutRow .card-body .table thead th {
+        font-size: 0.66rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-muted);
+        padding: 0.7rem 0.85rem;
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border-color);
+        white-space: nowrap;
+    }
+    #p2pLayoutRow .card-body .table tbody td {
+        padding: 0.6rem 0.85rem;
+        font-size: 0.83rem;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        vertical-align: middle;
+    }
+    [data-theme="light"] #p2pLayoutRow .card-body .table tbody td {
+        border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+    #p2pLayoutRow .card-body .table tbody tr:hover td {
+        background: rgba(90,90,255,0.05) !important;
+    }
+    #p2pLayoutRow .card-body .table tbody tr:last-child td {
+        border-bottom: 0;
+    }
+
+    /* Pagination strips look less Bootstrappy inside the widgets */
+    #p2pLayoutRow #subsPagination,
+    #p2pLayoutRow #pubsPagination {
+        border-top: 1px dashed var(--border-color);
+        padding-top: 0.65rem !important;
+        margin-top: 0.65rem;
+    }
+
+    /* ── Empty states ─────────────────────────────────────── */
+    #p2pLayoutRow #subsEmpty,
+    #p2pLayoutRow #pubsEmpty {
+        padding: 2rem 1rem !important;
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+    #p2pLayoutRow #subsEmpty::before,
+    #p2pLayoutRow #pubsEmpty::before {
+        content: '';
+        display: block;
+        width: 36px; height: 36px;
+        margin: 0 auto 0.7rem;
+        border-radius: 10px;
+        background: var(--bg-input);
+        border: 1px dashed var(--border-color);
+        background-image: radial-gradient(circle at center, var(--border-color-focus) 2px, transparent 2.5px);
+        background-size: 10px 10px;
+    }
+
+    /* ── Drawer polish (obs / pub drawers) ─────────────────── */
+    #obsDrawer, #pubDrawer {
+        background: var(--bg-input);
+        border-top: 1px solid var(--border-color) !important;
+    }
+    #obsDrawer h6, #pubDrawer h6 {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-secondary);
+        margin: 0;
+    }
+    #obsDrawerTabs {
+        border-bottom: 1px solid var(--border-color);
+    }
+    #obsDrawerTabs .nav-link {
+        font-size: 0.76rem;
+        color: var(--text-muted);
+        border: 0;
+        padding: 0.45rem 0.9rem;
+        border-bottom: 2px solid transparent;
+    }
+    #obsDrawerTabs .nav-link.active {
+        color: var(--text-primary);
+        background: transparent;
+        border-bottom-color: var(--accent-primary);
+    }
+
+    /* ── Fade-up entrance ─────────────────────────────────── */
+    #p2pLayoutRow .p2p-widget-col {
+        animation: p2p-fade-up 0.4s cubic-bezier(.2,.8,.2,1) both;
+    }
+    #p2pLayoutRow .p2p-widget-col:nth-child(1) { animation-delay: 0.04s; }
+    #p2pLayoutRow .p2p-widget-col:nth-child(2) { animation-delay: 0.12s; }
+    @keyframes p2p-fade-up {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 640px) {
+        .p2p-hero-h1 { font-size: 1.55rem; }
+        #p2pLayoutRow .card-header { flex-wrap: wrap; gap: 0.5rem; }
+    }
 </style>
 {% endif %}
 <style>
@@ -1031,6 +1277,29 @@
     <div id="p2p"></div>
 
     <input type="hidden" id="nostrPubkey" value="{{ nostr_pubkey or '' }}">
+
+    {% if page_mode == 'p2p' %}
+    <header class="p2p-hero">
+        <div class="p2p-hero-title">
+            <span class="p2p-hero-eyebrow">Peer-to-peer</span>
+            <h1 class="p2p-hero-h1">Streams &amp; <span class="p2p-accent">Relays</span></h1>
+            <p class="p2p-hero-sub">
+                Browse the streams you subscribe to, publish your own data sources, and watch data
+                flow between neurons in real time.
+            </p>
+        </div>
+        <div class="p2p-hero-meta">
+            <span class="p2p-meta-pill" id="p2pSubsMetaPill">
+                <i class="material-icons">playlist_add_check</i>
+                <strong id="p2pSubsCount">0</strong> subscriptions
+            </span>
+            <span class="p2p-meta-pill" id="p2pPubsMetaPill">
+                <i class="material-icons">publish</i>
+                <strong id="p2pPubsCount">0</strong> publications
+            </span>
+        </div>
+    </header>
+    {% endif %}
 
     <div class="row g-4" id="p2pLayoutRow">
         <!-- Active Subscriptions Section -->
@@ -2493,6 +2762,14 @@
         const drawer = document.getElementById('obsDrawer');
         const title = document.getElementById('obsDrawerTitle');
         const body = document.getElementById('obsDrawerBody');
+        // toggle closed if clicking the already-open stream
+        if (drawer.style.display === 'block'
+            && obsDrawerStream
+            && obsDrawerStream.name === streamName
+            && obsDrawerStream.pubkey === providerPubkey) {
+            closeObsDrawer();
+            return;
+        }
         title.textContent = streamName;
         obsDrawerStream = {name: streamName, pubkey: providerPubkey};
         body.innerHTML = '<tr><td colspan="4" class="text-center"><span class="spinner-border spinner-border-sm"></span> Loading...</td></tr>';
@@ -2585,6 +2862,9 @@
             const data = await resp.json();
             const empty = document.getElementById('subsEmpty');
             const table = document.getElementById('subsTable');
+            const heroCount = document.getElementById('p2pSubsCount');
+            const subsLen = (data.subscriptions || []).length;
+            if (heroCount) heroCount.textContent = subsLen;
 
             if (!data.subscriptions || data.subscriptions.length === 0) {
                 empty.style.display = 'block';
@@ -3289,6 +3569,9 @@
             const data = await resp.json();
             const empty = document.getElementById('pubsEmpty');
             const table = document.getElementById('pubsTable');
+            const heroCount = document.getElementById('p2pPubsCount');
+            const pubsLen = (data.publications || []).length;
+            if (heroCount) heroCount.textContent = pubsLen;
 
             if (!data.publications || data.publications.length === 0) {
                 empty.style.display = 'block';
