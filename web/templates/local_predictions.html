@@ -4,147 +4,488 @@
 
 {% block extra_css %}
 <style>
-    .metric-value {
-        font-size: 1.5rem;
+    /* ── Page shell ───────────────────────────────────────── */
+    .lp-page {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 1.75rem 1.5rem 4rem;
+    }
+
+    /* ── Hero ─────────────────────────────────────────────── */
+    .lp-hero {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        padding: 0 0.25rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 1.5rem;
+    }
+    .lp-hero-title { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+    .lp-hero-eyebrow {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    .lp-hero-h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin: 0;
+        line-height: 1.05;
+    }
+    .lp-hero-h1 .lp-accent {
+        background: var(--accent-gradient);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .lp-hero-sub {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        max-width: 62ch;
+        margin: 0.4rem 0 0;
+    }
+    .lp-hero-meta {
+        display: flex; flex-wrap: wrap;
+        align-items: center; gap: 0.4rem;
+    }
+    .lp-meta-pill {
+        display: inline-flex;
+        align-items: center; gap: 0.4rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 999px;
+        padding: 0.32rem 0.7rem;
+        font-size: 0.76rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+    }
+    .lp-meta-pill strong {
+        color: var(--text-primary);
         font-weight: 700;
     }
-    .metric-label {
-        color: var(--text-secondary);
-        font-size: 0.85rem;
+    .lp-meta-pill .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.65);
     }
-    .chart-wrap {
-        height: 320px;
+    .lp-meta-pill.is-waiting .dot {
+        background: #f59e0b;
+        box-shadow: 0 0 8px rgba(245, 158, 11, 0.65);
+        animation: lp-pulse 1.6s ease-in-out infinite;
     }
-    .table-responsive {
-        max-height: 460px;
-        overflow-y: auto;
+    .lp-meta-pill.is-stale .dot {
+        background: #9ca3af;
+        box-shadow: none;
     }
-    .table-responsive thead th {
-        position: sticky;
-        top: 0;
-        background: var(--bg-card);
-        color: var(--text-primary);
-        z-index: 1;
+    @keyframes lp-pulse {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.35; }
     }
-    .table {
-        color: var(--text-primary);
+    .lp-meta-pill .material-icons {
+        font-size: 14px; opacity: 0.7;
     }
-    .table tbody td {
-        color: var(--text-primary) !important;
-        background: var(--bg-card);
+
+    /* ── Consistent small card-header titles (dashboard style) ── */
+    .lp-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.6rem;
     }
-    .table tbody tr:nth-child(even) td {
-        background: var(--bg-input);
-    }
-    .table-sm td, .table-sm th {
-        vertical-align: middle;
-    }
-    .analytics-table {
-        border-collapse: separate;
-        border-spacing: 0;
-    }
-    .analytics-table thead th {
+    .lp-card-head h5 {
+        margin: 0;
         font-size: 0.72rem;
+        font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.08em;
         color: var(--text-secondary);
-        border-bottom: 1px solid var(--border-color);
-        padding-top: 0.65rem;
-        padding-bottom: 0.65rem;
-        background: var(--bg-card);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
     }
-    .analytics-table tbody td {
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    .lp-card-head h5 .material-icons {
+        font-size: 15px;
+        opacity: 0.55;
+        color: var(--text-primary);
+    }
+    .lp-card-head .drag-handle {
+        opacity: 0.25;
+        transition: opacity 0.12s;
+        cursor: grab;
+    }
+    .lp-card-head .drag-handle:hover { opacity: 0.6; }
+
+    /* ── Toolbar widget ───────────────────────────────────── */
+    .lp-toolbar-body { padding: 1rem 1.25rem 1.1rem; }
+    .lp-toolbar-grid {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.6fr) minmax(240px, 1.2fr) auto;
+        gap: 0.85rem 1rem;
+        align-items: end;
+    }
+    @media (max-width: 860px) {
+        .lp-toolbar-grid { grid-template-columns: 1fr; }
+    }
+    .lp-field-label {
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-muted);
+        margin-bottom: 0.4rem;
+    }
+
+    /* Stream picker (pill-style) */
+    .lp-stream-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        border-radius: 10px;
+        padding: 0.55rem 0.75rem;
+        font-size: 0.88rem;
+        font-weight: 600;
+        transition: border-color 0.12s ease, background 0.12s ease;
+    }
+    .lp-stream-btn:hover,
+    .lp-stream-btn:focus,
+    .lp-stream-btn.show {
+        background: var(--bg-input-focus);
+        border-color: var(--border-color-focus);
+        color: var(--text-primary);
+        outline: none;
+    }
+    .lp-stream-btn .material-icons { font-size: 18px; opacity: 0.55; }
+    .stream-picker-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: calc(100% - 26px);
+    }
+    /* Keep the filter widget above the rows that follow so the open
+       stream dropdown doesn't get painted under the stat tiles below. */
+    .dashboard-widget-col[data-widget-id="lp_filters"] {
+        position: relative;
+        z-index: 50;
+    }
+    .stream-dropdown-menu {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        min-width: 100%;
+        max-height: 380px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+        padding: 0.55rem;
+        z-index: 1055;
+    }
+    .stream-dropdown-menu .input-group-text {
+        background: transparent;
+        border-color: var(--border-color);
+        color: var(--text-muted);
+    }
+    .stream-list {
+        max-height: 280px;
+        overflow-y: auto;
+        margin-top: 0.35rem;
+    }
+    .stream-option {
+        border-radius: 7px;
+        margin-bottom: 0.2rem;
+        padding: 0.45rem 0.6rem;
+        color: var(--text-primary);
+        background: transparent;
+        border: 1px solid transparent;
+        text-align: left;
+    }
+    .stream-option .title {
+        font-weight: 600;
         font-size: 0.86rem;
     }
-    .analytics-table tbody tr:hover td {
-        background: rgba(90, 90, 255, 0.06) !important;
+    .stream-option .meta {
+        color: var(--text-muted);
+        font-size: 0.72rem;
+        margin-top: 2px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .numeric-cell {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-        font-family: Consolas, "Courier New", monospace;
+    .stream-option.active,
+    .stream-option:hover {
+        background: rgba(90, 90, 255, 0.12);
+        border-color: rgba(90, 90, 255, 0.3);
+        color: var(--text-primary);
     }
-    .time-cell {
-        min-width: 152px;
-        font-variant-numeric: tabular-nums;
-        font-family: Consolas, "Courier New", monospace;
+    .stream-option.active .meta,
+    .stream-option:hover .meta { color: var(--text-secondary); }
+
+    /* Segmented range buttons */
+    .lp-range {
+        display: inline-flex;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 3px;
+        gap: 2px;
+        width: 100%;
+        max-width: 360px;
+    }
+    .lp-range .range-btn {
+        flex: 1;
+        background: transparent;
+        border: 0;
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 0.4rem 0.7rem;
+        border-radius: 7px;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+        min-width: 0;
+    }
+    .lp-range .range-btn:hover:not(.is-active) {
+        color: var(--text-primary);
+        background: rgba(255,255,255,0.04);
+    }
+    [data-theme="light"] .lp-range .range-btn:hover:not(.is-active) {
+        background: rgba(0,0,0,0.04);
+    }
+    .lp-range .range-btn.is-active {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    }
+
+    /* Primary refresh */
+    .lp-refresh {
+        display: inline-flex;
+        align-items: center; gap: 0.4rem;
+        background: var(--accent-gradient);
+        color: #fff;
+        border: 0;
+        border-radius: 10px;
+        padding: 0.55rem 1rem;
+        font-size: 0.84rem;
+        font-weight: 600;
+        cursor: pointer;
+        height: 100%;
+        transition: filter 0.15s ease, transform 0.15s ease;
+    }
+    .lp-refresh:hover { filter: brightness(1.08); transform: translateY(-1px); }
+    .lp-refresh .material-icons { font-size: 16px; }
+    .lp-refresh.is-loading .material-icons { animation: lp-spin 0.9s linear infinite; }
+    @keyframes lp-spin { to { transform: rotate(360deg); } }
+
+    /* Stream meta line */
+    .lp-stream-meta {
+        margin-top: 1rem;
+        padding: 0.6rem 0.8rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem 1.2rem;
+    }
+    .lp-stream-meta strong { color: var(--text-primary); font-weight: 600; }
+    .lp-stream-meta .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         color: var(--text-secondary);
     }
+
+    /* Status box tuning (JS resets className to alert-*) */
+    #statusBox {
+        margin-top: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.78rem;
+        border-radius: 8px;
+    }
+
+    /* ── Stat tiles ───────────────────────────────────────── */
+    .lp-stat-card {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    .lp-stat-card .card-body {
+        padding: 0.9rem 1.1rem 1rem;
+    }
+    .lp-stat-accent {
+        width: 28px; height: 2px;
+        background: var(--accent-gradient);
+        border-radius: 2px;
+        margin-bottom: 0.65rem;
+        opacity: 0.85;
+    }
+    .lp-stat-card[data-accent="green"] .lp-stat-accent { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); }
+    .lp-stat-card[data-accent="blue"]  .lp-stat-accent { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
+    .lp-stat-card[data-accent="red"]   .lp-stat-accent { background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%); }
+    .lp-stat-card[data-accent="amber"] .lp-stat-accent { background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%); }
+
+    .lp-stat-label {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-muted);
+    }
+    .lp-stat-value {
+        font-size: 1.9rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+        margin-top: 0.35rem;
+        min-height: 2.1rem;
+        display: flex;
+        align-items: center;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .lp-stat-hint {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        margin-top: 0.3rem;
+    }
+    /* Dim stat values when we're waiting for observations so the zeros
+       don't look like a bug. */
+    .lp-stat-card.is-waiting .lp-stat-value { color: var(--text-muted); opacity: 0.55; }
+    .lp-stat-card.is-waiting .lp-stat-accent { opacity: 0.3; }
+
+    /* ── Chart cards ──────────────────────────────────────── */
+    .chart-wrap { height: 320px; }
+
+    /* ── Table card ───────────────────────────────────────── */
+    .lp-table-wrap {
+        max-height: 460px;
+        overflow: auto;
+    }
+    .lp-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        margin: 0;
+        color: var(--text-primary);
+    }
+    .lp-table thead th {
+        position: sticky; top: 0;
+        background: var(--bg-card);
+        z-index: 1;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        padding: 0.7rem 0.85rem;
+        border-bottom: 1px solid var(--border-color);
+        text-align: left;
+        white-space: nowrap;
+    }
+    .lp-table thead th.text-end { text-align: right; }
+    .lp-table tbody td {
+        padding: 0.62rem 0.85rem;
+        font-size: 0.84rem;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        background: transparent;
+    }
+    [data-theme="light"] .lp-table tbody td {
+        border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+    .lp-table tbody tr:hover td {
+        background: rgba(90, 90, 255, 0.05);
+    }
+    .lp-table tbody tr:last-child td { border-bottom: 0; }
+    .lp-table .numeric-cell {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .lp-table .time-cell {
+        min-width: 168px;
+        font-variant-numeric: tabular-nums;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--text-secondary);
+    }
+
     .delta-chip {
         display: inline-flex;
         align-items: center;
         gap: 0.2rem;
         border-radius: 999px;
-        padding: 0.12rem 0.42rem;
-        font-size: 0.75rem;
+        padding: 0.14rem 0.5rem;
+        font-size: 0.74rem;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
     }
-    .delta-chip.low {
-        color: #22c55e;
-        background: rgba(34, 197, 94, 0.16);
-    }
-    .delta-chip.mid {
-        color: #f59e0b;
-        background: rgba(245, 158, 11, 0.16);
-    }
-    .delta-chip.high {
-        color: #ef4444;
-        background: rgba(239, 68, 68, 0.16);
-    }
-    .subtle-value {
-        color: var(--text-secondary);
-    }
+    .delta-chip.low  { color: #22c55e; background: rgba(34, 197, 94, 0.14); }
+    .delta-chip.mid  { color: #f59e0b; background: rgba(245, 158, 11, 0.14); }
+    .delta-chip.high { color: #ef4444; background: rgba(239, 68, 68, 0.14); }
+
+    .subtle-value { color: var(--text-muted); }
+
     .analytic-pill {
         display: inline-flex;
         align-items: center;
         gap: 0.2rem;
         border-radius: 999px;
-        padding: 0.12rem 0.45rem;
-        font-size: 0.78rem;
+        padding: 0.14rem 0.5rem;
+        font-size: 0.74rem;
         font-weight: 600;
     }
-    .analytic-pill.up {
-        color: #22c55e;
-        background: rgba(34, 197, 94, 0.14);
-    }
-    .analytic-pill.down {
-        color: #ef4444;
-        background: rgba(239, 68, 68, 0.14);
-    }
-    .analytic-pill.flat {
-        color: #9ca3af;
-        background: rgba(156, 163, 175, 0.12);
-    }
-    .obs-change-up {
-        color: #22c55e;
+    .analytic-pill.up   { color: #22c55e; background: rgba(34, 197, 94, 0.12); }
+    .analytic-pill.down { color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+    .analytic-pill.flat { color: #9ca3af; background: rgba(156, 163, 175, 0.10); }
+
+    .obs-change-up   { color: #22c55e; font-weight: 600; }
+    .obs-change-down { color: #ef4444; font-weight: 600; }
+    .obs-change-flat { color: #9ca3af; font-weight: 600; }
+
+    /* Table export button */
+    .lp-export-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.74rem;
         font-weight: 600;
+        padding: 0.35rem 0.65rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: color 0.12s ease, border-color 0.12s ease;
     }
-    .obs-change-down {
-        color: #ef4444;
-        font-weight: 600;
+    .lp-export-btn:hover {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
     }
-    .obs-change-flat {
-        color: #9ca3af;
-        font-weight: 600;
-    }
-    .mono {
-        font-family: Consolas, "Courier New", monospace;
-    }
+    .lp-export-btn .material-icons { font-size: 14px; }
+
+    /* ── Loading overlay (kept, polished) ─────────────────── */
     .loading-overlay {
         position: fixed;
         inset: 0;
         background: rgba(8, 8, 12, 0.78);
-        backdrop-filter: blur(3px);
+        backdrop-filter: blur(4px);
         display: none;
         align-items: center;
         justify-content: center;
         z-index: 2000;
     }
+    [data-theme="light"] .loading-overlay { background: rgba(245, 245, 247, 0.82); }
     .loading-card {
         width: min(92vw, 460px);
-        background: linear-gradient(180deg, rgba(20, 20, 20, 0.96), rgba(12, 12, 14, 0.96));
+        background: var(--bg-card);
         border: 1px solid var(--border-color);
         border-radius: 14px;
         padding: 1.2rem 1.3rem;
@@ -162,6 +503,7 @@
         background: rgba(255, 255, 255, 0.08);
         overflow: hidden;
     }
+    [data-theme="light"] .loading-progress { background: rgba(0, 0, 0, 0.08); }
     .loading-progress-bar {
         height: 100%;
         width: 0%;
@@ -176,65 +518,22 @@
         color: var(--text-secondary);
         font-size: 0.8rem;
     }
-    .range-btn-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.4rem;
+
+    /* Entrance animation */
+    .dashboard-widget-col {
+        animation: lp-fade-up 0.38s cubic-bezier(.2,.8,.2,1) both;
     }
-    .range-btn {
-        min-width: 48px;
-    }
-    .stream-picker-btn {
-        background: var(--bg-input);
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        border-radius: 8px;
-        padding: 0.6rem 0.75rem;
-    }
-    .stream-picker-btn:hover,
-    .stream-picker-btn:focus {
-        background: var(--bg-input-focus);
-        border-color: var(--border-color-focus);
-        color: var(--text-primary);
-    }
-    .stream-picker-label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: calc(100% - 24px);
-        font-weight: 600;
-    }
-    .stream-dropdown-menu {
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 8px;
-        min-width: 100%;
-        max-height: 360px;
-        overflow: hidden;
-    }
-    .stream-list {
-        max-height: 260px;
-        overflow-y: auto;
-    }
-    .stream-option {
-        border-radius: 6px;
-        margin-bottom: 0.2rem;
-        color: var(--text-primary);
-        background: transparent;
-        border: 1px solid transparent;
-    }
-    .stream-option.active,
-    .stream-option:hover {
-        background: rgba(90, 90, 255, 0.14);
-        border-color: rgba(90, 90, 255, 0.3);
-        color: var(--text-primary);
-    }
-    .stream-option .title {
-        font-weight: 600;
-    }
-    .stream-option .meta {
-        color: var(--text-secondary);
-        font-size: 0.78rem;
+    .dashboard-widget-col:nth-child(1) { animation-delay: 0.02s; }
+    .dashboard-widget-col:nth-child(2) { animation-delay: 0.08s; }
+    .dashboard-widget-col:nth-child(3) { animation-delay: 0.12s; }
+    .dashboard-widget-col:nth-child(4) { animation-delay: 0.16s; }
+    .dashboard-widget-col:nth-child(5) { animation-delay: 0.20s; }
+    .dashboard-widget-col:nth-child(6) { animation-delay: 0.24s; }
+    .dashboard-widget-col:nth-child(7) { animation-delay: 0.28s; }
+    .dashboard-widget-col:nth-child(8) { animation-delay: 0.32s; }
+    @keyframes lp-fade-up {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
     }
 </style>
 {% endblock %}
@@ -242,43 +541,63 @@
 {% block content %}
 {% include 'partials/navbar.html' %}
 
-<div class="container-fluid py-4">
-    <div class="row g-4" id="localPredictionsLayoutRow">
+<div class="lp-page">
+    <!-- Hero -->
+    <header class="lp-hero">
+        <div class="lp-hero-title">
+            <span class="lp-hero-eyebrow">AI Engine</span>
+            <h1 class="lp-hero-h1">Local <span class="lp-accent">Predictions</span></h1>
+            <p class="lp-hero-sub">
+                Track the accuracy of your neuron's locally generated predictions for each published data stream.
+            </p>
+        </div>
+        <div class="lp-hero-meta">
+            <span class="lp-meta-pill" id="engineStatusPill">
+                <span class="dot"></span>
+                <span id="engineStatusLabel">Engine online</span>
+            </span>
+            <span class="lp-meta-pill" id="activeStreamsPill" style="display:none;">
+                <i class="material-icons">insights</i>
+                <strong id="activeStreamsCount">0</strong> active streams
+            </span>
+            <span class="lp-meta-pill" id="predictions24hPill" style="display:none;">
+                <i class="material-icons">schedule</i>
+                <strong id="predictions24hTotal">0</strong> preds / 24h
+            </span>
+            <span class="lp-meta-pill" id="lastObsPill" style="display:none;">
+                <i class="material-icons">cloud_download</i>
+                Last obs <strong id="lastObsLabel">–</strong>
+            </span>
+        </div>
+    </header>
+
+    <div class="row g-3" id="localPredictionsLayoutRow">
+        <!-- Controls / Filters -->
         <div class="col-12 dashboard-widget-col" data-widget-id="lp_filters">
             <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0">Filters</h6>
-                    <span class="text-muted drag-handle" title="Drag to reorder">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">tune</i>Controls</h5>
+                    <span class="drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
-                <div class="card-body">
-                    <div class="row g-3 align-items-end">
-                        <div class="col-12 col-lg-5">
-                            <label class="form-label">Data window</label>
-                            <div class="range-btn-group" id="rangeButtons">
-                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="1">1d</button>
-                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="5">5d</button>
-                                <button type="button" class="btn btn-primary btn-sm range-btn" data-days="10">10d</button>
-                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="30">30d</button>
-                                <button type="button" class="btn btn-outline-light btn-sm range-btn" data-days="all">All</button>
-                            </div>
-                        </div>
-                        <div class="col-12 col-lg-5">
-                            <label for="streamDropdownBtn" class="form-label">Local stream</label>
+                <div class="card-body lp-toolbar-body">
+                    <div class="lp-toolbar-grid">
+                        <div>
+                            <label class="lp-field-label" for="streamDropdownBtn">Local stream</label>
                             <div class="dropdown">
-                                <button class="btn stream-picker-btn w-100 d-flex justify-content-between align-items-center"
+                                <button class="lp-stream-btn"
                                         type="button"
                                         id="streamDropdownBtn"
                                         data-bs-toggle="dropdown"
                                         data-bs-auto-close="outside"
                                         aria-expanded="false">
                                     <span class="stream-picker-label" id="streamDropdownLabel">Select stream</span>
-                                    <i class="material-icons align-middle" style="font-size: 18px;">expand_more</i>
+                                    <i class="material-icons">expand_more</i>
                                 </button>
-                                <div class="dropdown-menu stream-dropdown-menu p-2" aria-labelledby="streamDropdownBtn">
-                                    <div class="input-group input-group-sm mb-2">
-                                        <span class="input-group-text"><i class="material-icons align-middle" style="font-size: 16px;">search</i></span>
+                                <div class="dropdown-menu stream-dropdown-menu" aria-labelledby="streamDropdownBtn">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text"><i class="material-icons" style="font-size: 16px;">search</i></span>
                                         <input type="text" class="form-control" id="streamSearchInput" placeholder="Find stream...">
                                     </div>
                                     <div id="streamDropdownList" class="stream-list"></div>
@@ -286,74 +605,99 @@
                             </div>
                             <select id="streamSelect" class="d-none"></select>
                         </div>
-                        <div class="col-12 col-lg-2 d-flex justify-content-lg-end">
-                            <button class="btn btn-primary" id="refreshBtn">
-                                <i class="material-icons align-middle me-1" style="font-size: 16px;">refresh</i>
+                        <div>
+                            <label class="lp-field-label">Data window</label>
+                            <div class="lp-range" id="rangeButtons">
+                                <button type="button" class="range-btn" data-days="1">1d</button>
+                                <button type="button" class="range-btn" data-days="5">5d</button>
+                                <button type="button" class="range-btn is-active" data-days="10">10d</button>
+                                <button type="button" class="range-btn" data-days="30">30d</button>
+                                <button type="button" class="range-btn" data-days="all">All</button>
+                            </div>
+                        </div>
+                        <div>
+                            <button class="lp-refresh" id="refreshBtn" type="button">
+                                <i class="material-icons">refresh</i>
                                 Refresh
                             </button>
                         </div>
                     </div>
-                    <div class="mt-3 small text-muted" id="streamMeta">-</div>
-                    <div class="mt-2 small text-muted">
-                        Active streams: <strong id="activeStreamsCount">0</strong>
-                        <span class="mx-2">|</span>
-                        Predictions last 24h: <strong id="predictions24hTotal">0</strong>
+                    <div class="lp-stream-meta" id="streamMeta">
+                        <span class="text-muted">Select a stream to view performance.</span>
                     </div>
-                    <div class="mt-3 alert alert-secondary mb-0" id="statusBox">Loading local predictions...</div>
+                    <div class="alert alert-secondary" id="statusBox">Loading local predictions...</div>
                 </div>
             </div>
         </div>
 
+        <!-- Stat tiles -->
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_obs">
-            <div class="card h-100"><div class="card-body">
-                <div class="d-flex justify-content-end mb-1">
-                    <span class="text-muted drag-handle" title="Drag to reorder">
+            <div class="card lp-stat-card" data-accent="green">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">radio_button_checked</i>Observations</h5>
+                    <span class="drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
-                <div class="metric-value" id="obsCount">0</div>
-                <div class="metric-label">Observations</div>
-            </div></div>
+                <div class="card-body">
+                    <div class="lp-stat-accent"></div>
+                    <div class="lp-stat-value" id="obsCount">0</div>
+                    <div class="lp-stat-hint">Data points received in window</div>
+                </div>
+            </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_pred">
-            <div class="card h-100"><div class="card-body">
-                <div class="d-flex justify-content-end mb-1">
-                    <span class="text-muted drag-handle" title="Drag to reorder">
+            <div class="card lp-stat-card" data-accent="blue">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">auto_graph</i>Predictions</h5>
+                    <span class="drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
-                <div class="metric-value" id="predCount">0</div>
-                <div class="metric-label">Predictions</div>
-            </div></div>
+                <div class="card-body">
+                    <div class="lp-stat-accent"></div>
+                    <div class="lp-stat-value" id="predCount">0</div>
+                    <div class="lp-stat-hint">Local predictions produced</div>
+                </div>
+            </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_avgerr">
-            <div class="card h-100"><div class="card-body">
-                <div class="d-flex justify-content-end mb-1">
-                    <span class="text-muted drag-handle" title="Drag to reorder">
+            <div class="card lp-stat-card" data-accent="red">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">trending_down</i>Avg abs error</h5>
+                    <span class="drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
-                <div class="metric-value" id="avgAbsError">-</div>
-                <div class="metric-label">Avg absolute error</div>
-            </div></div>
+                <div class="card-body">
+                    <div class="lp-stat-accent"></div>
+                    <div class="lp-stat-value" id="avgAbsError">-</div>
+                    <div class="lp-stat-hint">Mean |predicted − observed|</div>
+                </div>
+            </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3 dashboard-widget-col" data-widget-id="lp_acc">
-            <div class="card h-100"><div class="card-body">
-                <div class="d-flex justify-content-end mb-1">
-                    <span class="text-muted drag-handle" title="Drag to reorder">
+            <div class="card lp-stat-card" data-accent="amber">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">verified</i>Accuracy</h5>
+                    <span class="drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
-                <div class="metric-value" id="accuracyPct">-</div>
-                <div class="metric-label">Accuracy</div>
-            </div></div>
+                <div class="card-body">
+                    <div class="lp-stat-accent"></div>
+                    <div class="lp-stat-value" id="accuracyPct">-</div>
+                    <div class="lp-stat-hint">Matched-window accuracy score</div>
+                </div>
+            </div>
         </div>
 
+        <!-- Charts -->
         <div class="col-12 col-xl-6 dashboard-widget-col" data-widget-id="lp_chart_pred">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0">Observations vs predictions</h6>
-                    <span class="text-muted drag-handle" title="Drag to reorder">
+            <div class="card h-100">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">show_chart</i>Observations vs Predictions</h5>
+                    <span class="drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
@@ -366,10 +710,10 @@
         </div>
 
         <div class="col-12 col-xl-6 dashboard-widget-col" data-widget-id="lp_chart_err">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0">Prediction error (absolute)</h6>
-                    <span class="text-muted drag-handle" title="Drag to reorder">
+            <div class="card h-100">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">bar_chart</i>Prediction error (absolute)</h5>
+                    <span class="drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
@@ -381,36 +725,39 @@
             </div>
         </div>
 
+        <!-- Table -->
         <div class="col-12 dashboard-widget-col" data-widget-id="lp_table">
             <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0">Recent local predictions</h6>
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">list_alt</i>Recent local predictions</h5>
                     <div class="d-flex align-items-center gap-2">
-                        <button class="btn btn-outline-secondary btn-sm" id="exportCsvBtn">
-                            <i class="material-icons align-middle me-1" style="font-size: 16px;">download</i>
+                        <button class="lp-export-btn" id="exportCsvBtn" type="button">
+                            <i class="material-icons">download</i>
                             Export CSV
                         </button>
-                        <span class="text-muted drag-handle" title="Drag to reorder">
+                        <span class="drag-handle" title="Drag to reorder">
                             <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                         </span>
                     </div>
                 </div>
-                <div class="card-body table-responsive" style="max-height: 360px;">
-                    <table class="table table-sm table-hover mb-0 analytics-table">
-                        <thead>
-                            <tr>
-                                <th>Prediction time</th>
-                                <th>Trend</th>
-                                <th class="text-end">Predicted</th>
-                                <th class="text-end">Matched observation</th>
-                                <th>Obs change</th>
-                                <th class="text-end">Abs error</th>
-                            </tr>
-                        </thead>
-                        <tbody id="predictionRows">
-                            <tr><td colspan="6" class="text-muted">Loading...</td></tr>
-                        </tbody>
-                    </table>
+                <div class="card-body p-0">
+                    <div class="lp-table-wrap">
+                        <table class="lp-table">
+                            <thead>
+                                <tr>
+                                    <th>Prediction time</th>
+                                    <th>Trend</th>
+                                    <th class="text-end">Predicted</th>
+                                    <th class="text-end">Matched observation</th>
+                                    <th>Obs change</th>
+                                    <th class="text-end">Abs error</th>
+                                </tr>
+                            </thead>
+                            <tbody id="predictionRows">
+                                <tr><td colspan="6" class="text-muted">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -554,10 +901,7 @@ function rangeLabel(daysValue) {
 
 function setActiveRangeButton(daysValue) {
     document.querySelectorAll('#rangeButtons [data-days]').forEach((btn) => {
-        const isActive = btn.dataset.days === String(daysValue);
-        btn.classList.toggle('active', isActive);
-        btn.classList.toggle('btn-primary', isActive);
-        btn.classList.toggle('btn-outline-light', !isActive);
+        btn.classList.toggle('is-active', btn.dataset.days === String(daysValue));
     });
 }
 
@@ -681,7 +1025,7 @@ function formatSigned(value, decimals = 4) {
 
 function setStatus(message, type = 'secondary') {
     const box = document.getElementById('statusBox');
-    box.className = `mt-3 alert alert-${type} mb-0`;
+    box.className = `alert alert-${type}`;
     box.textContent = message;
 }
 
@@ -705,14 +1049,14 @@ function getStreamDisplayName(stream, index = 0) {
 function updateStreamMeta(stream) {
     const meta = document.getElementById('streamMeta');
     if (!stream) {
-        meta.textContent = '-';
+        meta.innerHTML = '<span class="text-muted">Select a stream to view performance.</span>';
         return;
     }
     const display = getStreamDisplayName(stream);
     meta.innerHTML = `
-        <span class="me-3"><strong>${display}</strong></span>
-        <span class="me-3">Stream UUID: <span class="mono">${shortUuid(stream.stream_uuid)}</span></span>
-        <span>Prediction UUID: <span class="mono">${shortUuid(stream.prediction_stream_uuid)}</span></span>
+        <span><strong>${display}</strong></span>
+        <span>Stream UUID <span class="mono">${shortUuid(stream.stream_uuid)}</span></span>
+        <span>Prediction UUID <span class="mono">${shortUuid(stream.prediction_stream_uuid)}</span></span>
     `;
 }
 
@@ -768,6 +1112,62 @@ function renderStreamDropdownOptions(filterText = '') {
     });
 }
 
+function formatRelativeFromNow(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+    const diffSec = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+    if (diffSec < 10)   return 'just now';
+    if (diffSec < 60)   return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.round(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.round(diffSec / 3600)}h ago`;
+    return `${Math.round(diffSec / 86400)}d ago`;
+}
+
+function updateObservationStatus(lastObsIsoString, activeStreamsCount) {
+    const statusPill     = document.getElementById('engineStatusPill');
+    const statusLabel    = document.getElementById('engineStatusLabel');
+    const activePill     = document.getElementById('activeStreamsPill');
+    const preds24Pill    = document.getElementById('predictions24hPill');
+    const obsPill        = document.getElementById('lastObsPill');
+    const obsLabel       = document.getElementById('lastObsLabel');
+    const predTile       = document.querySelector('[data-widget-id="lp_pred"] .lp-stat-card');
+    const obsTile        = document.querySelector('[data-widget-id="lp_obs"] .lp-stat-card');
+
+    // Fresh (<10 min) means the engine is actively receiving; anything older
+    // (or missing) is treated as stale.
+    const STALE_AFTER_MS = 10 * 60 * 1000;
+    let parsed = null;
+    if (lastObsIsoString) {
+        const d = new Date(lastObsIsoString);
+        if (!Number.isNaN(d.getTime())) parsed = d;
+    }
+    const isFresh = parsed !== null && (Date.now() - parsed.getTime()) <= STALE_AFTER_MS;
+
+    statusPill.classList.remove('is-waiting', 'is-stale');
+    predTile?.classList.remove('is-waiting');
+    obsTile?.classList.remove('is-waiting');
+
+    if (!isFresh) {
+        // Until new observations arrive, show only the status pill.
+        statusPill.classList.add('is-stale');
+        statusLabel.textContent = 'Observations stale';
+        activePill.style.display  = 'none';
+        preds24Pill.style.display = 'none';
+        obsPill.style.display     = 'none';
+        if (activeStreamsCount > 0) {
+            predTile?.classList.add('is-waiting');
+            obsTile?.classList.add('is-waiting');
+        }
+        return;
+    }
+
+    // Fresh observations — reveal the rest of the hero stats.
+    statusLabel.textContent   = 'Engine receiving';
+    activePill.style.display  = '';
+    preds24Pill.style.display = '';
+    obsPill.style.display     = '';
+    obsLabel.textContent      = formatRelativeFromNow(parsed) || '–';
+}
+
 async function loadStreams() {
     const select = document.getElementById('streamSelect');
     const dropdownBtn = document.getElementById('streamDropdownBtn');
@@ -781,8 +1181,10 @@ async function loadStreams() {
         updateLoading('Stream list ready', 45);
         const streams = data.streams || [];
         allStreams = streams;
-        document.getElementById('activeStreamsCount').textContent = data.active_model_count || 0;
+        const activeCount = data.active_model_count || 0;
+        document.getElementById('activeStreamsCount').textContent = activeCount;
         document.getElementById('predictions24hTotal').textContent = data.predictions_24h_total || 0;
+        updateObservationStatus(data.last_observation_ts || null, activeCount);
 
         select.innerHTML = '';
         if (streams.length === 0) {
@@ -1031,6 +1433,9 @@ async function loadPerformance() {
     setStatus('Loading predictions for selected stream...', 'secondary');
     showLoading('Loading local predictions...', `Fetching ${rangeLabel(currentRangeDays)}...`, 70);
 
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) refreshBtn.classList.add('is-loading');
+
     try {
         const data = await fetchJson(
             `/api/engine/performance?stream_uuid=${encodeURIComponent(streamUuid)}&days=${encodeURIComponent(currentRangeDays)}`
@@ -1056,6 +1461,8 @@ async function loadPerformance() {
     } catch (error) {
         setStatus(`Failed to load performance data: ${error.message}`, 'danger');
         hideLoading();
+    } finally {
+        if (refreshBtn) refreshBtn.classList.remove('is-loading');
     }
 }
 

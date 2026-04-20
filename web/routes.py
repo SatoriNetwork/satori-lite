@@ -1497,10 +1497,19 @@ def register_routes(app):
                 except Exception:
                     pred_to_obs_meta = {}
 
+            # Track which storage instance holds predictions for each stream.
+            # Active models write to their own model.storage; stored prediction
+            # tables live on the global engine storage. Using the wrong one
+            # yields empty results and undercounts 24h predictions.
+            storage_by_pred_uuid = {}
+
             for obs_uuid, model in stream_models.items():
                 pred_uuid = getattr(model, 'predictionStreamUuid', None)
                 if pred_uuid:
                     known_prediction_ids.add(pred_uuid)
+                    model_storage = getattr(model, 'storage', None)
+                    if model_storage is not None:
+                        storage_by_pred_uuid[pred_uuid] = model_storage
 
                 sub_stream = getattr(model, 'subscriptionStream', None)
                 stream_id = getattr(sub_stream, 'streamId', None) if sub_stream else None
@@ -1556,13 +1565,19 @@ def register_routes(app):
                         'stream_type': 'stored_prediction',
                     })
 
-                # Compute 24h prediction count.
+                # Compute 24h prediction count. Active-model predictions live
+                # on the per-model storage; stored-prediction tables live on
+                # the global engine storage.
                 for item in streams:
                     pred_uuid = item.get('prediction_stream_uuid') or item.get('stream_uuid')
                     if not pred_uuid:
                         continue
-                    pdf = storage.getPredictions(pred_uuid)
-                    if pdf.empty:
+                    pred_storage = storage_by_pred_uuid.get(pred_uuid, storage)
+                    try:
+                        pdf = pred_storage.getPredictions(pred_uuid)
+                    except Exception:
+                        pdf = None
+                    if pdf is None or pdf.empty:
                         continue
                     for ts in pdf.index:
                         try:
@@ -1572,11 +1587,39 @@ def register_routes(app):
                         if ts_dt >= now_utc - pd.Timedelta(hours=24):
                             predictions_24h_total += 1
 
+            # Find most recent observation across all active models so the UI
+            # can distinguish "engine idle waiting for data" from "engine
+            # actively receiving observations".
+            last_obs_ts = None
+            try:
+                import pandas as pd  # ensure available even if storage is None
+                for obs_uuid, model in stream_models.items():
+                    model_storage = getattr(model, 'storage', None)
+                    if model_storage is None:
+                        continue
+                    try:
+                        df = model_storage.getStreamData(obs_uuid)
+                    except Exception:
+                        df = None
+                    if df is None or df.empty:
+                        continue
+                    try:
+                        ts_series = df['ts'] if 'ts' in df.columns else df.index.to_series()
+                        parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                        max_ts = parsed.max()
+                        if pd.notna(max_ts) and (last_obs_ts is None or max_ts > last_obs_ts):
+                            last_obs_ts = max_ts
+                    except Exception:
+                        continue
+            except Exception:
+                last_obs_ts = None
+
             return jsonify({
                 'streams': sorted(streams, key=lambda x: (x.get('stream_name') or '').lower()),
                 'count': len(streams),
                 'active_model_count': len(stream_models),
                 'predictions_24h_total': predictions_24h_total,
+                'last_observation_ts': last_obs_ts.isoformat() if last_obs_ts is not None else None,
             })
         except Exception as e:
             logger.error(f"Error getting engine streams: {e}")
