@@ -564,10 +564,6 @@
                 <i class="material-icons">schedule</i>
                 <strong id="predictions24hTotal">0</strong> preds / 24h
             </span>
-            <span class="lp-meta-pill" id="lastObsPill" style="display:none;">
-                <i class="material-icons">cloud_download</i>
-                Last obs <strong id="lastObsLabel">–</strong>
-            </span>
         </div>
     </header>
 
@@ -1127,14 +1123,11 @@ function updateObservationStatus(lastObsIsoString, activeStreamsCount) {
     const statusLabel    = document.getElementById('engineStatusLabel');
     const activePill     = document.getElementById('activeStreamsPill');
     const preds24Pill    = document.getElementById('predictions24hPill');
-    const obsPill        = document.getElementById('lastObsPill');
-    const obsLabel       = document.getElementById('lastObsLabel');
     const predTile       = document.querySelector('[data-widget-id="lp_pred"] .lp-stat-card');
     const obsTile        = document.querySelector('[data-widget-id="lp_obs"] .lp-stat-card');
 
-    // Fresh (<10 min) means the engine is actively receiving; anything older
-    // (or missing) is treated as stale.
-    const STALE_AFTER_MS = 10 * 60 * 1000;
+    // Any observation within the last 24h counts as "receiving".
+    const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
     let parsed = null;
     if (lastObsIsoString) {
         const d = new Date(lastObsIsoString);
@@ -1147,15 +1140,12 @@ function updateObservationStatus(lastObsIsoString, activeStreamsCount) {
     obsTile?.classList.remove('is-waiting');
 
     if (!isFresh) {
-        // Until fresh observations arrive, show only the status pill and
-        // the 24h prediction count. Hide active-streams and last-obs pills.
         statusPill.classList.add('is-stale');
         statusLabel.textContent = parsed === null
             ? 'Awaiting observations'
             : 'Observations stale';
         activePill.style.display  = 'none';
         preds24Pill.style.display = '';
-        obsPill.style.display     = 'none';
         if (activeStreamsCount > 0) {
             predTile?.classList.add('is-waiting');
             obsTile?.classList.add('is-waiting');
@@ -1163,12 +1153,27 @@ function updateObservationStatus(lastObsIsoString, activeStreamsCount) {
         return;
     }
 
-    // Fresh observations — full "engine receiving" state.
     statusLabel.textContent   = 'Engine receiving';
     activePill.style.display  = '';
     preds24Pill.style.display = '';
-    obsPill.style.display     = '';
-    obsLabel.textContent      = formatRelativeFromNow(parsed) || '–';
+}
+
+async function refreshStreamsMeta() {
+    // Lightweight refresh: re-pull /api/engine/streams just to update the
+    // hero pills (active streams, preds/24h, last obs). Does not touch the
+    // stream dropdown or the selected-stream performance charts.
+    try {
+        const data = await fetchJson('/api/engine/streams');
+        const activeCount = data.active_model_count || 0;
+        document.getElementById('activeStreamsCount').textContent = activeCount;
+        document.getElementById('predictions24hTotal').textContent = data.predictions_24h_total || 0;
+        updateObservationStatus(data.last_observation_ts || null, activeCount);
+        // Keep the in-memory stream list reasonably current too, so a newly
+        // registered stream appears in the dropdown without a full reload.
+        if (Array.isArray(data.streams)) allStreams = data.streams;
+    } catch (e) {
+        // Silent — this is a background refresh.
+    }
 }
 
 async function loadStreams() {
@@ -1487,7 +1492,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.getElementById('refreshBtn').addEventListener('click', async () => {
-        await loadPerformance();
+        await Promise.all([loadPerformance(), refreshStreamsMeta()]);
     });
     document.getElementById('exportCsvBtn').addEventListener('click', exportCurrentTableToCsv);
     document.getElementById('streamSearchInput').addEventListener('input', (event) => {

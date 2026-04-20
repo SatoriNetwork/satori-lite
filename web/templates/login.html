@@ -4,59 +4,338 @@
 
 {% block extra_css %}
 <style>
-    .login-container {
+    /* ── Full-viewport stage (plain background) ───────────── */
+    .login-stage {
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 2rem;
+        padding: 2rem 1.25rem;
     }
-    .password-container {
-        background: var(--bg-card);
-        border-radius: 8px;
-        padding: 3rem;
-        box-shadow: var(--shadow);
+
+    /* ── The card ─────────────────────────────────────────── */
+    .login-card {
+        position: relative;
+        z-index: 1;
+        width: min(100%, 440px);
+        background: color-mix(in oklab, var(--bg-card) 92%, transparent);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
         border: 1px solid var(--border-color);
-        max-width: 420px;
-        width: 100%;
-        animation: fadeIn 0.6s ease;
+        border-radius: 18px;
+        padding: 2.1rem 2rem 1.7rem;
+        box-shadow:
+            0 24px 60px rgba(0, 0, 0, 0.35),
+            0 1px 0 rgba(255, 255, 255, 0.04) inset;
+        animation: login-rise 0.55s cubic-bezier(.2,.8,.2,1) both;
     }
-    .version-badge {
-        text-align: center;
-        margin-top: 0.4rem;
+    [data-theme="light"] .login-card {
+        box-shadow:
+            0 20px 60px rgba(0, 0, 0, 0.08),
+            0 1px 0 rgba(0, 0, 0, 0.03) inset;
+    }
+
+    /* Soft accent seam along the top edge */
+    .login-card::before {
+        content: '';
+        position: absolute;
+        left: 2rem; right: 2rem; top: -1px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+        opacity: 0.7;
+    }
+    @keyframes login-rise {
+        from { opacity: 0; transform: translateY(14px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Brand header ─────────────────────────────────────── */
+    .login-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.85rem;
+        margin-bottom: 1.6rem;
+    }
+    .login-eyebrow {
+        font-size: 0.64rem;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
         color: var(--text-muted);
-        font-size: 0.75rem;
-        letter-spacing: 0.01em;
+        font-weight: 700;
     }
+    .login-logo-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.85rem 1.1rem;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.02);
+        border: 1px solid var(--border-color);
+    }
+    .login-logo-wrap::after {
+        /* soft glow behind the mark */
+        content: '';
+        position: absolute;
+        inset: -8px -10px -14px -10px;
+        border-radius: 18px;
+        background: radial-gradient(closest-side, rgba(90,90,255,0.25), transparent 70%);
+        z-index: -1;
+        filter: blur(2px);
+    }
+    .login-logo-wrap img {
+        width: 112px; height: auto;
+        display: block;
+    }
+    [data-theme="dark"] .login-logo-wrap img { filter: invert(1); }
+
+    .login-version {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        text-align: center;
+        margin-top: -0.3rem;
+    }
+
+    .login-title {
+        font-size: 1.45rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0.15rem 0 0;
+        text-align: center;
+        line-height: 1.15;
+    }
+    .login-title .accent {
+        color: var(--text-primary);
+    }
+    .login-sub {
+        margin: 0.25rem 0 0;
+        color: var(--text-secondary);
+        font-size: 0.84rem;
+        text-align: center;
+        max-width: 34ch;
+    }
+
+    /* ── Password input ───────────────────────────────────── */
+    .login-field {
+        position: relative;
+        margin-bottom: 0.9rem;
+    }
+    .login-field-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.63rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+    }
+    .login-field-label .caps-lock-hint {
+        color: #f59e0b;
+        display: none;
+        letter-spacing: 0.1em;
+    }
+    .login-field.caps-on .caps-lock-hint { display: inline-flex; align-items: center; gap: 0.3rem; }
+    .login-field.caps-on .caps-lock-hint::before {
+        content: '';
+        width: 5px; height: 5px; border-radius: 50%;
+        background: #f59e0b;
+        box-shadow: 0 0 6px rgba(245, 158, 11, 0.75);
+    }
+    .login-input-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 11px;
+        padding: 0 0.9rem;
+        transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+    }
+    .login-input-wrap:focus-within {
+        border-color: var(--accent-primary);
+        background: var(--bg-input-focus);
+        box-shadow: 0 0 0 4px rgba(90, 90, 255, 0.12);
+    }
+    .login-input-wrap .material-icons {
+        font-size: 18px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+    }
+    /* Force-override Bootstrap's .form-control styles that would paint an
+       inner box inside our wrap (border, bg, radius, focus ring). */
+    .login-input-wrap input,
+    .login-input-wrap input.form-control,
+    .login-input-wrap input.form-control:focus {
+        flex: 1;
+        min-width: 0;
+        background: transparent !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        outline: none !important;
+        box-shadow: none !important;
+        color: var(--text-primary);
+        padding: 0.95rem 0.7rem;
+        font-size: 0.95rem;
+        letter-spacing: 0.04em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .login-input-wrap input::placeholder {
+        color: var(--text-muted);
+        letter-spacing: normal;
+        font-family: inherit;
+    }
+    .login-reveal {
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        color: var(--text-muted);
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem;
+        border-radius: 6px;
+        transition: color 0.15s ease, background 0.15s ease;
+    }
+    .login-reveal:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
+    [data-theme="light"] .login-reveal:hover { background: rgba(0,0,0,0.04); }
+    .login-reveal .material-icons { font-size: 17px; color: inherit; }
+
+    /* ── Submit button ────────────────────────────────────── */
+    .login-submit {
+        width: 100%;
+        border: 0;
+        border-radius: 11px;
+        background: var(--accent-gradient);
+        color: #fff;
+        padding: 0.85rem 1rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+        transition: transform 0.12s ease, filter 0.12s ease;
+        box-shadow:
+            0 12px 30px rgba(90, 90, 255, 0.25),
+            0 1px 0 rgba(255,255,255,0.08) inset;
+    }
+    .login-submit::after {
+        /* sheen that slides across on hover */
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.22) 50%, transparent 70%);
+        transform: translateX(-120%);
+        transition: transform 0.55s cubic-bezier(.2,.8,.2,1);
+    }
+    .login-submit:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+    .login-submit:hover:not(:disabled)::after { transform: translateX(120%); }
+    .login-submit:disabled { cursor: not-allowed; opacity: 0.82; }
+    .login-submit .material-icons { font-size: 18px; }
+
+    /* ── Flash / error messages ──────────────────────────── */
+    .login-flash {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.55rem;
+        padding: 0.7rem 0.85rem;
+        margin-bottom: 1rem;
+        border-radius: 10px;
+        font-size: 0.8rem;
+        line-height: 1.35;
+    }
+    .login-flash .material-icons { font-size: 16px; margin-top: 1px; }
+    .login-flash.is-error {
+        background: rgba(220, 53, 69, 0.08);
+        border: 1px solid rgba(220, 53, 69, 0.3);
+        color: #ff6b7a;
+    }
+    .login-flash.is-info {
+        background: rgba(90, 90, 255, 0.08);
+        border: 1px solid rgba(90, 90, 255, 0.3);
+        color: var(--text-primary);
+    }
+    .login-flash.is-success {
+        background: rgba(34, 197, 94, 0.08);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        color: #22c55e;
+    }
+
+    /* ── Floating theme toggle (top right of the viewport) ── */
+    .login-theme-toggle {
+        position: fixed;
+        top: 18px;
+        right: 18px;
+        z-index: 10;
+        width: 34px; height: 34px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 9px;
+        color: var(--text-secondary);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 0;
+        transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+    }
+    .login-theme-toggle:hover {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
+        transform: translateY(-1px);
+    }
+    .login-theme-toggle .material-icons { font-size: 17px; }
+
+    /* ── Auth loading overlay (kept, polished) ─────────────── */
     .auth-loading-overlay {
         position: fixed;
         inset: 0;
         background: rgba(8, 8, 12, 0.82);
-        backdrop-filter: blur(3px);
+        backdrop-filter: blur(4px);
         display: none;
         align-items: center;
         justify-content: center;
         z-index: 3000;
     }
+    [data-theme="light"] .auth-loading-overlay { background: rgba(245, 245, 247, 0.85); }
     .auth-loading-card {
         width: min(92vw, 440px);
-        background: linear-gradient(180deg, rgba(20, 20, 20, 0.96), rgba(12, 12, 14, 0.96));
+        background: var(--bg-card);
         border: 1px solid var(--border-color);
         border-radius: 14px;
         padding: 1.15rem 1.2rem;
         box-shadow: var(--shadow);
     }
     .auth-loading-title {
-        font-size: 0.95rem;
+        font-size: 0.85rem;
         font-weight: 600;
         margin-bottom: 0.6rem;
+        color: var(--text-primary);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .auth-loading-title .material-icons {
+        font-size: 15px;
+        color: var(--accent-primary);
     }
     .auth-loading-progress {
-        height: 8px;
+        height: 6px;
         border-radius: 999px;
         background: rgba(255, 255, 255, 0.08);
         overflow: hidden;
     }
+    [data-theme="light"] .auth-loading-progress { background: rgba(0, 0, 0, 0.08); }
     .auth-loading-progress-bar {
         height: 100%;
         width: 0%;
@@ -64,135 +343,90 @@
         transition: width 0.22s ease;
     }
     .auth-loading-meta {
-        margin-top: 0.45rem;
+        margin-top: 0.6rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
         color: var(--text-secondary);
-        font-size: 0.8rem;
-    }
-    .logo-container {
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .logo-container header {
-        font-size: 1.125rem;
-        font-weight: 400;
-        margin-bottom: 0.5rem;
-        color: var(--text-secondary);
-        letter-spacing: -0.01em;
-    }
-    .logo-container img {
-        width: 180px;
-        height: auto;
-        margin: 0 auto;
-        display: block;
-    }
-    [data-theme="dark"] .logo-container img {
-        filter: invert(1);
-    }
-    .logo-text {
-        font-size: 2.5rem;
-        font-weight: 700;
-        background: var(--accent-gradient);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        letter-spacing: -0.03em;
-    }
-    .enhanced-input {
-        margin-bottom: 1.25rem;
-    }
-    .enhanced-input input {
-        width: 100%;
-        padding: 0.875rem 1.25rem;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        font-size: 1rem;
-        text-align: center;
-        background: var(--bg-input);
-        color: var(--text-primary);
-        transition: all 0.2s ease;
-    }
-    .enhanced-input input:focus {
-        border-color: var(--accent-primary);
-        box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.15);
-        outline: none;
-        background: var(--bg-input-focus);
-    }
-    .enhanced-input input::placeholder {
-        color: var(--text-muted);
-    }
-    .login-btn {
-        width: 100%;
-        padding: 0.875rem 1.5rem;
-        font-size: 1rem;
-        font-weight: 500;
-        border: none;
-        border-radius: 6px;
-        background: var(--accent-gradient);
-        color: white;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        letter-spacing: -0.01em;
-    }
-    .login-btn:hover {
-        background: var(--accent-secondary);
-        transform: translateY(-1px);
-        box-shadow: var(--shadow-sm);
-    }
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
+        font-size: 0.76rem;
+        letter-spacing: 0.05em;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="login-container">
-    <div class="password-container">
-        <div class="logo-container">
-            <header>Welcome to</header>
-            <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori Logo">
-            <div class="version-badge">{{ version }}</div>
+<button type="button" class="login-theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+    <i class="material-icons" id="themeIcon">light_mode</i>
+</button>
+
+<div class="login-stage">
+    <div class="login-card">
+        <div class="login-brand">
+            <span class="login-eyebrow">Vault access</span>
+            <div class="login-logo-wrap">
+                <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori">
+            </div>
+            <span class="login-version">{{ version }}</span>
+            <h1 class="login-title"><span class="accent">Welcome</span></h1>
+            <p class="login-sub">Unlock your encrypted vault to continue to your Satori neuron.</p>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} mb-3" role="alert">
-                        {{ message }}
+                    {% set cat = 'is-error' if category in ['error','danger'] else ('is-success' if category == 'success' else 'is-info') %}
+                    {% set icon = 'error_outline' if category in ['error','danger'] else ('check_circle' if category == 'success' else 'info') %}
+                    <div class="login-flash {{ cat }}" role="alert">
+                        <i class="material-icons">{{ icon }}</i>
+                        <div>{{ message }}</div>
                     </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
         <form action="{{ url_for('login') }}" method="POST" id="loginForm">
-            <div class="enhanced-input">
-                <input type="password"
-                       name="password"
-                       class="form-control"
-                       placeholder="Enter your vault password"
-                       autofocus
-                       id="password"
-                       required>
+            <div class="login-field" id="passwordField">
+                <div class="login-field-label">
+                    <span>Vault password</span>
+                    <span class="caps-lock-hint" id="capsLockHint">Caps lock</span>
+                </div>
+                <div class="login-input-wrap">
+                    <i class="material-icons" aria-hidden="true">lock</i>
+                    <input type="password"
+                           name="password"
+                           class="form-control"
+                           placeholder="••••••••••"
+                           autofocus
+                           autocomplete="current-password"
+                           spellcheck="false"
+                           id="password"
+                           required>
+                    <button type="button" class="login-reveal" id="loginRevealBtn" aria-label="Toggle password visibility">
+                        <i class="material-icons" id="loginRevealIcon">visibility</i>
+                    </button>
+                </div>
             </div>
 
-            <button type="submit" class="login-btn" id="unlockBtn">
-                Unlock Vault
+            <button type="submit" class="login-submit" id="unlockBtn">
+                <i class="material-icons">lock_open</i>
+                <span>Unlock vault</span>
             </button>
         </form>
+
     </div>
 </div>
 
 <div id="authLoadingOverlay" class="auth-loading-overlay" aria-hidden="true">
     <div class="auth-loading-card">
-        <div class="auth-loading-title">Unlocking vault...</div>
+        <div class="auth-loading-title">
+            <i class="material-icons">lock_open</i>
+            Unlocking vault
+        </div>
         <div class="auth-loading-progress">
             <div id="authLoadingProgressBar" class="auth-loading-progress-bar"></div>
         </div>
         <div class="auth-loading-meta">
-            <span id="authLoadingStep">Verifying credentials...</span>
+            <span id="authLoadingStep">Verifying credentials…</span>
             <strong id="authLoadingPercent">0%</strong>
         </div>
     </div>
@@ -200,28 +434,58 @@
 
 <script>
     (function () {
-        const form = document.getElementById('loginForm');
-        const button = document.getElementById('unlockBtn');
-        const overlay = document.getElementById('authLoadingOverlay');
-        const bar = document.getElementById('authLoadingProgressBar');
-        const percent = document.getElementById('authLoadingPercent');
-        const step = document.getElementById('authLoadingStep');
+        const form        = document.getElementById('loginForm');
+        const button      = document.getElementById('unlockBtn');
+        const overlay     = document.getElementById('authLoadingOverlay');
+        const bar         = document.getElementById('authLoadingProgressBar');
+        const percent     = document.getElementById('authLoadingPercent');
+        const step        = document.getElementById('authLoadingStep');
+        const passwordEl  = document.getElementById('password');
+        const revealBtn   = document.getElementById('loginRevealBtn');
+        const revealIcon  = document.getElementById('loginRevealIcon');
+        const capsHint    = document.getElementById('capsLockHint');
+        const passField   = document.getElementById('passwordField');
         let timer = null;
 
-        if (!form || !button || !overlay || !bar || !percent || !step) {
-            return;
+        // Reveal password
+        if (revealBtn && passwordEl && revealIcon) {
+            revealBtn.addEventListener('click', () => {
+                const isPw = passwordEl.type === 'password';
+                passwordEl.type = isPw ? 'text' : 'password';
+                revealIcon.textContent = isPw ? 'visibility_off' : 'visibility';
+                passwordEl.focus();
+            });
         }
 
+        // Caps-lock nudge
+        if (passwordEl && capsHint && passField) {
+            const updateCaps = (e) => {
+                const on = e.getModifierState && e.getModifierState('CapsLock');
+                passField.classList.toggle('caps-on', !!on);
+            };
+            passwordEl.addEventListener('keyup', updateCaps);
+            passwordEl.addEventListener('keydown', updateCaps);
+        }
+
+        // Sync theme icon on load (base.html's toggleTheme handles the rest)
+        const themeIcon = document.getElementById('themeIcon');
+        if (themeIcon) {
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            themeIcon.textContent = current === 'dark' ? 'light_mode' : 'dark_mode';
+        }
+
+        // Submit: show overlay + simulated progress
+        if (!form || !button || !overlay || !bar || !percent || !step) return;
         form.addEventListener('submit', function () {
             button.disabled = true;
-            button.textContent = 'Unlocking...';
+            button.innerHTML = '<i class="material-icons">hourglass_top</i><span>Unlocking…</span>';
             overlay.style.display = 'flex';
             overlay.setAttribute('aria-hidden', 'false');
 
             let current = 8;
             bar.style.width = current + '%';
             percent.textContent = current + '%';
-            step.textContent = 'Verifying credentials...';
+            step.textContent = 'Verifying credentials…';
 
             timer = setInterval(() => {
                 if (current < 92) {
@@ -229,7 +493,7 @@
                     bar.style.width = current + '%';
                     percent.textContent = current + '%';
                     if (current > 55) {
-                        step.textContent = 'Preparing dashboard...';
+                        step.textContent = 'Preparing dashboard…';
                     }
                 } else if (timer) {
                     clearInterval(timer);

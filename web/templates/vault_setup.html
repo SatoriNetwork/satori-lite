@@ -1,208 +1,582 @@
 {% extends "base.html" %}
 
-{% block title %}Satori - Create Vault Password{% endblock %}
+{% block title %}Satori - Create Vault{% endblock %}
 
 {% block extra_css %}
 <style>
-    .login-container {
+    /* ── Full-viewport stage (plain background) ───────────── */
+    .login-stage {
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 2rem;
+        padding: 2rem 1.25rem;
     }
-    .password-container {
+
+    /* Floating theme toggle (top right of the viewport) */
+    .login-theme-toggle {
+        position: fixed;
+        top: 18px;
+        right: 18px;
+        z-index: 10;
+        width: 34px; height: 34px;
         background: var(--bg-card);
-        border-radius: 8px;
-        padding: 3rem;
-        box-shadow: var(--shadow);
         border: 1px solid var(--border-color);
-        max-width: 420px;
-        width: 100%;
-        animation: fadeIn 0.6s ease;
-    }
-    .version-badge {
-        text-align: center;
-        margin-top: 0.4rem;
-        color: var(--text-muted);
-        font-size: 0.75rem;
-        letter-spacing: 0.01em;
-    }
-    .logo-container {
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .logo-container header {
-        font-size: 1.125rem;
-        font-weight: 400;
-        margin-bottom: 0.5rem;
+        border-radius: 9px;
         color: var(--text-secondary);
-        letter-spacing: -0.01em;
-    }
-    .logo-container img {
-        width: 180px;
-        height: auto;
-        margin: 0 auto;
-        display: block;
-    }
-    [data-theme="dark"] .logo-container img {
-        filter: invert(1);
-    }
-    .logo-text {
-        font-size: 2.5rem;
-        font-weight: 700;
-        background: var(--accent-gradient);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        letter-spacing: -0.03em;
-    }
-    .setup-instructions {
-        text-align: center;
-        color: var(--text-secondary);
-        font-size: 0.9rem;
-        margin-bottom: 1.5rem;
-        line-height: 1.5;
-    }
-    .enhanced-input {
-        margin-bottom: 1.25rem;
-    }
-    .enhanced-input label {
-        display: block;
-        margin-bottom: 0.5rem;
-        color: var(--text-secondary);
-        font-size: 0.875rem;
-        font-weight: 500;
-    }
-    .enhanced-input input {
-        width: 100%;
-        padding: 0.875rem 1.25rem;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        font-size: 1rem;
-        background: var(--bg-input);
-        color: var(--text-primary);
-        transition: all 0.2s ease;
-    }
-    .enhanced-input input:focus {
-        border-color: var(--accent-primary);
-        box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.15);
-        outline: none;
-        background: var(--bg-input-focus);
-    }
-    .enhanced-input input::placeholder {
-        color: var(--text-muted);
-    }
-    .password-hint {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        margin-top: 0.25rem;
-    }
-    .login-btn {
-        width: 100%;
-        padding: 0.875rem 1.5rem;
-        font-size: 1rem;
-        font-weight: 500;
-        border: none;
-        border-radius: 6px;
-        background: var(--accent-gradient);
-        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         cursor: pointer;
-        transition: all 0.2s ease;
-        letter-spacing: -0.01em;
+        padding: 0;
+        transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
     }
-    .login-btn:hover {
-        background: var(--accent-secondary);
+    .login-theme-toggle:hover {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
         transform: translateY(-1px);
-        box-shadow: var(--shadow-sm);
     }
-    .login-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none;
+    .login-theme-toggle .material-icons { font-size: 17px; }
+
+    /* ── The card ─────────────────────────────────────────── */
+    .login-card {
+        position: relative;
+        z-index: 1;
+        width: min(100%, 460px);
+        background: color-mix(in oklab, var(--bg-card) 92%, transparent);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1px solid var(--border-color);
+        border-radius: 18px;
+        padding: 2.1rem 2rem 1.7rem;
+        box-shadow:
+            0 24px 60px rgba(0, 0, 0, 0.35),
+            0 1px 0 rgba(255, 255, 255, 0.04) inset;
+        animation: login-rise 0.55s cubic-bezier(.2,.8,.2,1) both;
     }
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
+    [data-theme="light"] .login-card {
+        box-shadow:
+            0 20px 60px rgba(0, 0, 0, 0.08),
+            0 1px 0 rgba(0, 0, 0, 0.03) inset;
+    }
+    .login-card::before {
+        content: '';
+        position: absolute;
+        left: 2rem; right: 2rem; top: -1px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+        opacity: 0.7;
+    }
+    @keyframes login-rise {
+        from { opacity: 0; transform: translateY(14px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Brand header ─────────────────────────────────────── */
+    .login-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.85rem;
+        margin-bottom: 1.2rem;
+    }
+    .login-eyebrow {
+        font-size: 0.64rem;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        font-weight: 700;
+    }
+    .login-logo-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.85rem 1.1rem;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.02);
+        border: 1px solid var(--border-color);
+    }
+    .login-logo-wrap::after {
+        content: '';
+        position: absolute;
+        inset: -8px -10px -14px -10px;
+        border-radius: 18px;
+        background: radial-gradient(closest-side, rgba(90,90,255,0.25), transparent 70%);
+        z-index: -1;
+        filter: blur(2px);
+    }
+    .login-logo-wrap img {
+        width: 112px; height: auto;
+        display: block;
+    }
+    [data-theme="dark"] .login-logo-wrap img { filter: invert(1); }
+
+    .login-version {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.68rem;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        text-align: center;
+        margin-top: -0.3rem;
+    }
+
+    .login-title {
+        font-size: 1.45rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0.15rem 0 0;
+        text-align: center;
+        line-height: 1.15;
+    }
+    .login-title .accent { color: var(--text-primary); }
+
+    .login-sub {
+        margin: 0.25rem 0 0;
+        color: var(--text-secondary);
+        font-size: 0.84rem;
+        text-align: center;
+        max-width: 38ch;
+        line-height: 1.45;
+    }
+
+    /* ── Password fields ──────────────────────────────────── */
+    .login-field {
+        position: relative;
+        margin-bottom: 0.85rem;
+    }
+    .login-field-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.63rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+    }
+    .login-field-label .caps-lock-hint {
+        color: #f59e0b;
+        display: none;
+        letter-spacing: 0.1em;
+    }
+    .login-field.caps-on .caps-lock-hint { display: inline-flex; align-items: center; gap: 0.3rem; }
+    .login-field.caps-on .caps-lock-hint::before {
+        content: '';
+        width: 5px; height: 5px; border-radius: 50%;
+        background: #f59e0b;
+        box-shadow: 0 0 6px rgba(245, 158, 11, 0.75);
+    }
+    .login-field-label .match-hint {
+        display: none;
+        align-items: center;
+        gap: 0.3rem;
+        letter-spacing: 0.1em;
+    }
+    .login-field-label .match-hint .material-icons {
+        font-size: 13px;
+    }
+    .login-field-label .match-hint.match-ok   { color: #22c55e; display: inline-flex; }
+    .login-field-label .match-hint.match-miss { color: #ef4444; display: inline-flex; }
+
+    .login-input-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 11px;
+        padding: 0 0.9rem;
+        transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+    }
+    .login-input-wrap:focus-within {
+        border-color: var(--accent-primary);
+        background: var(--bg-input-focus);
+        box-shadow: 0 0 0 4px rgba(90, 90, 255, 0.12);
+    }
+    .login-input-wrap.match-ok {
+        border-color: rgba(34, 197, 94, 0.55);
+    }
+    .login-input-wrap.match-ok:focus-within {
+        box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+    }
+    .login-input-wrap.match-miss {
+        border-color: rgba(239, 68, 68, 0.55);
+    }
+    .login-input-wrap.match-miss:focus-within {
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+    }
+    .login-input-wrap .material-icons {
+        font-size: 18px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+    }
+    .login-input-wrap input,
+    .login-input-wrap input.form-control,
+    .login-input-wrap input.form-control:focus {
+        flex: 1;
+        min-width: 0;
+        background: transparent !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        outline: none !important;
+        box-shadow: none !important;
+        color: var(--text-primary);
+        padding: 0.95rem 0.7rem;
+        font-size: 0.95rem;
+        letter-spacing: 0.04em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .login-input-wrap input::placeholder {
+        color: var(--text-muted);
+        letter-spacing: normal;
+        font-family: inherit;
+    }
+    .login-reveal {
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        color: var(--text-muted);
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem;
+        border-radius: 6px;
+        transition: color 0.15s ease, background 0.15s ease;
+    }
+    .login-reveal:hover { color: var(--text-primary); background: rgba(255,255,255,0.04); }
+    [data-theme="light"] .login-reveal:hover { background: rgba(0,0,0,0.04); }
+    .login-reveal .material-icons { font-size: 17px; color: inherit; }
+
+    /* ── Password strength meter (under first field) ──────── */
+    .strength-meter {
+        margin-top: 0.55rem;
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+    }
+    .strength-bar {
+        flex: 1;
+        display: flex;
+        gap: 3px;
+    }
+    .strength-bar span {
+        flex: 1;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--border-color);
+        transition: background 0.2s ease;
+    }
+    .strength-label {
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--text-muted);
+        min-width: 6ch;
+        text-align: right;
+    }
+    .strength-meter[data-level="1"] .strength-bar span:nth-child(-n+1) { background: #ef4444; }
+    .strength-meter[data-level="1"] .strength-label { color: #ef4444; }
+    .strength-meter[data-level="2"] .strength-bar span:nth-child(-n+2) { background: #f59e0b; }
+    .strength-meter[data-level="2"] .strength-label { color: #f59e0b; }
+    .strength-meter[data-level="3"] .strength-bar span:nth-child(-n+3) { background: #84cc16; }
+    .strength-meter[data-level="3"] .strength-label { color: #84cc16; }
+    .strength-meter[data-level="4"] .strength-bar span:nth-child(-n+4) { background: #22c55e; }
+    .strength-meter[data-level="4"] .strength-label { color: #22c55e; }
+
+    /* ── Submit button ────────────────────────────────────── */
+    .login-submit {
+        width: 100%;
+        border: 0;
+        border-radius: 11px;
+        background: var(--accent-gradient);
+        color: #fff;
+        padding: 0.85rem 1rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+        margin-top: 0.5rem;
+        transition: transform 0.12s ease, filter 0.12s ease;
+        box-shadow:
+            0 12px 30px rgba(90, 90, 255, 0.25),
+            0 1px 0 rgba(255,255,255,0.08) inset;
+    }
+    .login-submit::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.22) 50%, transparent 70%);
+        transform: translateX(-120%);
+        transition: transform 0.55s cubic-bezier(.2,.8,.2,1);
+    }
+    .login-submit:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+    .login-submit:hover:not(:disabled)::after { transform: translateX(120%); }
+    .login-submit:disabled { cursor: not-allowed; opacity: 0.82; }
+    .login-submit .material-icons { font-size: 18px; }
+
+    /* Small note below the submit button */
+    .login-foot-note {
+        margin: 1rem 0 0;
+        text-align: center;
+        font-size: 0.76rem;
+        color: var(--text-muted);
+        letter-spacing: 0.02em;
+    }
+
+    /* ── Safety notice (small pill below form) ───────────── */
+    .login-safety {
+        margin-top: 1.05rem;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.55rem 0.75rem;
+        border-radius: 10px;
+        background: rgba(245, 158, 11, 0.08);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        color: #fbbf24;
+        font-size: 0.76rem;
+        line-height: 1.4;
+    }
+    [data-theme="light"] .login-safety { color: #b45309; }
+    .login-safety .material-icons { font-size: 15px; margin-top: 1px; }
+
+    /* ── Flash messages ──────────────────────────────────── */
+    .login-flash {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.55rem;
+        padding: 0.7rem 0.85rem;
+        margin-bottom: 1rem;
+        border-radius: 10px;
+        font-size: 0.8rem;
+        line-height: 1.35;
+    }
+    .login-flash .material-icons { font-size: 16px; margin-top: 1px; }
+    .login-flash.is-error {
+        background: rgba(220, 53, 69, 0.08);
+        border: 1px solid rgba(220, 53, 69, 0.3);
+        color: #ff6b7a;
+    }
+    .login-flash.is-info {
+        background: rgba(90, 90, 255, 0.08);
+        border: 1px solid rgba(90, 90, 255, 0.3);
+        color: var(--text-primary);
+    }
+    .login-flash.is-success {
+        background: rgba(34, 197, 94, 0.08);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        color: #22c55e;
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="login-container">
-    <div class="password-container">
-        <div class="logo-container">
-            <header>Welcome to</header>
-            <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori Logo">
-            <div class="version-badge">{{ version }}</div>
-        </div>
+<button type="button" class="login-theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+    <i class="material-icons" id="themeIcon">light_mode</i>
+</button>
 
-        <div class="setup-instructions">
-            Create a secure password to protect your vault. This password will encrypt your private keys and wallet data.
+<div class="login-stage">
+    <div class="login-card">
+        <div class="login-brand">
+            <span class="login-eyebrow">Create vault</span>
+            <div class="login-logo-wrap">
+                <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori">
+            </div>
+            <span class="login-version">{{ version }}</span>
+            <h1 class="login-title"><span class="accent">Set a vault password</span></h1>
+            <p class="login-sub">
+                This password encrypts your private keys and wallet data locally.
+            </p>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} mb-3" role="alert">
-                        {{ message }}
+                    {% set cat = 'is-error' if category in ['error','danger'] else ('is-success' if category == 'success' else 'is-info') %}
+                    {% set icon = 'error_outline' if category in ['error','danger'] else ('check_circle' if category == 'success' else 'info') %}
+                    <div class="login-flash {{ cat }}" role="alert">
+                        <i class="material-icons">{{ icon }}</i>
+                        <div>{{ message }}</div>
                     </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
         <form action="{{ url_for('vault_setup') }}" method="POST" id="setupForm">
-            <div class="enhanced-input">
-                <label for="password">Vault Password</label>
-                <input type="password"
-                       name="password"
-                       class="form-control"
-                       placeholder="Enter password"
-                       autofocus
-                       id="password"
-                       minlength="4"
-                       required>
-                <div class="password-hint">Minimum 4 characters</div>
+            <div class="login-field" id="passwordField">
+                <div class="login-field-label">
+                    <span>Vault password</span>
+                    <span class="caps-lock-hint" id="capsLockHint">Caps lock</span>
+                </div>
+                <div class="login-input-wrap">
+                    <i class="material-icons" aria-hidden="true">lock</i>
+                    <input type="password"
+                           name="password"
+                           class="form-control"
+                           placeholder="Choose a strong password"
+                           autofocus
+                           autocomplete="new-password"
+                           spellcheck="false"
+                           id="password"
+                           minlength="4"
+                           required>
+                    <button type="button" class="login-reveal" id="loginRevealBtn" aria-label="Toggle password visibility">
+                        <i class="material-icons" id="loginRevealIcon">visibility</i>
+                    </button>
+                </div>
+                <div class="strength-meter" id="strengthMeter" data-level="0">
+                    <div class="strength-bar">
+                        <span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="strength-label" id="strengthLabel">—</div>
+                </div>
             </div>
 
-            <div class="enhanced-input">
-                <label for="password_confirm">Confirm Password</label>
-                <input type="password"
-                       name="password_confirm"
-                       class="form-control"
-                       placeholder="Re-enter password"
-                       id="password_confirm"
-                       minlength="4"
-                       required>
+            <div class="login-field" id="confirmField">
+                <div class="login-field-label">
+                    <span>Confirm password</span>
+                    <span class="match-hint" id="matchHint"></span>
+                </div>
+                <div class="login-input-wrap" id="confirmWrap">
+                    <i class="material-icons" aria-hidden="true">verified_user</i>
+                    <input type="password"
+                           name="password_confirm"
+                           class="form-control"
+                           placeholder="Re-enter the same password"
+                           autocomplete="new-password"
+                           spellcheck="false"
+                           id="password_confirm"
+                           minlength="4"
+                           required>
+                    <button type="button" class="login-reveal" id="confirmRevealBtn" aria-label="Toggle password visibility">
+                        <i class="material-icons" id="confirmRevealIcon">visibility</i>
+                    </button>
+                </div>
             </div>
 
-            <button type="submit" class="login-btn" id="submitBtn">
-                Create Vault Password
+            <button type="submit" class="login-submit" id="submitBtn">
+                <i class="material-icons">key</i>
+                <span>Create vault</span>
             </button>
+
+            <p class="login-foot-note">Keep it safe. We can't recover it.</p>
         </form>
     </div>
 </div>
 
 <script>
-    // Client-side validation
-    document.getElementById('setupForm').addEventListener('submit', function(e) {
-        const password = document.getElementById('password').value;
-        const passwordConfirm = document.getElementById('password_confirm').value;
+    (function () {
+        const form         = document.getElementById('setupForm');
+        const button       = document.getElementById('submitBtn');
+        const password     = document.getElementById('password');
+        const confirmEl    = document.getElementById('password_confirm');
+        const revealBtn    = document.getElementById('loginRevealBtn');
+        const revealIcon   = document.getElementById('loginRevealIcon');
+        const cRevealBtn   = document.getElementById('confirmRevealBtn');
+        const cRevealIcon  = document.getElementById('confirmRevealIcon');
+        const capsHint     = document.getElementById('capsLockHint');
+        const passField    = document.getElementById('passwordField');
+        const confirmWrap  = document.getElementById('confirmWrap');
+        const matchHint    = document.getElementById('matchHint');
+        const meter        = document.getElementById('strengthMeter');
+        const meterLabel   = document.getElementById('strengthLabel');
 
-        if (password.length < 4) {
-            e.preventDefault();
-            alert('Password must be at least 4 characters long');
-            return false;
+        // Reveal toggles
+        function wireReveal(input, btn, icon) {
+            if (!btn || !input || !icon) return;
+            btn.addEventListener('click', () => {
+                const isPw = input.type === 'password';
+                input.type = isPw ? 'text' : 'password';
+                icon.textContent = isPw ? 'visibility_off' : 'visibility';
+                input.focus();
+            });
+        }
+        wireReveal(password, revealBtn, revealIcon);
+        wireReveal(confirmEl, cRevealBtn, cRevealIcon);
+
+        // Caps-lock nudge on the primary password field
+        const updateCaps = (e) => {
+            const on = e.getModifierState && e.getModifierState('CapsLock');
+            passField.classList.toggle('caps-on', !!on);
+        };
+        password.addEventListener('keyup', updateCaps);
+        password.addEventListener('keydown', updateCaps);
+
+        // Sync theme icon
+        const themeIcon = document.getElementById('themeIcon');
+        if (themeIcon) {
+            const current = document.documentElement.getAttribute('data-theme') || 'dark';
+            themeIcon.textContent = current === 'dark' ? 'light_mode' : 'dark_mode';
         }
 
-        if (password !== passwordConfirm) {
-            e.preventDefault();
-            alert('Passwords do not match. Please try again.');
-            return false;
+        // Strength meter: simple heuristic (length + character classes)
+        function scorePassword(pw) {
+            if (!pw) return { level: 0, label: '—' };
+            let score = 0;
+            if (pw.length >= 4)  score += 1;
+            if (pw.length >= 8)  score += 1;
+            if (pw.length >= 12) score += 1;
+            const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((re) => re.test(pw)).length;
+            if (classes >= 2) score += 1;
+            if (classes >= 3) score += 1;
+            // Clamp to 1–4 once we have anything
+            const level = Math.max(1, Math.min(4, Math.round(score * 0.8)));
+            const labels = { 1: 'Weak', 2: 'Okay', 3: 'Good', 4: 'Strong' };
+            return { level, label: labels[level] };
         }
 
-        // Disable button to prevent double submission
-        document.getElementById('submitBtn').disabled = true;
-    });
+        function renderStrength() {
+            const { level, label } = scorePassword(password.value);
+            meter.setAttribute('data-level', String(level));
+            meterLabel.textContent = label;
+        }
+
+        function renderMatch() {
+            const a = password.value;
+            const b = confirmEl.value;
+            confirmWrap.classList.remove('match-ok', 'match-miss');
+            matchHint.classList.remove('match-ok', 'match-miss');
+            matchHint.innerHTML = '';
+            if (!b) return;
+            if (a === b) {
+                confirmWrap.classList.add('match-ok');
+                matchHint.classList.add('match-ok');
+                matchHint.innerHTML = '<i class="material-icons">check_circle</i>Match';
+            } else {
+                confirmWrap.classList.add('match-miss');
+                matchHint.classList.add('match-miss');
+                matchHint.innerHTML = '<i class="material-icons">cancel</i>No match';
+            }
+        }
+
+        password.addEventListener('input', () => { renderStrength(); renderMatch(); });
+        confirmEl.addEventListener('input', renderMatch);
+
+        // Submit: client-side validation + disable
+        form.addEventListener('submit', function (e) {
+            const a = password.value;
+            const b = confirmEl.value;
+            if (a.length < 4) {
+                e.preventDefault();
+                alert('Password must be at least 4 characters long');
+                return false;
+            }
+            if (a !== b) {
+                e.preventDefault();
+                alert('Passwords do not match. Please try again.');
+                return false;
+            }
+            button.disabled = true;
+            button.innerHTML = '<i class="material-icons">hourglass_top</i><span>Creating…</span>';
+        });
+    })();
 </script>
 {% endblock %}

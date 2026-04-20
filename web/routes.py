@@ -1651,16 +1651,6 @@ def register_routes(app):
             except Exception:
                 last_obs_ts = None
 
-            try:
-                logger.info(
-                    "engine/streams debug: active_models=%s pred24h=%s last_obs=%s stream_uuids=%s",
-                    len(stream_models),
-                    predictions_24h_total,
-                    last_obs_ts.isoformat() if last_obs_ts is not None else None,
-                    [s.get('stream_uuid')[:8] for s in streams if s.get('stream_uuid')],
-                )
-            except Exception:
-                pass
             return jsonify({
                 'streams': sorted(streams, key=lambda x: (x.get('stream_name') or '').lower()),
                 'count': len(streams),
