@@ -2712,7 +2712,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not client:
                 continue
             try:
-                streams = await client.discover_datastreams()
+                streams = await client.discover_datastreams(limit=1000)
             except Exception:
                 await self._networkDisconnect(relay_url)
                 continue
@@ -2726,10 +2726,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 metadata = relay_index.get(stream_name)
                 if not metadata:
                     continue
-                _, is_active = await self._networkCheckFreshness(
-                    client, stream_name, metadata)
-                if not is_active:
-                    continue
+                # Paid subscriptions: skip freshness — the provider only
+                # publishes to known subscribers, so the relay may have no
+                # recent events even though the provider is alive. Connect
+                # and announce so the provider learns about us again.
+                sub_info = hunting.get(stream_name, {})
+                is_paid = int(sub_info.get('price_per_obs', 0) or 0) > 0
+                if not is_paid:
+                    _, is_active = await self._networkCheckFreshness(
+                        client, stream_name, metadata)
+                    if not is_active:
+                        continue
                 # Found active — update DB, subscribe
                 sub = hunting.pop(stream_name)
                 found_any = True
