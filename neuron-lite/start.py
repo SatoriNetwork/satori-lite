@@ -790,6 +790,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             receiver_nostr_pubkey=self.nostrPubkey or '',
             created_at=int(getattr(co, 'timestamp', 0)) or None,
         )
+        # If the funding UTXO changed (refund/reopen), clear the stale
+        # pending commitment from the previous funding round — otherwise the
+        # next legitimate commitment looks like a remainder-rollback attack.
+        if existing and existing.get('funding_txid') != co.funding_txid:
+            await asyncio.to_thread(
+                self.networkDB.clear_pending_commitment, co.p2sh_address)
         logging.info(
             f'Channel: {"updated" if existing else "registered inbound"} '
             f'channel {co.p2sh_address} from {co.sender_pubkey[:16]}… '
@@ -832,6 +838,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(
                 f'Channel: commitment for unknown channel '
                 f'{commitment.p2sh_address} — ignoring')
+            return
+        # Only the receiver should process inbound commitments.
+        # The sender also knows about the channel (it opened it) and sees the
+        # same commitment events on the relay — skip if we're the sender.
+        if channel.get('receiver_pubkey') != self.wallet.pubkey:
             return
         # Bind the commitment envelope to the channel's known pubkeys. Nostr
         # kind 34604 is parameterized-replaceable by (kind, author, d_tag), so
@@ -1374,7 +1385,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if paid_count <= 0:
                 continue
             current_seq = pub.get('last_seq_num', 0)
-            grant_to_seq = current_seq + paid_count
             for client in self._networkClients.values():
                 # Ensure the subscriber is registered before granting access.
                 # record_payment is a no-op if they aren't in _subscribers,
@@ -1383,6 +1393,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if sender_nostr_pubkey not in client._subscribers.get(
                         pub_stream, {}):
                     client.record_subscription(pub_stream, sender_nostr_pubkey)
+                # Advance from the subscriber's existing last_paid_seq when
+                # higher than current_seq — handles multiple commits arriving
+                # between publishes, where last_seq_num hasn't moved but each
+                # incremental payment should still grant one more observation.
+                existing = client._subscribers[pub_stream].get(sender_nostr_pubkey)
+                base_seq = current_seq
+                if existing and existing.last_paid_seq is not None:
+                    base_seq = max(base_seq, existing.last_paid_seq)
+                grant_to_seq = base_seq + paid_count
                 client.record_payment(pub_stream, sender_nostr_pubkey, grant_to_seq)
             logging.info(
                 f'Channel: granted {sender_nostr_pubkey[:16]}… access to '
@@ -1419,8 +1438,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(f'Channel: expiry check failed: {e}')
 
     def _channelFundSats(self) -> int:
-        """Return the configured channel funding amount in sats (default 1 SATORI)."""
-        return int(config.get().get('channel_fund_sats', 100_000_000))
+        """Return the configured channel funding amount in sats (default 0.01 SATORI)."""
+        return int(config.get().get('channel_fund_sats', 1_000_000))
 
     def _channelFetchUtxoSatori(
         self,
