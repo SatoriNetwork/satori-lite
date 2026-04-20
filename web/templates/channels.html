@@ -7,14 +7,18 @@
 <div class="container-fluid py-4" style="max-width: 960px;">
 
   <!-- Header -->
-  <div class="d-flex align-items-start justify-content-between mb-3">
+  <div class="d-flex align-items-end justify-content-between mb-3 gap-3 flex-wrap">
     <div>
       <h4 class="mb-1">Payment Channels</h4>
-      <p class="text-muted small mb-0">
+      <p class="text-muted small mb-2">
         Off-chain micropayments for data streams — lock SATORI once, pay per observation with no on-chain fee each time.
       </p>
+      <div class="ch-unit" role="group" aria-label="Display unit">
+        <button class="is-active" data-unit="satori" onclick="setChannelUnit('satori', this)">SATORI</button>
+        <button                   data-unit="sats"   onclick="setChannelUnit('sats', this)">sats</button>
+      </div>
     </div>
-    <button class="btn btn-primary btn-sm ms-3 flex-shrink-0" style="white-space:nowrap;" data-bs-toggle="modal" data-bs-target="#openChannelModal">
+    <button class="btn btn-primary btn-sm flex-shrink-0" style="white-space:nowrap;" data-bs-toggle="modal" data-bs-target="#openChannelModal">
       <i class="material-icons align-middle" style="font-size:16px;">add</i>
       Open Channel
     </button>
@@ -302,11 +306,47 @@ tr.ch-closed:hover td { opacity: 0.65; }
 .claimable-amount { color: #28a745; font-weight: 600; }
 .eye-btn { border: none; background: none; color: var(--text-muted, #888); cursor: pointer; padding: 0 4px; }
 .eye-btn:hover { color: var(--text-primary, #fff); }
+
+/* ── Display-unit segmented control (sats / SATORI) ───── */
+.ch-unit {
+  display: inline-flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+.ch-unit button {
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.32rem 0.65rem;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.ch-unit button[data-unit="satori"] { text-transform: uppercase; letter-spacing: 0.08em; }
+.ch-unit button[data-unit="sats"]   { text-transform: lowercase; }
+.ch-unit button.is-active {
+  background: var(--bg-card);
+  color: var(--accent-primary);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
 </style>
 <script>
 // ── Formatting ────────────────────────────────────────────────
+let channelDisplayUnit = localStorage.getItem('ch-display-unit') || 'satori'; // 'satori' | 'sats'
+
 function fmtSatori(sats) {
-  const val = Number(sats) / 1e8;
+  const n = Number(sats) || 0;
+  if (channelDisplayUnit === 'sats') {
+    return n.toLocaleString() + ' sats';
+  }
+  const val = n / 1e8;
   // Up to 8 decimal places, strip trailing zeros
   let s = val.toFixed(8).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
   return s + ' SATORI';
@@ -315,6 +355,23 @@ function fmtSatori(sats) {
 function satoriToSats(satori) {
   return Math.round(parseFloat(satori) * 1e8) || 0;
 }
+
+function setChannelUnit(unit, btn) {
+  channelDisplayUnit = unit;
+  try { localStorage.setItem('ch-display-unit', unit); } catch(e) {}
+  document.querySelectorAll('.ch-unit button').forEach(b => b.classList.remove('is-active'));
+  if (btn) btn.classList.add('is-active');
+  // Re-render both tables with the new unit
+  if (typeof renderSending === 'function' && typeof _cachedSending !== 'undefined')   renderSending(_cachedSending);
+  if (typeof renderReceiving === 'function' && typeof _cachedReceiving !== 'undefined') renderReceiving(_cachedReceiving);
+}
+
+// Reflect stored unit in the segmented control on first paint
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.ch-unit button').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.unit === channelDisplayUnit);
+  });
+});
 
 const fmtAddr = (s) => s ? s.slice(0, 10) + '…' + s.slice(-6) : '—';
 
