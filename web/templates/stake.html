@@ -318,73 +318,143 @@
         background: transparent;
     }
 
-    /* ── Commission gradient thermometer ──────────────────── */
-    .stk-commission-wrap {
-        display: flex;
-        align-items: stretch;
-        gap: 0.6rem;
+    /* ── Pool-commission slider (minimal, number-first) ──── */
+    .stk-commission {
+        --stk-comm-accent: var(--accent-primary);
+        padding: 0.2rem 0.1rem 0;
+    }
+    .stk-commission-value {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.3rem;
+        padding: 0.2rem 0.4rem;
+        margin: 0 0 0.85rem -0.4rem;
+        border-radius: 6px;
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+    }
+    .stk-commission-value:hover {
         background: var(--bg-input);
-        border: 1px solid var(--border-color);
-        border-radius: 10px;
-        padding: 0.55rem 0.6rem 0.55rem 0.85rem;
     }
-    .stk-commission-wrap .form-control {
+    .stk-commission-value:focus-within {
+        background: var(--bg-input-focus);
+        box-shadow: 0 0 0 2px color-mix(in oklab, var(--stk-comm-accent) 22%, transparent);
+    }
+    .stk-commission-value input {
+        width: 2.2ch;
+        min-width: 0;
+        background: transparent;
         border: 0;
-        background: transparent;
-        color: var(--text-primary);
+        outline: none;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-variant-numeric: tabular-nums;
-        font-weight: 700;
-        font-size: 1.05rem;
-        padding: 0.15rem 0.25rem;
+        font-weight: 600;
+        font-size: 2.1rem;
+        letter-spacing: -0.04em;
+        color: var(--text-primary);
+        text-align: right;
+        padding: 0;
+        line-height: 1;
+        -moz-appearance: textfield;
+        caret-color: var(--stk-comm-accent);
+    }
+    /* Two digits when value is in the 10-99 range (so "73%" hugs tight) */
+    .stk-commission-value input:not(:placeholder-shown) {
+        width: auto;
+        min-width: 1.1ch;
+        field-sizing: content; /* supported browsers auto-fit to content */
+    }
+    .stk-commission-value input::-webkit-outer-spin-button,
+    .stk-commission-value input::-webkit-inner-spin-button {
+        -webkit-appearance: none; margin: 0;
+    }
+    .stk-commission-value input::placeholder { color: var(--text-muted); opacity: 0.45; }
+    .stk-commission-unit {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 500;
+        font-size: 1.15rem;
+        color: var(--text-muted);
+        letter-spacing: 0;
+    }
+
+    /* Range input — everything in one element, no decorative wrapper */
+    .stk-commission-range {
+        -webkit-appearance: none;
+        appearance: none;
         width: 100%;
-    }
-    .stk-commission-wrap .form-control:focus {
-        box-shadow: none;
+        height: 20px;
         background: transparent;
+        margin: 0;
+        padding: 0;
+        display: block;
+        cursor: pointer;
+        outline: none;
+        --stk-comm-fill: 0%;
     }
-    .stk-commission-wrap .stk-commission-unit {
-        align-self: center;
-        font-weight: 700;
-        color: var(--text-secondary);
-        font-size: 0.95rem;
-    }
-    .stk-commission-bar {
-        position: relative;
-        height: 6px;
+    .stk-commission-range:focus { outline: none; }
+
+    /* WebKit track — single-color fill up to the thumb */
+    .stk-commission-range::-webkit-slider-runnable-track {
+        height: 3px;
         border-radius: 999px;
-        background: linear-gradient(90deg, #22c55e 0%, #f59e0b 55%, #ef4444 100%);
-        margin-top: 0.55rem;
-        overflow: visible;
+        background: linear-gradient(
+            90deg,
+            var(--stk-comm-accent) 0 var(--stk-comm-fill),
+            var(--border-color) var(--stk-comm-fill) 100%);
     }
-    .stk-commission-bar::before {
-        /* subtle track dimmer */
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: rgba(0,0,0,0.2);
-        mix-blend-mode: multiply;
+    /* WebKit thumb — small, precise, single accent ring */
+    .stk-commission-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px; height: 16px;
+        margin-top: -6.5px; /* center on 3px track */
+        border-radius: 50%;
+        background: var(--bg-primary);
+        border: 2px solid var(--stk-comm-accent);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        transition: transform 0.12s ease;
+    }
+    .stk-commission-range:hover::-webkit-slider-thumb,
+    .stk-commission-range:focus-visible::-webkit-slider-thumb {
+        transform: scale(1.12);
+    }
+    .stk-commission-range:active::-webkit-slider-thumb {
+        transform: scale(0.94);
+    }
+
+    /* Firefox */
+    .stk-commission-range::-moz-range-track {
+        height: 3px;
         border-radius: 999px;
+        background: var(--border-color);
     }
-    [data-theme="light"] .stk-commission-bar::before { background: rgba(255,255,255,0.35); }
-    .stk-commission-cursor {
-        position: absolute;
-        top: 50%;
+    .stk-commission-range::-moz-range-progress {
+        height: 3px;
+        border-radius: 999px;
+        background: var(--stk-comm-accent);
+    }
+    .stk-commission-range::-moz-range-thumb {
         width: 14px; height: 14px;
         border-radius: 50%;
-        background: var(--bg-card);
-        border: 2px solid var(--text-primary);
-        transform: translate(-50%, -50%);
-        transition: left 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        background: var(--bg-primary);
+        border: 2px solid var(--stk-comm-accent);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        transition: transform 0.12s ease;
     }
-    .stk-commission-hint {
+    .stk-commission-range:hover::-moz-range-thumb,
+    .stk-commission-range:focus-visible::-moz-range-thumb {
+        transform: scale(1.12);
+    }
+
+    /* Axis — just two faint numerals at the ends */
+    .stk-commission-axis {
         display: flex;
         justify-content: space-between;
-        margin-top: 0.35rem;
+        margin-top: 0.2rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.68rem;
         color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
     }
 
     /* ── Address chips (workers / lenders) ────────────────── */
@@ -509,7 +579,7 @@
     @media (max-width: 640px) {
         .stk-page { padding: 1.25rem 1rem 3rem; }
         .stk-hero-h1 { font-size: 1.55rem; }
-        .stk-commission-wrap { flex-direction: column; }
+        .stk-commission-value input { font-size: 1.8rem; }
     }
 </style>
 {% endblock %}
@@ -639,23 +709,29 @@
                     <div class="stk-section">
                         <label class="stk-section-label" for="poolCommission">Pool commission fee</label>
                         <span class="d-inline-block w-100" id="poolCommissionWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
-                            <div class="stk-commission-wrap">
-                                <input type="number" class="form-control" id="poolCommission"
-                                       placeholder="0"
-                                       min="0" max="100" step="1"
-                                       oninput="updateCommissionCursor()"
-                                       onchange="setPoolCommission()"
-                                       onkeypress="if(event.key === 'Enter') { setPoolCommission(); event.preventDefault(); }">
-                                <span class="stk-commission-unit">%</span>
+                            <div class="stk-commission">
+                                <div class="stk-commission-value">
+                                    <input type="number" id="poolCommission"
+                                           placeholder="0"
+                                           min="0" max="100" step="1"
+                                           aria-label="Pool commission percentage"
+                                           oninput="updateCommissionCursor()"
+                                           onchange="setPoolCommission()"
+                                           onkeypress="if(event.key === 'Enter') { setPoolCommission(); event.preventDefault(); }">
+                                    <span class="stk-commission-unit">%</span>
+                                </div>
+                                <input type="range" id="poolCommissionRange" class="stk-commission-range"
+                                       min="0" max="100" step="1" value="0"
+                                       style="--stk-comm-fill: 0%"
+                                       aria-label="Pool commission slider"
+                                       oninput="this.style.setProperty('--stk-comm-fill', this.value + '%'); syncCommissionFromRange(this.value)"
+                                       onchange="setPoolCommission()">
+                                <div class="stk-commission-axis" aria-hidden="true">
+                                    <span>0</span>
+                                    <span>100</span>
+                                </div>
                             </div>
                         </span>
-                        <div class="stk-commission-bar">
-                            <span class="stk-commission-cursor" id="stkCommissionCursor" style="left: 0%;"></span>
-                        </div>
-                        <div class="stk-commission-hint">
-                            <span>0% — pool closed</span>
-                            <span>100% — full commission</span>
-                        </div>
                     </div>
 
                     <div class="stk-section">
@@ -1091,12 +1167,22 @@
 
     function updateCommissionCursor() {
         const input = document.getElementById('poolCommission');
-        const cursor = document.getElementById('stkCommissionCursor');
-        if (!input || !cursor) return;
+        const range = document.getElementById('poolCommissionRange');
+        if (!input) return;
         const raw = input.value === '' ? 0 : parseInt(input.value);
         const pct = Math.max(0, Math.min(100, isNaN(raw) ? 0 : raw));
-        cursor.style.left = `${pct}%`;
+        if (range) {
+            if (Number(range.value) !== pct) range.value = String(pct);
+            range.style.setProperty('--stk-comm-fill', pct + '%');
+        }
         updatePoolHeroPill();
+    }
+
+    // Drag handler: push range value into the number input, then sync.
+    function syncCommissionFromRange(val) {
+        const input = document.getElementById('poolCommission');
+        if (input) input.value = val;
+        updateCommissionCursor();
     }
 
     async function loadWorkers() {
