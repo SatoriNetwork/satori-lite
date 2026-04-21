@@ -5,6 +5,10 @@ import sqlite3
 import threading
 import time
 
+SQLITE_BUSY_TIMEOUT_MS = 30000
+SQLITE_READ_RETRIES = 3
+SQLITE_READ_RETRY_DELAY_SECONDS = 0.2
+
 
 class NetworkDB:
     """Thread-safe SQLite database for tracking subscribed datastreams."""
@@ -17,9 +21,29 @@ class NetworkDB:
 
     def _get_conn(self) -> sqlite3.Connection:
         if not hasattr(self._local, 'conn') or self._local.conn is None:
-            self._local.conn = sqlite3.connect(self._db_path)
+            self._local.conn = sqlite3.connect(
+                self._db_path,
+                timeout=SQLITE_BUSY_TIMEOUT_MS / 1000,
+            )
             self._local.conn.row_factory = sqlite3.Row
+            self._local.conn.execute(
+                f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+            self._local.conn.execute("PRAGMA journal_mode = WAL")
+            self._local.conn.execute("PRAGMA synchronous = NORMAL")
         return self._local.conn
+
+    def _fetchall_with_retry(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:
+        conn = self._get_conn()
+        for attempt in range(SQLITE_READ_RETRIES):
+            try:
+                return conn.execute(query, params).fetchall()
+            except sqlite3.OperationalError as exc:
+                if 'database is locked' not in str(exc).lower():
+                    raise
+                if attempt == SQLITE_READ_RETRIES - 1:
+                    raise
+                time.sleep(SQLITE_READ_RETRY_DELAY_SECONDS)
+        return []
 
     def _init_schema(self):
         conn = self._get_conn()
@@ -470,10 +494,9 @@ class NetworkDB:
 
     def get_relays(self) -> list[dict]:
         """Return all known relays."""
-        conn = self._get_conn()
-        rows = conn.execute(
+        rows = self._fetchall_with_retry(
             "SELECT * FROM relays ORDER BY last_active DESC"
-        ).fetchall()
+        )
         return [dict(r) for r in rows]
 
     def delete_relay(self, relay_url: str):
@@ -929,4 +952,3 @@ class NetworkDB:
             "WHERE stream_name = ? AND p2sh_address = ?",
             (stream_name, p2sh_address)).fetchone()
         return dict(row) if row else None
-
