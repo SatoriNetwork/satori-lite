@@ -588,8 +588,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if not channel or channel['remainder_sats'] < price_sats:
                     return
             await self.sendChannelPayment(
-                channel['p2sh_address'], price_sats, stream_name,
-                price_per_obs=price_sats)
+                channel['p2sh_address'], price_sats, stream_name)
             key = (stream_name, provider_pubkey)
             self._paymentCooldowns[key] = time.time()
         finally:
@@ -1076,8 +1075,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 sender_nostr_pubkey=sender_nostr_pubkey,
                 total_paid_sats=commitment.pay_amount_sats,
                 stream_name=commitment.stream_name,
-                p2sh_address=commitment.p2sh_address,
-                price_per_obs=commitment.price_per_obs)
+                p2sh_address=commitment.p2sh_address)
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -1284,8 +1282,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
             total_paid_sats=commitment.pay_amount_sats,
             stream_name=commitment.stream_name,
-            p2sh_address=p2sh_address,
-            price_per_obs=commitment.price_per_obs)
+            p2sh_address=p2sh_address)
         logging.info(
             f'Channel: claimed {commitment.pay_amount_sats} sats '
             f'from {p2sh_address} — txid={txid}',
@@ -1554,7 +1551,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         total_paid_sats: int,
         stream_name: str = '',
         p2sh_address: str = '',
-        price_per_obs: int = 0,
     ) -> None:
         """Update subscriber access rights after a successful channel claim.
 
@@ -1574,18 +1570,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         When p2sh_address is supplied, the granted last_paid_seq is persisted
         to the subscriber_access table so it survives provider restarts and
         Nostr key rotations (Fix C).
-
-        When price_per_obs is supplied (>0), uses the committed price rather
-        than the live publication row — prevents mismatch if the provider
-        changed the price between commit and grant (Fix B).
         """
         if not sender_nostr_pubkey or total_paid_sats <= 0:
             return
         pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
         for pub in pubs:
-            # Fix B: use the committed price if available, fall back to live
-            pub_price = pub.get('price_per_obs', 0)
-            effective_price = price_per_obs if price_per_obs > 0 else pub_price
+            effective_price = pub.get('price_per_obs', 0)
             if effective_price <= 0:
                 continue
             pub_stream = pub['stream_name']
@@ -2045,7 +2035,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         p2sh_address: str,
         pay_amount_sats: int,
         stream_name: str = '',
-        price_per_obs: int = 0,
     ) -> None:
         """Issue a payment commitment to the receiver over Nostr (sender side).
 
@@ -2134,7 +2123,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             fee=0,  # no fee embedded; receiver handles via 3-path
             timestamp=int(time.time()),
             stream_name=stream_name,
-            price_per_obs=price_per_obs,
         )
         # The Nostr `p` tag must be a 32-byte x-only Nostr pubkey — that is a
         # different value from the 33-byte EVR wallet pubkey stored in
@@ -3088,6 +3076,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 await asyncio.to_thread(
                     self.networkDB.update_relay,
                     stream_name, sub['provider_pubkey'], relay_url)
+                # Refresh price from the provider's metadata
+                discovered_price = getattr(metadata, 'price_per_obs', None)
+                if discovered_price is not None:
+                    await asyncio.to_thread(
+                        self.networkDB.update_subscription_price,
+                        stream_name, sub['provider_pubkey'],
+                        discovered_price)
                 try:
                     await client.subscribe_datastream(
                         stream_name, sub['provider_pubkey'])

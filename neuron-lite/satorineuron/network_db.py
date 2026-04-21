@@ -358,6 +358,17 @@ class NetworkDB:
         conn.commit()
         self.upsert_relay(relay_url)
 
+    def update_subscription_price(self, stream_name: str,
+                                  provider_pubkey: str,
+                                  price_per_obs: int):
+        """Update the price for an active subscription."""
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE subscriptions SET price_per_obs = ?
+            WHERE stream_name = ? AND provider_pubkey = ? AND active = 1
+        """, (price_per_obs, stream_name, provider_pubkey))
+        conn.commit()
+
     def should_recheck_stale(self, stale_since: int,
                              interval: int = 86400) -> bool:
         """Check if enough time has passed to recheck a stale stream."""
