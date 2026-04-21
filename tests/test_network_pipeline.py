@@ -453,6 +453,19 @@ class TestFetchDataSources:
             resp.raise_for_status.side_effect = Exception(f'HTTP {status}')
         return resp
 
+    @staticmethod
+    def _fetch_all(harness):
+        """Fetch all active data sources (replaces old batch method)."""
+        sources = harness.networkDB.get_active_data_sources()
+        for src in sources:
+            if not src.get('url') or not src.get('cadence_seconds'):
+                continue
+            pub_map = {p['stream_name']: p
+                       for p in harness.networkDB.get_active_publications()}
+            if src['stream_name'] not in pub_map:
+                continue
+            asyncio.run(harness._networkFetchOneDataSource(src))
+
     def test_json_path_fetch_and_publish(self, harness):
         harness.networkDB.add_data_source(
             stream_name='btc-price',
@@ -470,7 +483,7 @@ class TestFetchDataSources:
             '{"data": {"price": "42000"}}')
 
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         mock_client.publish_observation.assert_called_once()
         obs = mock_client.publish_observation.call_args[0][0]
@@ -493,7 +506,7 @@ class TestFetchDataSources:
             '{"markets": [{"price": 3200}]}')
 
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         obs = mock_client.publish_observation.call_args[0][0]
         assert obs.value == '3200'
@@ -514,7 +527,7 @@ class TestFetchDataSources:
         mock_requests.get.return_value = self._mock_response('21.5')
 
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         mock_client.publish_observation.assert_called_once()
         obs = mock_client.publish_observation.call_args[0][0]
@@ -537,7 +550,7 @@ class TestFetchDataSources:
         mock_requests.post.return_value = self._mock_response('{"value": "99"}')
 
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         # Should have used POST, not GET
         mock_requests.post.assert_called_once()
@@ -550,7 +563,7 @@ class TestFetchDataSources:
 
         mock_requests = mock.MagicMock()
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         mock_requests.get.assert_not_called()
 
@@ -565,24 +578,7 @@ class TestFetchDataSources:
 
         mock_requests = mock.MagicMock()
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
-
-        mock_requests.get.assert_not_called()
-
-    def test_skips_not_due_yet(self, harness):
-        harness.networkDB.add_data_source(
-            stream_name='btc',
-            url='https://example.com',
-            cadence_seconds=3600,
-            parser_type='json_path',
-            parser_config='price')
-        harness.networkDB.add_publication('btc', cadence_seconds=3600)
-        # Mark as just published
-        harness.networkDB.mark_published('btc')
-
-        mock_requests = mock.MagicMock()
-        with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         mock_requests.get.assert_not_called()
 
@@ -602,7 +598,7 @@ class TestFetchDataSources:
         mock_requests.get.side_effect = Exception('Connection refused')
 
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         mock_client.publish_observation.assert_not_called()
 
@@ -622,7 +618,7 @@ class TestFetchDataSources:
         mock_requests.get.return_value = self._mock_response('{"other": 1}')
 
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            self._fetch_all(harness)
 
         mock_client.publish_observation.assert_not_called()
 
@@ -723,7 +719,7 @@ class TestEndToEnd:
         mock_requests.get.return_value = TestFetchDataSources._mock_response(
             '{"reading": "23.5"}')
         with mock.patch.dict(sys.modules, {'requests': mock_requests}):
-            asyncio.run(harness._networkFetchDataSources())
+            TestFetchDataSources._fetch_all(harness)
 
         assert mock_client.publish_observation.call_count == 1
         obs1 = mock_client.publish_observation.call_args[0][0]

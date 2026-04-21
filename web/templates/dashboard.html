@@ -1671,6 +1671,13 @@
                                     <input type="text" id="dsHeaders" class="form-control" placeholder='{"Authorization": "Bearer ..."}'>
                                 </div>
                             </div>
+                            <div class="ds-field-group cols-2" id="dsOffsetGroup">
+                                <div class="ds-field">
+                                    <label>Offset <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional, seconds from UTC 0 &mdash; random if blank)</span></label>
+                                    <input type="number" id="dsOffsetSeconds" class="form-control" value="" min="0" placeholder="random" style="font-size:0.82rem;">
+                                </div>
+                                <div class="ds-field"></div>
+                            </div>
 
                             <!-- Parser section -->
                             <div id="dsParserRow">
@@ -3001,8 +3008,8 @@
 
     // ── Data Source Form ──────────────────────────────────────
     function downloadCsvTemplate() {
-        const header = 'stream_name,name,description,url,method,headers,cadence_minutes,parser_type,parser_config,classification,tags';
-        const example = 'btc-price,Bitcoin Price,BTC/USD spot price,https://api.example.com/price,GET,,60,json_path,data.price,crypto,btc usd';
+        const header = 'stream_name,name,description,url,method,headers,cadence_minutes,offset_seconds,parser_type,parser_config,classification,tags';
+        const example = 'btc-price,Bitcoin Price,BTC/USD spot price,https://api.example.com/price,GET,,60,,json_path,data.price,crypto,btc usd';
         const csv = header + '\n' + example + '\n';
         const blob = new Blob([csv], {type: 'text/csv'});
         const a = document.createElement('a');
@@ -3056,6 +3063,7 @@
             const csvTags = (row.tags || '')
                 .split(/[\s,;]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
             try {
+                const csvOffset = row.offset_seconds ? parseInt(row.offset_seconds) : null;
                 const resp = await fetch('/api/network/data-source', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -3067,6 +3075,7 @@
                         method: row.method || 'GET',
                         headers: row.headers || null,
                         cadence_seconds: cadenceMin ? cadenceMin * 60 : 0,
+                        offset_seconds: csvOffset,
                         parser_type: hasUrl ? (row.parser_type || 'json_path') : '',
                         parser_config: hasUrl ? (row.parser_config || '') : '',
                         classification: (row.classification || '').trim().toLowerCase(),
@@ -3108,6 +3117,7 @@
             id => document.getElementById(id).value = '');
         document.getElementById('dsClassification').value = '';
         document.getElementById('dsCadenceMin').value = '';
+        document.getElementById('dsOffsetSeconds').value = '';
         resetPriceUnit();
         document.getElementById('dsPricePerObs').value = '0';
         document.getElementById('dsMethod').value = 'GET';
@@ -3168,6 +3178,7 @@
                 switchCadenceUnit('min');
                 document.getElementById('dsCadenceMin').value = '';
             }
+            document.getElementById('dsOffsetSeconds').value = ds.offset_seconds != null ? ds.offset_seconds : '';
             resetPriceUnit();
             document.getElementById('dsPricePerObs').value = ds.price_per_obs || 0;
             const tags = ds.tags || [];
@@ -3444,6 +3455,8 @@
         const classification = document.getElementById('dsClassification').value.trim();
         const extraTags = document.getElementById('dsTags').value
             .split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+        const offsetRaw = document.getElementById('dsOffsetSeconds').value.trim();
+        const offsetSeconds = offsetRaw !== '' ? parseInt(offsetRaw) : null;
         btnLoading(btn);
         const resp = await fetch('/api/network/data-source', {
             method: 'POST',
@@ -3456,6 +3469,7 @@
                 method: url ? document.getElementById('dsMethod').value : 'GET',
                 headers: headers,
                 cadence_seconds: cadence,
+                offset_seconds: offsetSeconds,
                 parser_type: parserType,
                 parser_config: parserConfig,
                 price_per_obs: getPriceInSats(),

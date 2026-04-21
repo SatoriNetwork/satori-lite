@@ -2516,6 +2516,8 @@ def register_routes(app):
         ]
         all_tags = ([classification] if classification else []) + extra_tags
         # Create the data source
+        raw_offset = data.get('offset_seconds')
+        offset = int(raw_offset) if raw_offset is not None else None
         startup.networkDB.add_data_source(
             stream_name=data['stream_name'],
             url=url,
@@ -2525,7 +2527,8 @@ def register_routes(app):
             name=data.get('name', ''),
             description=data.get('description', ''),
             method=data.get('method', 'GET'),
-            headers=data.get('headers'))
+            headers=data.get('headers'),
+            offset_seconds=offset)
         # Create corresponding publication
         try:
             price_per_obs = int(data.get('price_per_obs', 0) or 0)

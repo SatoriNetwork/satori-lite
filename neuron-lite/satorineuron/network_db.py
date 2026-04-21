@@ -1,6 +1,7 @@
 """Local SQLite storage for network datastream subscriptions."""
 
 import os
+import random
 import sqlite3
 import threading
 import time
@@ -135,6 +136,7 @@ class NetworkDB:
                 method TEXT NOT NULL DEFAULT 'GET',
                 headers TEXT,
                 cadence_seconds INTEGER NOT NULL,
+                offset_seconds INTEGER,
                 parser_type TEXT NOT NULL DEFAULT 'json_path',
                 parser_config TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1,
@@ -245,6 +247,12 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN utxo_checked_at INTEGER NOT NULL DEFAULT 0")
+        # Migration: add offset_seconds to data_sources (existing DBs)
+        try:
+            conn.execute("SELECT offset_seconds FROM data_sources LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE data_sources ADD COLUMN offset_seconds INTEGER")
         # Persisted subscriber access state (provider side). Keyed by
         # (stream_name, p2sh_address) so it survives provider restarts and
         # Nostr key rotations. The nostr_pubkey column tracks the most
@@ -657,15 +665,24 @@ class NetworkDB:
                         cadence_seconds: int = 0, parser_type: str = '',
                         parser_config: str = '', name: str = '',
                         description: str = '', method: str = 'GET',
-                        headers: str = None) -> int:
-        """Register an external data source. Returns row id."""
+                        headers: str = None,
+                        offset_seconds: int = None) -> int:
+        """Register an external data source. Returns row id.
+
+        offset_seconds is the position within each cadence cycle relative
+        to UTC 0.  If not provided a random offset is generated (up to
+        min(cadence_seconds, 86400), capped at 24 h).
+        """
+        if offset_seconds is None:
+            cap = min(cadence_seconds, 86400) if cadence_seconds else 86400
+            offset_seconds = random.randint(0, max(cap - 1, 0))
         conn = self._get_conn()
         conn.execute("""
             INSERT INTO data_sources
                 (stream_name, name, description, url, method, headers,
-                 cadence_seconds, parser_type, parser_config, active,
-                 created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                 cadence_seconds, offset_seconds, parser_type, parser_config,
+                 active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(stream_name) DO UPDATE SET
                 active = 1,
                 name = excluded.name,
@@ -674,11 +691,12 @@ class NetworkDB:
                 method = excluded.method,
                 headers = excluded.headers,
                 cadence_seconds = excluded.cadence_seconds,
+                offset_seconds = excluded.offset_seconds,
                 parser_type = excluded.parser_type,
                 parser_config = excluded.parser_config
         """, (
             stream_name, name, description, url, method, headers,
-            cadence_seconds, parser_type, parser_config,
+            cadence_seconds, offset_seconds, parser_type, parser_config,
             int(time.time()),
         ))
         conn.commit()
