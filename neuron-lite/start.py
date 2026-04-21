@@ -843,19 +843,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         existing = await asyncio.to_thread(
             self.networkDB.get_channel, co.p2sh_address)
         # Ignore replays: same P2SH + same funding_txid means we already have it.
-        # A new funding_txid means the sender refunded/reopened — accept the
-        # update ONLY if the announcement's timestamp is newer than what we
-        # already have. This prevents Nostr history replays from overwriting
-        # a newer on-chain state (e.g. a UTXO created by our own claim).
+        # A different funding_txid is the authoritative reset signal (Fix D) —
+        # the sender refunded/reopened with a new UTXO. Accept unconditionally;
+        # the on-chain UTXO change is proof that this is a real state transition
+        # regardless of timestamp ordering (clock skew, relay delivery latency,
+        # or missing timestamps can all make the old timestamp check unreliable).
         if existing:
             if existing.get('funding_txid') == co.funding_txid:
-                return
-            announce_ts = int(getattr(co, 'timestamp', 0))
-            if announce_ts and announce_ts <= int(existing.get('created_at') or 0):
-                logging.info(
-                    f'Channel: ignoring stale channel_open for {co.p2sh_address} '
-                    f'(announce_ts={announce_ts} <= local={existing.get("created_at")})',
-                    color='yellow')
                 return
         await asyncio.to_thread(
             self.networkDB.save_channel,
@@ -1243,8 +1237,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.info(
                 f'Channel: {p2sh_address} fully drained, awaiting refund',
                 color='yellow')
-        await asyncio.to_thread(
-            self.networkDB.clear_pending_commitment, p2sh_address)
         # ── Grant access for exactly this payment, not cumulative total ───────
         await self._grantChannelAccess(
             sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
@@ -1255,8 +1247,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             f'Channel: claimed {commitment.pay_amount_sats} sats '
             f'from {p2sh_address} — txid={txid}',
             color='green')
-        # Notify sender so they can update their funding UTXO
+        # Notify sender so they can update their funding UTXO.
+        # Fix A: if settlement is published to zero relays, the sender never
+        # learns the UTXO moved and keeps building commitments against a spent
+        # output. Keep pending_commitment so the operator can retry, and raise.
         sender_nostr_pubkey = channel.get('sender_nostr_pubkey')
+        published_count = 0
         if sender_nostr_pubkey:
             from satorilib.satori_nostr.models import ChannelSettlement
             settlement = ChannelSettlement(
@@ -1266,7 +1262,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 new_locked_sats=change_sats,
                 timestamp=settlement_ts,
             )
-            published_count = 0
             for relay_url, client in self._networkClients.items():
                 try:
                     await client.publish_settlement(settlement, sender_nostr_pubkey)
@@ -1277,19 +1272,29 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 except Exception as e:
                     logging.warning(
                         f'Channel: failed to publish settlement on {relay_url}: {e}')
-            if published_count == 0:
-                logging.error(
-                    f'Channel: settlement for {p2sh_address} published to 0 relays')
         else:
             logging.warning(
                 f'Channel: {p2sh_address} has no sender_nostr_pubkey — '
                 f'cannot notify sender of settlement')
-        # Tombstone the commitment on all relays
+        # Tombstone the commitment on all relays (backup signal for the
+        # sender's stale-tombstone detector even if settlement publish failed)
         for client in self._networkClients.values():
             try:
                 await client.remove_commitment(p2sh_address)
             except Exception:
                 pass
+        # Only clear the pending commitment if the sender was notified.
+        # On restart the stale-tombstone fix detects the UTXO mismatch and
+        # cleans up, so keeping it is safe and allows a manual retry.
+        if published_count > 0 or not sender_nostr_pubkey:
+            await asyncio.to_thread(
+                self.networkDB.clear_pending_commitment, p2sh_address)
+        else:
+            raise RuntimeError(
+                f'Channel: settlement for {p2sh_address} published to 0 '
+                f'relays — pending commitment kept for retry. The tx '
+                f'({txid}) was broadcast on-chain; only the Nostr '
+                f'notification failed.')
         return txid
 
     async def _claimChannelViaMundo(
