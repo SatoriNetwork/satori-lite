@@ -167,6 +167,13 @@ class NetworkDB:
                 "ALTER TABLE observations ADD COLUMN seq_num INTEGER")
             conn.execute(
                 "ALTER TABLE observations ADD COLUMN observed_at INTEGER")
+        # Migration: track what the subscriber has paid for (Fix F)
+        try:
+            conn.execute("SELECT last_paid_seq FROM subscriptions LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE subscriptions "
+                "ADD COLUMN last_paid_seq INTEGER NOT NULL DEFAULT 0")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS channels (
                 p2sh_address          TEXT PRIMARY KEY,
@@ -304,6 +311,17 @@ class NetworkDB:
         ).fetchone()
         return row is not None and row['active'] == 1
 
+    def update_last_paid_seq(
+        self, stream_name: str, provider_pubkey: str, seq_num: int
+    ) -> None:
+        """Advance the subscriber's last_paid_seq for a paid stream."""
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE subscriptions SET last_paid_seq = ?
+            WHERE stream_name = ? AND provider_pubkey = ? AND active = 1
+        """, (seq_num, stream_name, provider_pubkey))
+        conn.commit()
+
     def mark_stale(self, stream_name: str, provider_pubkey: str):
         """Mark a subscription as stale (provider not delivering)."""
         conn = self._get_conn()
@@ -391,6 +409,16 @@ class NetworkDB:
             ORDER BY received_at DESC LIMIT 1
         """, (stream_name, provider_pubkey)).fetchone()
         return row['received_at'] if row else None
+
+    def max_observation_seq(self, stream_name: str,
+                           provider_pubkey: str) -> int:
+        """Return the highest seq_num we've received for this stream."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT MAX(seq_num) as max_seq FROM observations
+            WHERE stream_name = ? AND provider_pubkey = ?
+        """, (stream_name, provider_pubkey)).fetchone()
+        return row['max_seq'] if row and row['max_seq'] is not None else 0
 
     def is_locally_stale(self, stream_name: str, provider_pubkey: str,
                          cadence_seconds: int,

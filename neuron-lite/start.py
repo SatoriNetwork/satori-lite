@@ -438,17 +438,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Pay for an observation via a channel (sender/buyer side).
 
-        Rate-limited: never pays more than once per cadence/2 seconds.
-        If an observation arrives during the cooldown, schedules exactly one
-        deferred payment at cooldown end. The deferred payment signals the
-        seller that the buyer is still subscribed. Streams with no cadence
-        (null/0) are not rate-limited.
+        Fix F — state-based trigger: fires a payment iff the subscriber's
+        persisted last_paid_seq is behind the incoming seq_num. This avoids
+        both over-paying on bursts and under-paying on replays/stale data.
+        The cooldown stays as a rate-limiter inside, not the entrance gate.
         """
         try:
-            sub = await asyncio.to_thread(
-                self.networkDB.is_subscribed, stream_name, provider_pubkey)
-            if not sub:
-                return
             conn_rows = await asyncio.to_thread(self.networkDB.get_active)
             subscription = next(
                 (s for s in conn_rows
@@ -457,16 +452,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 None)
             if not subscription or subscription.get('price_per_obs', 0) == 0:
                 return  # free stream
+            # State gate: only pay if we're behind
+            last_paid = subscription.get('last_paid_seq', 0) or 0
+            if seq_num <= last_paid:
+                return
             price_sats = subscription['price_per_obs']
             cadence = subscription.get('cadence_seconds') or 0
             cooldown = cadence / 2 if cadence > 0 else 0
             key = (stream_name, provider_pubkey)
             now = time.time()
-            last_paid = self._paymentCooldowns.get(key, 0)
-            if cooldown > 0 and (now - last_paid) < cooldown:
+            last_paid_time = self._paymentCooldowns.get(key, 0)
+            if cooldown > 0 and (now - last_paid_time) < cooldown:
                 # Inside cooldown — schedule one deferred payment at cooldown end
                 if key not in self._paymentDeferred:
-                    delay = cooldown - (now - last_paid)
+                    delay = cooldown - (now - last_paid_time)
                     loop = asyncio.get_event_loop()
                     self._paymentDeferred[key] = loop.call_later(
                         delay,
@@ -478,6 +477,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         f'in {delay:.1f}s (cooldown)')
                 return
             await self._channelPayNow(stream_name, provider_pubkey, price_sats)
+            # Advance last_paid_seq so we don't double-pay
+            await asyncio.to_thread(
+                self.networkDB.update_last_paid_seq,
+                stream_name, provider_pubkey, seq_num)
         except Exception as e:
             logging.warning(f'Channel: pay-for-observation failed: {e}')
 
@@ -500,6 +503,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 return
             price_sats = subscription['price_per_obs']
             await self._channelPayNow(stream_name, provider_pubkey, price_sats)
+            # Advance last_paid_seq to the highest observation we've received
+            max_seq = await asyncio.to_thread(
+                self.networkDB.max_observation_seq,
+                stream_name, provider_pubkey)
+            if max_seq > 0:
+                await asyncio.to_thread(
+                    self.networkDB.update_last_paid_seq,
+                    stream_name, provider_pubkey, max_seq)
         except Exception as e:
             logging.warning(f'Channel: deferred payment failed: {e}')
 
@@ -513,6 +524,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         Handles channel lookup, refund if exhausted, and open if none exists.
         """
+        await self._channelEnsureWallet()
         conn_rows = await asyncio.to_thread(self.networkDB.get_active)
         subscription = next(
             (s for s in conn_rows
@@ -1056,6 +1068,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             The broadcast txid
         """
         from satorilib.satori_nostr.models import ChannelCommitment, ChannelSettlement
+        await self._channelEnsureWallet()
         # Refresh UTXOs so PATH B can see our EVR for the mining fee
         await asyncio.to_thread(self.wallet.getUnspents)
         channel = await asyncio.to_thread(
@@ -1672,6 +1685,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return created_at + int(blocks) * 60
         return 0
 
+    async def _channelEnsureWallet(self) -> None:
+        """Ensure the wallet has a live Electrumx connection (Fix E).
+
+        Channel operations (open, refund, claim, pay) need the wallet online.
+        On startup the connection may not be ready yet; this retries once after
+        a short delay. Raises RuntimeError if the wallet is still unreachable
+        so the caller gets a clear error instead of a swallowed warning.
+        """
+        if self.walletManager.isConnected():
+            return
+        if await asyncio.to_thread(self.walletManager.connect):
+            return
+        # Retry once after a short wait — the wallet often recovers quickly
+        await asyncio.sleep(3)
+        if await asyncio.to_thread(self.walletManager.connect):
+            logging.info('Channel: wallet connected on retry', color='green')
+            return
+        raise RuntimeError(
+            'Wallet is not connected — channel operation aborted. '
+            'The Electrumx connection will be retried on the next cycle.')
+
     async def openChannel(
         self,
         receiver_pubkey: str,
@@ -1697,6 +1731,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The P2SH address of the new channel
         """
+        await self._channelEnsureWallet()
         await asyncio.to_thread(self.wallet.getUnspents)
         amount_satori = amount_sats / 1e8
         txid, script_payload = await asyncio.to_thread(
@@ -1786,6 +1821,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             p2sh_address: The channel to refund
             amount_sats: Amount to send (defaults to _channelFundSats())
         """
+        await self._channelEnsureWallet()
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
