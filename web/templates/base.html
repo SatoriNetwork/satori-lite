@@ -1279,6 +1279,7 @@
             padding: 0.5rem 1rem;
             font-size: 0.875rem;
             letter-spacing: -0.01em;
+            transition: filter 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
         }
         .btn-primary {
             background: var(--accent-gradient);
@@ -1286,7 +1287,7 @@
             color: #ffffff;
         }
         .btn-primary:hover {
-            background: var(--accent-secondary);
+            filter: brightness(1.1);
             transform: translateY(-1px);
             box-shadow: var(--shadow-sm);
         }
