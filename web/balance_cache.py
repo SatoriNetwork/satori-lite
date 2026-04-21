@@ -43,8 +43,7 @@ def _get_manager() -> WalletManager:
 def _fetch_snapshot() -> Dict[str, Any]:
     """Hit ElectrumX once and return a balance snapshot."""
     manager = _get_manager()
-    if not manager.connect():
-        log.warning("WalletManager.connect() returned False")
+    manager.connect()
 
     def _read(obj, label: str) -> tuple[float, float]:
         if not obj or not hasattr(obj, "getBalances"):
