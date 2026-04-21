@@ -1497,10 +1497,19 @@ def register_routes(app):
                 except Exception:
                     pred_to_obs_meta = {}
 
+            # Track which storage instance holds predictions for each stream.
+            # Active models write to their own model.storage; stored prediction
+            # tables live on the global engine storage. Using the wrong one
+            # yields empty results and undercounts 24h predictions.
+            storage_by_pred_uuid = {}
+
             for obs_uuid, model in stream_models.items():
                 pred_uuid = getattr(model, 'predictionStreamUuid', None)
                 if pred_uuid:
                     known_prediction_ids.add(pred_uuid)
+                    model_storage = getattr(model, 'storage', None)
+                    if model_storage is not None:
+                        storage_by_pred_uuid[pred_uuid] = model_storage
 
                 sub_stream = getattr(model, 'subscriptionStream', None)
                 stream_id = getattr(sub_stream, 'streamId', None) if sub_stream else None
@@ -1556,27 +1565,98 @@ def register_routes(app):
                         'stream_type': 'stored_prediction',
                     })
 
-                # Compute 24h prediction count.
+                # Compute 24h prediction count. Active-model predictions live
+                # on the per-model storage; stored-prediction tables live on
+                # the global engine storage. Timestamps may be stored as
+                # epoch seconds; auto-detect unit to avoid ns-misparsing.
+                def _parse_ts_series_24h(ts_series):
+                    parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                    numeric = pd.to_numeric(ts_series, errors='coerce')
+                    numeric_mask = numeric.notna()
+                    if numeric_mask.any():
+                        median_abs = float(numeric[numeric_mask].abs().median())
+                        if median_abs < 1e11:
+                            unit = 's'
+                        elif median_abs < 1e14:
+                            unit = 'ms'
+                        else:
+                            unit = 'ns'
+                        parsed.loc[numeric_mask] = pd.to_datetime(
+                            numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                        )
+                    return parsed
+
+                cutoff_24h = now_utc - pd.Timedelta(hours=24)
                 for item in streams:
                     pred_uuid = item.get('prediction_stream_uuid') or item.get('stream_uuid')
                     if not pred_uuid:
                         continue
-                    pdf = storage.getPredictions(pred_uuid)
-                    if pdf.empty:
+                    pred_storage = storage_by_pred_uuid.get(pred_uuid, storage)
+                    try:
+                        pdf = pred_storage.getPredictions(pred_uuid)
+                    except Exception:
+                        pdf = None
+                    if pdf is None or pdf.empty:
                         continue
-                    for ts in pdf.index:
-                        try:
-                            ts_dt = pd.to_datetime(ts, utc=True)
-                        except Exception:
-                            continue
-                        if ts_dt >= now_utc - pd.Timedelta(hours=24):
-                            predictions_24h_total += 1
+                    try:
+                        ts_series = pdf['ts'] if 'ts' in pdf.columns else pdf.index.to_series()
+                        parsed = _parse_ts_series_24h(ts_series)
+                        predictions_24h_total += int((parsed >= cutoff_24h).sum())
+                    except Exception:
+                        continue
+
+            # Find most recent observation across all active models so the UI
+            # can distinguish "engine idle waiting for data" from "engine
+            # actively receiving observations".
+            def _parse_ts_series(ts_series):
+                """Parse a ts column/index, auto-detecting s/ms/ns from magnitude.
+                Mirrors the normalize_ts_column logic in the performance endpoint."""
+                parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                numeric = pd.to_numeric(ts_series, errors='coerce')
+                numeric_mask = numeric.notna()
+                if numeric_mask.any():
+                    median_abs = float(numeric[numeric_mask].abs().median())
+                    if median_abs < 1e11:
+                        unit = 's'
+                    elif median_abs < 1e14:
+                        unit = 'ms'
+                    else:
+                        unit = 'ns'
+                    parsed.loc[numeric_mask] = pd.to_datetime(
+                        numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                    )
+                return parsed
+
+            last_obs_ts = None
+            try:
+                import pandas as pd  # ensure available even if storage is None
+                for obs_uuid, model in stream_models.items():
+                    model_storage = getattr(model, 'storage', None)
+                    if model_storage is None:
+                        continue
+                    try:
+                        df = model_storage.getStreamData(obs_uuid)
+                    except Exception:
+                        df = None
+                    if df is None or df.empty:
+                        continue
+                    try:
+                        ts_series = df['ts'] if 'ts' in df.columns else df.index.to_series()
+                        parsed = _parse_ts_series(ts_series)
+                        max_ts = parsed.max()
+                        if pd.notna(max_ts) and (last_obs_ts is None or max_ts > last_obs_ts):
+                            last_obs_ts = max_ts
+                    except Exception:
+                        continue
+            except Exception:
+                last_obs_ts = None
 
             return jsonify({
                 'streams': sorted(streams, key=lambda x: (x.get('stream_name') or '').lower()),
                 'count': len(streams),
                 'active_model_count': len(stream_models),
                 'predictions_24h_total': predictions_24h_total,
+                'last_observation_ts': last_obs_ts.isoformat() if last_obs_ts is not None else None,
             })
         except Exception as e:
             logger.error(f"Error getting engine streams: {e}")
@@ -2223,6 +2303,8 @@ def register_routes(app):
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
         startup.networkDB.unsubscribe(data['stream_name'], data['nostr_pubkey'])
+        # Notify the provider so they stop encrypting for us (Fix G)
+        startup.publishUnsubscribeSync(data['stream_name'], data['nostr_pubkey'])
         pred_name = data['stream_name'] + '_pred'
         startup.networkDB.remove_publication(pred_name)
         startup.tombstonePublicationSync(pred_name)

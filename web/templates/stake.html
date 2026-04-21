@@ -1,25 +1,626 @@
 {% extends "base.html" %}
 
-{% block title %}Satori - Stake Management{% endblock %}
+{% block title %}Satori - Stake{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ── Page shell (same family as /local-predictions & /marketplace) ── */
+    .stk-page {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 1.75rem 1.5rem 4rem;
+    }
+
+    /* ── Hero ─────────────────────────────────────────────── */
+    .stk-hero {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        padding: 0 0.25rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 1.5rem;
+    }
+    .stk-hero-title { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+    .stk-hero-eyebrow {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--text-muted);
+        font-weight: 600;
+    }
+    .stk-hero-h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin: 0;
+        line-height: 1.05;
+    }
+    .stk-hero-h1 .stk-accent {
+        background: var(--accent-gradient);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .stk-hero-sub {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        max-width: 62ch;
+        margin: 0.4rem 0 0;
+    }
+    .stk-hero-meta {
+        display: flex; flex-wrap: wrap;
+        align-items: center; gap: 0.4rem;
+    }
+    .stk-meta-pill {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 999px;
+        padding: 0.32rem 0.75rem;
+        font-size: 0.76rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+    .stk-meta-pill strong { color: var(--text-primary); font-weight: 700; }
+    .stk-meta-pill .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #9ca3af;
+    }
+    .stk-meta-pill.is-active .dot {
+        background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.6);
+    }
+    .stk-meta-pill.is-pool .dot {
+        background: #5a5aff; box-shadow: 0 0 8px rgba(90,90,255,0.6);
+    }
+
+    /* ── Card-header rhythm (matches predictions page) ─────── */
+    .stk-card-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 0.6rem;
+    }
+    .stk-card-head h5 {
+        margin: 0;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-secondary);
+        display: inline-flex; align-items: center; gap: 0.45rem;
+    }
+    .stk-card-head h5 .material-icons {
+        font-size: 15px; opacity: 0.55; color: var(--text-primary);
+    }
+    .stk-card-head .stk-head-actions {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .stk-card-head .drag-handle {
+        opacity: 0.25;
+        transition: opacity 0.12s;
+    }
+    .stk-card-head .drag-handle:hover { opacity: 0.6; }
+
+    /* ── Section labels inside cards ──────────────────────── */
+    .stk-section-label {
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+    }
+    .stk-section-label .material-icons { font-size: 13px; opacity: 0.55; vertical-align: middle; }
+    .stk-section + .stk-section {
+        margin-top: 1.2rem;
+        padding-top: 1.2rem;
+        border-top: 1px dashed var(--border-color);
+    }
+
+    /* ── Big status block (Pool staking state) ────────────── */
+    .stk-status {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        padding: 0.9rem 1rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .stk-status .stk-status-dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #9ca3af;
+        flex-shrink: 0;
+    }
+    .stk-status .stk-status-body { flex: 1; min-width: 0; }
+    .stk-status .stk-status-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        letter-spacing: -0.01em;
+    }
+    .stk-status .stk-status-sub {
+        font-size: 0.74rem;
+        color: var(--text-muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        margin-top: 0.15rem;
+    }
+    .stk-status.is-staking {
+        background: linear-gradient(180deg,
+            color-mix(in oklab, #22c55e 10%, var(--bg-input)) 0%,
+            var(--bg-input) 100%);
+        border-color: rgba(34, 197, 94, 0.35);
+    }
+    .stk-status.is-staking .stk-status-dot {
+        background: #22c55e; box-shadow: 0 0 10px rgba(34,197,94,0.55);
+    }
+
+    /* ── Pool list ────────────────────────────────────────── */
+    .stk-pool-list {
+        max-height: 240px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin-top: 0.3rem;
+        padding-right: 0.15rem;
+    }
+    .stk-pool-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.4rem 0.8rem;
+        align-items: center;
+        padding: 0.6rem 0.75rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+    .stk-pool-item:hover {
+        transform: translateY(-1px);
+        border-color: var(--border-color-focus);
+        background: var(--bg-input-focus);
+    }
+    .stk-pool-item.is-selected {
+        border-color: rgba(90, 90, 255, 0.5);
+        background: rgba(90, 90, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(90, 90, 255, 0.2);
+    }
+    .stk-pool-addr {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.74rem;
+        color: var(--text-primary);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .stk-pool-sub {
+        font-size: 0.66rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.1rem;
+    }
+    .stk-pool-right {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.3rem;
+    }
+    .stk-pool-alias {
+        font-size: 0.64rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding: 0.18rem 0.5rem;
+        border-radius: 5px;
+        background: rgba(90, 90, 255, 0.14);
+        color: var(--accent-primary);
+        border: 1px solid rgba(90, 90, 255, 0.3);
+        max-width: 140px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .stk-pool-fee {
+        display: inline-flex; align-items: center; gap: 0.25rem;
+        font-size: 0.78rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+    }
+    .stk-pool-fee .material-icons { font-size: 12px; opacity: 0.7; }
+    .stk-empty {
+        padding: 0.85rem 1rem;
+        background: var(--bg-input);
+        border: 1px dashed var(--border-color);
+        border-radius: 10px;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        text-align: center;
+    }
+
+    /* ── Address input row with inline clear ──────────────── */
+    .stk-input-row { position: relative; }
+    .stk-input-row .form-control {
+        padding-right: 2.2rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.84rem;
+        letter-spacing: -0.01em;
+    }
+    .stk-input-clear {
+        position: absolute;
+        top: 50%;
+        right: 0.55rem;
+        transform: translateY(-50%);
+        background: transparent;
+        border: 0;
+        color: var(--text-muted);
+        display: none;
+        align-items: center; justify-content: center;
+        cursor: pointer;
+        padding: 0.25rem;
+        border-radius: 999px;
+        transition: color 0.15s ease, background 0.15s ease;
+    }
+    .stk-input-row.is-filled .stk-input-clear { display: inline-flex; }
+    .stk-input-clear:hover {
+        color: var(--text-primary);
+        background: rgba(255,255,255,0.05);
+    }
+    [data-theme="light"] .stk-input-clear:hover { background: rgba(0,0,0,0.05); }
+    .stk-input-clear .material-icons { font-size: 16px; }
+
+    /* ── Primary/danger action buttons ────────────────────── */
+    .stk-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.55rem 0.95rem;
+        border-radius: 9px;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-primary);
+        font-size: 0.83rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    }
+    .stk-btn:hover:not(:disabled) {
+        transform: translateY(-1px);
+        border-color: var(--border-color-focus);
+    }
+    .stk-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+    }
+    .stk-btn .material-icons { font-size: 16px; }
+    .stk-btn-primary {
+        background: var(--accent-gradient);
+        border-color: transparent;
+        color: #fff;
+    }
+    .stk-btn-primary:hover:not(:disabled) {
+        filter: brightness(1.08);
+    }
+    .stk-btn-danger {
+        color: #ff6b7a;
+        border-color: rgba(220, 53, 69, 0.35);
+        background: rgba(220, 53, 69, 0.06);
+    }
+    .stk-btn-danger:hover:not(:disabled) {
+        color: #ff3b50;
+        border-color: rgba(220, 53, 69, 0.55);
+        background: rgba(220, 53, 69, 0.1);
+    }
+    .stk-btn-ghost {
+        background: transparent;
+    }
+
+    /* ── Pool-commission slider (minimal, number-first) ──── */
+    .stk-commission {
+        --stk-comm-accent: var(--accent-primary);
+        padding: 0.2rem 0.1rem 0;
+    }
+    .stk-commission-value {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.3rem;
+        padding: 0.2rem 0.4rem;
+        margin: 0 0 0.85rem -0.4rem;
+        border-radius: 6px;
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+    }
+    .stk-commission-value:hover {
+        background: var(--bg-input);
+    }
+    .stk-commission-value:focus-within {
+        background: var(--bg-input-focus);
+        box-shadow: 0 0 0 2px color-mix(in oklab, var(--stk-comm-accent) 22%, transparent);
+    }
+    .stk-commission-value input {
+        width: 2.2ch;
+        min-width: 0;
+        background: transparent;
+        border: 0;
+        outline: none;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+        font-size: 2.1rem;
+        letter-spacing: -0.04em;
+        color: var(--text-primary);
+        text-align: right;
+        padding: 0;
+        line-height: 1;
+        -moz-appearance: textfield;
+        caret-color: var(--stk-comm-accent);
+    }
+    /* Two digits when value is in the 10-99 range (so "73%" hugs tight) */
+    .stk-commission-value input:not(:placeholder-shown) {
+        width: auto;
+        min-width: 1.1ch;
+        field-sizing: content; /* supported browsers auto-fit to content */
+    }
+    .stk-commission-value input::-webkit-outer-spin-button,
+    .stk-commission-value input::-webkit-inner-spin-button {
+        -webkit-appearance: none; margin: 0;
+    }
+    .stk-commission-value input::placeholder { color: var(--text-muted); opacity: 0.45; }
+    .stk-commission-unit {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-weight: 500;
+        font-size: 1.15rem;
+        color: var(--text-muted);
+        letter-spacing: 0;
+    }
+
+    /* Range input — everything in one element, no decorative wrapper */
+    .stk-commission-range {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 20px;
+        background: transparent;
+        margin: 0;
+        padding: 0;
+        display: block;
+        cursor: pointer;
+        outline: none;
+        --stk-comm-fill: 0%;
+    }
+    .stk-commission-range:focus { outline: none; }
+
+    /* WebKit track — single-color fill up to the thumb */
+    .stk-commission-range::-webkit-slider-runnable-track {
+        height: 3px;
+        border-radius: 999px;
+        background: linear-gradient(
+            90deg,
+            var(--stk-comm-accent) 0 var(--stk-comm-fill),
+            var(--border-color) var(--stk-comm-fill) 100%);
+    }
+    /* WebKit thumb — small, precise, single accent ring */
+    .stk-commission-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px; height: 16px;
+        margin-top: -6.5px; /* center on 3px track */
+        border-radius: 50%;
+        background: var(--bg-primary);
+        border: 2px solid var(--stk-comm-accent);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        transition: transform 0.12s ease;
+    }
+    .stk-commission-range:hover::-webkit-slider-thumb,
+    .stk-commission-range:focus-visible::-webkit-slider-thumb {
+        transform: scale(1.12);
+    }
+    .stk-commission-range:active::-webkit-slider-thumb {
+        transform: scale(0.94);
+    }
+
+    /* Firefox */
+    .stk-commission-range::-moz-range-track {
+        height: 3px;
+        border-radius: 999px;
+        background: var(--border-color);
+    }
+    .stk-commission-range::-moz-range-progress {
+        height: 3px;
+        border-radius: 999px;
+        background: var(--stk-comm-accent);
+    }
+    .stk-commission-range::-moz-range-thumb {
+        width: 14px; height: 14px;
+        border-radius: 50%;
+        background: var(--bg-primary);
+        border: 2px solid var(--stk-comm-accent);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        transition: transform 0.12s ease;
+    }
+    .stk-commission-range:hover::-moz-range-thumb,
+    .stk-commission-range:focus-visible::-moz-range-thumb {
+        transform: scale(1.12);
+    }
+
+    /* Axis — just two faint numerals at the ends */
+    .stk-commission-axis {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 0.2rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.68rem;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.04em;
+    }
+
+    /* ── Address chips (workers / lenders) ────────────────── */
+    .stk-addr-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        max-height: 260px;
+        overflow-y: auto;
+    }
+    .stk-addr-row {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 0.5rem;
+        align-items: center;
+        padding: 0.45rem 0.55rem 0.45rem 0.6rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 9px;
+        min-width: 0;
+    }
+    .stk-addr-row .stk-addr-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--accent-primary);
+        opacity: 0.8;
+    }
+    .stk-addr-row .stk-addr-body { min-width: 0; }
+    .stk-addr-row .stk-addr-code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.75rem;
+        color: var(--text-primary);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        display: block;
+    }
+    .stk-addr-row .stk-addr-alias {
+        font-size: 0.64rem;
+        font-weight: 700;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        margin-top: 2px;
+        display: inline-block;
+    }
+    .stk-addr-remove {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--text-muted);
+        border-radius: 6px;
+        padding: 0.25rem 0.3rem;
+        cursor: pointer;
+        display: inline-flex;
+        transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    .stk-addr-remove:hover {
+        color: #ff6b7a;
+        border-color: rgba(220, 53, 69, 0.35);
+        background: rgba(220, 53, 69, 0.08);
+    }
+    .stk-addr-remove .material-icons { font-size: 15px; }
+
+    /* ── Add worker input-button combo ────────────────────── */
+    .stk-combo {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.5rem;
+    }
+    .stk-combo .form-control {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.84rem;
+    }
+
+    /* ── Dimmed state (when staking) ──────────────────────── */
+    .stk-management.is-dimmed .stk-section:not(.stk-notice-section),
+    #poolManagementBody.dimmed > :not(.pool-staking-notice) {
+        opacity: 0.45;
+        pointer-events: auto;
+    }
+    #poolManagementBody.dimmed .pool-staking-notice { opacity: 1; }
+    .stk-notice {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.55rem;
+        padding: 0.7rem 0.85rem;
+        background: rgba(250, 204, 21, 0.08);
+        border: 1px solid rgba(250, 204, 21, 0.3);
+        border-radius: 10px;
+        color: #fbbf24;
+        font-size: 0.82rem;
+        line-height: 1.35;
+    }
+    .stk-notice .material-icons { font-size: 18px; margin-top: 1px; }
+    [data-theme="light"] .stk-notice { color: #b45309; }
+
+    /* ── Audit downloads ──────────────────────────────────── */
+    .stk-audit-row {
+        display: flex; flex-wrap: wrap; gap: 0.5rem;
+    }
+    .stk-audit-hint {
+        font-size: 0.73rem;
+        color: var(--text-muted);
+        margin-top: 0.55rem;
+        line-height: 1.35;
+    }
+
+    /* ── Status alert tuning ──────────────────────────────── */
+    #stakingStatus {
+        display: none;
+    }
+
+    /* ── Fade-up entrance ─────────────────────────────────── */
+    .dashboard-widget-col {
+        animation: stk-fade-up 0.4s cubic-bezier(.2,.8,.2,1) both;
+    }
+    .dashboard-widget-col:nth-child(1) { animation-delay: 0.04s; }
+    .dashboard-widget-col:nth-child(2) { animation-delay: 0.12s; }
+    @keyframes stk-fade-up {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Responsive tune-up ───────────────────────────────── */
+    @media (max-width: 640px) {
+        .stk-page { padding: 1.25rem 1rem 3rem; }
+        .stk-hero-h1 { font-size: 1.55rem; }
+        .stk-commission-value input { font-size: 1.8rem; }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<!-- Navigation -->
 {% include 'partials/navbar.html' %}
 
-<div class="container-fluid py-4">
+<div class="stk-page">
+
+    <!-- Hero -->
+    <header class="stk-hero">
+        <div class="stk-hero-title">
+            <span class="stk-hero-eyebrow">Stake &amp; Pools</span>
+            <h1 class="stk-hero-h1">Stake <span class="stk-accent">Management</span></h1>
+            <p class="stk-hero-sub">
+                Delegate your SATORI stake to a pool, or run your own pool and distribute rewards
+                across a set of worker neurons.
+            </p>
+        </div>
+        <div class="stk-hero-meta">
+            <span class="stk-meta-pill" id="stkStakingPill">
+                <span class="dot"></span>
+                <span id="stkStakingPillLabel">Not staking</span>
+            </span>
+            <span class="stk-meta-pill" id="stkPoolPill">
+                <span class="dot"></span>
+                <span id="stkPoolPillLabel">Pool closed</span>
+            </span>
+        </div>
+    </header>
+
     <div class="row g-4" id="stakeLayoutRow">
 
-        <!-- Pool Staking Section -->
+        <!-- ── Pool Staking ───────────────────────────────── -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="stake_pool_staking">
             <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">handshake</i>
-                        Pool Staking
-                    </h5>
-                    <div class="d-flex align-items-center gap-2">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAvailablePools()">
-                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                <div class="card-header stk-card-head">
+                    <h5><i class="material-icons">handshake</i>Pool Staking</h5>
+                    <div class="stk-head-actions">
+                        <button class="stk-btn stk-btn-ghost" onclick="loadAvailablePools()" title="Reload pools" aria-label="Reload pools" type="button">
+                            <i class="material-icons" style="font-size: 16px;">refresh</i>
                         </button>
                         <span class="text-muted drag-handle" title="Drag to reorder">
                             <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
@@ -27,109 +628,163 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Status</label>
+
+                    <div class="stk-section">
+                        <label class="stk-section-label">Current status</label>
+                        <div class="stk-status" id="stkStatusBlock">
+                            <span class="stk-status-dot" id="stkStatusDot"></span>
+                            <div class="stk-status-body">
+                                <div class="stk-status-title" id="stkStatusTitle">Loading...</div>
+                                <div class="stk-status-sub" id="stkStatusSub" style="display:none;"></div>
+                            </div>
+                        </div>
+                        <!-- legacy alert kept (hidden) so JS can still write to it -->
                         <div id="stakingStatus" class="alert alert-secondary">Loading...</div>
                     </div>
 
-                    <!-- Available Pools List -->
-                    <div class="mb-3">
-                        <label class="form-label">Available Open Pools</label>
-                        <div id="availablePoolsList" class="list-group mb-2" style="max-height: 200px; overflow-y: auto;">
-                            <div class="text-muted small p-2">Loading pools...</div>
+                    <div class="stk-section">
+                        <label class="stk-section-label">
+                            <i class="material-icons">groups_2</i>
+                            Available open pools
+                        </label>
+                        <div id="availablePoolsList" class="stk-pool-list">
+                            <div class="stk-empty">Loading pools...</div>
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label">Pool Address</label>
+                    <div class="stk-section">
+                        <label class="stk-section-label" for="poolAddress">Pool address</label>
                         <span class="d-inline-block w-100" id="poolAddressWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
-                            <input type="text" class="form-control" id="poolAddress" placeholder="Enter pool address or select from list above">
+                            <div class="stk-input-row" id="stkPoolAddressRow">
+                                <input type="text" class="form-control" id="poolAddress"
+                                       placeholder="Paste a pool address (E…) or pick from the list above">
+                                <button class="stk-input-clear" type="button" title="Clear" aria-label="Clear"
+                                        onclick="clearPoolAddress()">
+                                    <i class="material-icons">close</i>
+                                </button>
+                            </div>
                         </span>
+
+                        <div class="d-flex gap-2 mt-3">
+                            <span class="d-inline-block" id="addStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                                <button class="stk-btn stk-btn-primary" id="addStakeBtn" onclick="addStakeToPool()" type="button">
+                                    <i class="material-icons">add</i>
+                                    Stake to pool
+                                </button>
+                            </span>
+                            <span class="d-inline-block" id="removeStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                                <button class="stk-btn stk-btn-danger" id="removeStakeBtn" onclick="removeStakeFromPool()" type="button">
+                                    <i class="material-icons">logout</i>
+                                    Unstake
+                                </button>
+                            </span>
+                        </div>
                     </div>
-                    <div class="d-flex gap-2">
-                        <span class="d-inline-block" id="addStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
-                            <button class="btn btn-primary" id="addStakeBtn" onclick="addStakeToPool()">Add Stake to Pool</button>
-                        </span>
-                        <span class="d-inline-block" id="removeStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
-                            <button class="btn btn-danger" id="removeStakeBtn" onclick="removeStakeFromPool()">Remove Stake from Pool</button>
-                        </span>
-                    </div>
+
                 </div>
             </div>
         </div>
 
-        <!-- Pool Management Section -->
+        <!-- ── Pool Management ─────────────────────────────── -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="stake_pool_management">
-            <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2">groups</i>
-                        Pool Management
-                    </h5>
+            <div class="card h-100 stk-management">
+                <div class="card-header stk-card-head">
+                    <h5><i class="material-icons">groups</i>Pool Management</h5>
                     <span class="text-muted drag-handle" title="Drag to reorder">
                         <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
                     </span>
                 </div>
                 <div class="card-body" id="poolManagementBody">
-                    <!-- Pool Staking Notice (shown when user is staking to another pool) -->
-                    <div class="alert alert-warning pool-staking-notice mb-3" id="poolStakingNotice" style="display: none;">
-                        <i class="material-icons align-middle me-1" style="font-size: 18px;">info</i>
-                        <strong>Note:</strong> Staking to a pool disables this neuron to act as a pool.
+
+                    <div class="stk-section stk-notice-section">
+                        <div class="stk-notice pool-staking-notice" id="poolStakingNotice" style="display: none;">
+                            <i class="material-icons">info</i>
+                            <div>
+                                <strong>Note:</strong> staking to a pool disables this neuron from acting as a pool itself.
+                                Unstake first to enable pool management.
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label">Pool Commission Fee (%)</label>
+                    <div class="stk-section">
+                        <label class="stk-section-label" for="poolCommission">Pool commission fee</label>
                         <span class="d-inline-block w-100" id="poolCommissionWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
-                            <div class="input-group">
-                                <input type="number" class="form-control" id="poolCommission"
-                                       placeholder="0 = closed, 1-100 = pool fee %"
-                                       min="0" max="100" step="1"
-                                       onchange="setPoolCommission()"
-                                       onkeypress="if(event.key === 'Enter') { setPoolCommission(); event.preventDefault(); }">
-                                <span class="input-group-text">%</span>
-                            </div>
-                        </span>
-                        <small class="form-text text-muted">
-                            Percentage pool keeps as commission fee. Empty or 0 = pool closed. 1-100 = pool open, pool takes that %.
-                        </small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Workers</label>
-                        <div id="workerList" class="mb-3">
-                            <p class="text-muted">Loading...</p>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Add Worker</label>
-                        <span class="d-inline-block w-100" id="addWorkerWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
-                            <div class="input-group">
-                                <input type="text" class="form-control" id="newWorkerAddress" placeholder="Worker address">
-                                <button class="btn btn-primary" id="addWorkerBtn" onclick="addWorker()">Add</button>
+                            <div class="stk-commission">
+                                <div class="stk-commission-value">
+                                    <input type="number" id="poolCommission"
+                                           placeholder="0"
+                                           min="0" max="100" step="1"
+                                           aria-label="Pool commission percentage"
+                                           oninput="updateCommissionCursor()"
+                                           onchange="setPoolCommission()"
+                                           onkeypress="if(event.key === 'Enter') { setPoolCommission(); event.preventDefault(); }">
+                                    <span class="stk-commission-unit">%</span>
+                                </div>
+                                <input type="range" id="poolCommissionRange" class="stk-commission-range"
+                                       min="0" max="100" step="1" value="0"
+                                       style="--stk-comm-fill: 0%"
+                                       aria-label="Pool commission slider"
+                                       oninput="this.style.setProperty('--stk-comm-fill', this.value + '%'); syncCommissionFromRange(this.value)"
+                                       onchange="setPoolCommission()">
+                                <div class="stk-commission-axis" aria-hidden="true">
+                                    <span>0</span>
+                                    <span>100</span>
+                                </div>
                             </div>
                         </span>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Pool Stakers</label>
-                        <div id="lenderList" class="mb-3">
-                            <p class="text-muted">Loading...</p>
+
+                    <div class="stk-section">
+                        <label class="stk-section-label">
+                            <i class="material-icons">engineering</i>
+                            Workers
+                        </label>
+                        <div id="workerList" class="stk-addr-list">
+                            <div class="stk-empty">Loading...</div>
+                        </div>
+                        <div class="mt-3">
+                            <span class="d-inline-block w-100" id="addWorkerWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
+                                <div class="stk-combo">
+                                    <input type="text" class="form-control" id="newWorkerAddress" placeholder="Worker address (E…)">
+                                    <button class="stk-btn stk-btn-primary" id="addWorkerBtn" onclick="addWorker()" type="button">
+                                        <i class="material-icons">add</i>
+                                        Add
+                                    </button>
+                                </div>
+                            </span>
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Pool Audits</label>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-outline-primary btn-sm" onclick="downloadWorkersAudit()">
-                                <i class="material-icons align-middle" style="font-size: 16px;">download</i>
-                                Download Workers Audit
+
+                    <div class="stk-section">
+                        <label class="stk-section-label">
+                            <i class="material-icons">account_balance</i>
+                            Pool stakers
+                        </label>
+                        <div id="lenderList" class="stk-addr-list">
+                            <div class="stk-empty">Loading...</div>
+                        </div>
+                    </div>
+
+                    <div class="stk-section">
+                        <label class="stk-section-label">
+                            <i class="material-icons">description</i>
+                            Pool audits
+                        </label>
+                        <div class="stk-audit-row">
+                            <button class="stk-btn" onclick="downloadWorkersAudit()" type="button">
+                                <i class="material-icons">download</i>
+                                Workers audit
                             </button>
-                            <button class="btn btn-outline-primary btn-sm" onclick="downloadLendersAudit()">
-                                <i class="material-icons align-middle" style="font-size: 16px;">download</i>
-                                Download Pool Stakers Audit
+                            <button class="stk-btn" onclick="downloadLendersAudit()" type="button">
+                                <i class="material-icons">download</i>
+                                Pool stakers audit
                             </button>
                         </div>
-                        <small class="form-text text-muted">
-                            Download the latest audit files showing worker distributions and pool staker commissions.
-                        </small>
+                        <p class="stk-audit-hint">
+                            Latest CSV exports of worker distributions and pool-staker commissions.
+                        </p>
                     </div>
+
                 </div>
             </div>
         </div>
@@ -137,12 +792,14 @@
     </div>
 </div>
 
-<!-- Toast for notifications -->
+<!-- Toast -->
 <div class="toast-container position-fixed bottom-0 end-0 p-3">
     <div id="statusToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
         <div class="toast-body" id="toastMessage"></div>
     </div>
 </div>
+
+{% include 'partials/footer.html' %}
 {% endblock %}
 
 {% block extra_js %}
@@ -202,22 +859,16 @@
         });
     }
 
-    // Helper function to format balance values (removes trailing zeros)
     function formatBalance(value) {
         if (value === undefined || value === null) return '--';
         return parseFloat(parseFloat(value).toFixed(8)).toString();
     }
 
-    // Get color for commission percentage (light green at 0% to red at 100%)
     function getCommissionColor(percentage) {
-        // Clamp percentage between 0 and 100
         const p = Math.max(0, Math.min(100, percentage));
-
-        // Light green (144, 238, 144) at 0% to red (220, 53, 69) at 100%
         const r = Math.round(144 + (220 - 144) * (p / 100));
         const g = Math.round(238 + (53 - 238) * (p / 100));
         const b = Math.round(144 + (69 - 144) * (p / 100));
-
         return `rgb(${r}, ${g}, ${b})`;
     }
 
@@ -234,17 +885,14 @@
         try {
             const options = {
                 method: method,
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+                headers: { 'Content-Type': 'application/json' }
             };
             if (data) {
                 options.body = JSON.stringify(data);
             }
             const response = await fetch(API_URL + endpoint, options);
-
             if (!response.ok) {
-                const errorData = await response.json();
+                const errorData = await response.json().catch(() => ({}));
                 showToast(errorData.detail || 'API request failed', true);
                 return null;
             }
@@ -262,14 +910,12 @@
         if (percentage >= 1.0) return 0;
         return Math.round(86400 * Math.pow(1 - percentage, 7));
     }
-
     function secondsToSlider(seconds) {
         if (seconds >= 86400) return 0;
         if (seconds <= 0) return 100;
         const percentage = 1 - Math.pow(seconds / 86400, 1 / 7);
         return Math.round(percentage * 100);
     }
-
     function formatDelay(seconds) {
         if (seconds === 0) return "Continuous";
         if (seconds < 60) return `${seconds} seconds`;
@@ -277,7 +923,6 @@
         if (seconds < 86400) return `${Math.round(seconds / 3600)} hours`;
         return `${Math.round(seconds / 86400)} days`;
     }
-
     function updateTrainingDelayLabel(sliderValue) {
         const seconds = sliderToSeconds(sliderValue);
         const label = document.getElementById('trainingDelayLabel');
@@ -285,7 +930,6 @@
             label.textContent = formatDelay(seconds);
         }
     }
-
     async function setTrainingDelay(sliderValue) {
         const seconds = sliderToSeconds(sliderValue);
         const result = await apiCall('/engine/training-delay', 'POST', { delay_seconds: seconds });
@@ -293,7 +937,6 @@
             showToast(`Training frequency updated: ${formatDelay(seconds)}`);
         }
     }
-
     async function loadTrainingDelay() {
         const slider = document.getElementById('trainingDelaySlider');
         if (!slider) return;
@@ -305,8 +948,36 @@
         }
     }
 
+    /* ── Hero meta ─────────────────────────────────────── */
+    function updateStakingHeroPill() {
+        const pill = document.getElementById('stkStakingPill');
+        const label = document.getElementById('stkStakingPillLabel');
+        if (!pill || !label) return;
+        pill.classList.remove('is-active');
+        if (isStakingToPool) {
+            pill.classList.add('is-active');
+            label.textContent = 'Staking to pool';
+        } else {
+            label.textContent = 'Not staking';
+        }
+    }
+    function updatePoolHeroPill() {
+        const pill = document.getElementById('stkPoolPill');
+        const label = document.getElementById('stkPoolPillLabel');
+        if (!pill || !label) return;
+        pill.classList.remove('is-pool');
+        const input = document.getElementById('poolCommission');
+        const raw = input && input.value !== '' ? parseInt(input.value) : null;
+        if (raw && raw > 0) {
+            pill.classList.add('is-pool');
+            label.textContent = `Pool open · ${raw}% fee`;
+        } else {
+            label.textContent = 'Pool closed';
+        }
+    }
+
+    /* ── Mutual exclusion ──────────────────────────────── */
     function updateMutualExclusionUI() {
-        // Pool Staking elements
         const poolAddressInput = document.getElementById('poolAddress');
         const poolAddressWrapper = document.getElementById('poolAddressWrapper');
         const addStakeBtn = document.getElementById('addStakeBtn');
@@ -314,13 +985,11 @@
         const removeStakeBtn = document.getElementById('removeStakeBtn');
         const removeStakeBtnWrapper = document.getElementById('removeStakeBtnWrapper');
 
-        // Pool Staking inputs are always enabled
         poolAddressInput.disabled = false;
         poolAddressWrapper.setAttribute('title', '');
         addStakeBtn.disabled = false;
         addStakeBtnWrapper.setAttribute('title', '');
 
-        // Remove button only enabled if actually staking to a pool
         if (isStakingToPool) {
             removeStakeBtn.disabled = false;
             removeStakeBtnWrapper.setAttribute('title', '');
@@ -329,41 +998,70 @@
             removeStakeBtnWrapper.setAttribute('title', 'You are not currently staking to a pool');
         }
 
-        // If staking to pool, dim Pool Management card and show notice
         const poolManagementBody = document.getElementById('poolManagementBody');
         const poolStakingNotice = document.getElementById('poolStakingNotice');
-
         if (isStakingToPool) {
             poolManagementBody.classList.add('dimmed');
-            poolStakingNotice.style.display = 'block';
+            poolStakingNotice.style.display = 'flex';
         } else {
             poolManagementBody.classList.remove('dimmed');
             poolStakingNotice.style.display = 'none';
         }
+
+        updateStakingHeroPill();
+        updatePoolHeroPill();
+        reflectPoolAddressFilled();
+    }
+
+    function reflectPoolAddressFilled() {
+        const row = document.getElementById('stkPoolAddressRow');
+        const input = document.getElementById('poolAddress');
+        if (!row || !input) return;
+        row.classList.toggle('is-filled', !!input.value.trim());
+    }
+
+    function clearPoolAddress() {
+        const input = document.getElementById('poolAddress');
+        if (!input) return;
+        input.value = '';
+        reflectPoolAddressFilled();
+        // de-select any selected pool in the list
+        document.querySelectorAll('.stk-pool-item.is-selected')
+            .forEach((el) => el.classList.remove('is-selected'));
     }
 
     async function loadStakingStatus() {
-        // Get wallet address first
         const walletData = await apiCall('/wallet/address');
+        const statusEl = document.getElementById('stakingStatus');
+        const title = document.getElementById('stkStatusTitle');
+        const sub = document.getElementById('stkStatusSub');
+        const block = document.getElementById('stkStatusBlock');
+
+        block.classList.remove('is-staking');
         if (!walletData || !walletData.wallet_address) {
-            const statusEl = document.getElementById('stakingStatus');
             statusEl.className = 'alert alert-warning';
             statusEl.textContent = 'Unable to load staking status';
+            title.textContent = 'Unable to load staking status';
+            sub.style.display = 'none';
             return;
         }
 
-        // Query lender status with wallet address
         const result = await apiCall(`/lender/status?wallet_address=${encodeURIComponent(walletData.wallet_address)}`);
-        const statusEl = document.getElementById('stakingStatus');
         if (result && result.pool_address) {
             isStakingToPool = true;
             statusEl.className = 'alert alert-success';
             statusEl.textContent = 'Staking with pool: ' + result.pool_address;
+            title.textContent = 'Staking with a pool';
+            sub.textContent = result.pool_address;
+            sub.style.display = '';
+            block.classList.add('is-staking');
             document.getElementById('poolAddress').value = result.pool_address;
         } else {
             isStakingToPool = false;
             statusEl.className = 'alert alert-secondary';
             statusEl.textContent = 'Not staking with a pool';
+            title.textContent = 'Not staking with a pool';
+            sub.style.display = 'none';
             document.getElementById('poolAddress').value = '';
         }
         updateMutualExclusionUI();
@@ -396,38 +1094,43 @@
 
     async function loadAvailablePools() {
         const listEl = document.getElementById('availablePoolsList');
-        listEl.innerHTML = '<div class="text-muted small p-2">Loading pools...</div>';
+        listEl.innerHTML = '<div class="stk-empty">Loading pools...</div>';
 
         const result = await apiCall('/pool/open', 'GET');
+        const currentAddr = (document.getElementById('poolAddress').value || '').trim();
+
         if (result && result.pools && result.pools.length > 0) {
             listEl.innerHTML = '';
-            // Sort pools by increasing commission fee percentage
             result.pools.sort((a, b) => a.commission - b.commission);
-            result.pools.forEach(pool => {
+            result.pools.forEach((pool) => {
                 const item = document.createElement('a');
                 item.href = '#';
-                item.className = 'list-group-item list-group-item-action';
+                item.className = 'stk-pool-item' + (pool.address === currentAddr ? ' is-selected' : '');
                 item.onclick = (e) => {
                     e.preventDefault();
                     document.getElementById('poolAddress').value = pool.address;
+                    document.querySelectorAll('.stk-pool-item.is-selected')
+                        .forEach((el) => el.classList.remove('is-selected'));
+                    item.classList.add('is-selected');
+                    reflectPoolAddressFilled();
                 };
                 const commissionColor = getCommissionColor(pool.commission);
                 item.innerHTML = `
-                    <div class="d-flex w-100 justify-content-between align-items-center">
-                        <div>
-                            <small class="text-muted">Address:</small><br>
-                            <code class="small">${pool.address}</code>
-                        </div>
-                        <div class="text-end">
-                            ${pool.alias ? `<span class="badge bg-primary">${pool.alias}</span><br>` : ''}
-                            <small class="fw-bold" style="color: ${commissionColor}">${pool.commission}% Fee</small>
-                        </div>
+                    <div>
+                        <div class="stk-pool-sub">Pool address</div>
+                        <div class="stk-pool-addr">${pool.address}</div>
+                    </div>
+                    <div class="stk-pool-right">
+                        ${pool.alias ? `<span class="stk-pool-alias">${pool.alias}</span>` : ''}
+                        <span class="stk-pool-fee" style="color: ${commissionColor}">
+                            ${pool.commission}% fee
+                        </span>
                     </div>
                 `;
                 listEl.appendChild(item);
             });
         } else {
-            listEl.innerHTML = '<div class="text-muted small p-2">No open pools available</div>';
+            listEl.innerHTML = '<div class="stk-empty">No open pools available</div>';
         }
     }
 
@@ -440,8 +1143,6 @@
             return;
         }
 
-        // Send commission directly to server (no conversion)
-        // commission = % pool keeps as fee
         const result = await apiCall('/pool/toggle-open', 'POST', { commission: commission });
         if (result) {
             const msg = commission === null || commission === 0 ? 'Pool closed' : `Pool open with ${commission}% commission fee`;
@@ -456,11 +1157,32 @@
         const result = await apiCall('/pool/commission', 'GET');
         if (result) {
             const commissionInput = document.getElementById('poolCommission');
-            // Display commission directly (no conversion)
             commissionInput.value = result.commission !== null ? result.commission : '';
             isOpenPool = result.commission !== null && result.commission > 0;
+            updateCommissionCursor();
+            updatePoolHeroPill();
             updateMutualExclusionUI();
         }
+    }
+
+    function updateCommissionCursor() {
+        const input = document.getElementById('poolCommission');
+        const range = document.getElementById('poolCommissionRange');
+        if (!input) return;
+        const raw = input.value === '' ? 0 : parseInt(input.value);
+        const pct = Math.max(0, Math.min(100, isNaN(raw) ? 0 : raw));
+        if (range) {
+            if (Number(range.value) !== pct) range.value = String(pct);
+            range.style.setProperty('--stk-comm-fill', pct + '%');
+        }
+        updatePoolHeroPill();
+    }
+
+    // Drag handler: push range value into the number input, then sync.
+    function syncCommissionFromRange(val) {
+        const input = document.getElementById('poolCommission');
+        if (input) input.value = val;
+        updateCommissionCursor();
     }
 
     async function loadWorkers() {
@@ -470,24 +1192,24 @@
         if (result && result.workers && result.workers.length > 0) {
             hasWorkers = true;
             workerListEl.innerHTML = '';
-            result.workers.forEach(worker => {
-                const workerItem = document.createElement('div');
-                workerItem.className = 'd-flex justify-content-between align-items-center mb-2 p-2 border rounded';
-                workerItem.innerHTML = `
-                    <div>
-                        <small class="text-muted">Address:</small><br>
-                        <code class="small">${worker.address}</code>
-                        ${worker.alias ? `<br><span class="badge bg-secondary">${worker.alias}</span>` : ''}
+            result.workers.forEach((worker) => {
+                const row = document.createElement('div');
+                row.className = 'stk-addr-row';
+                row.innerHTML = `
+                    <span class="stk-addr-dot"></span>
+                    <div class="stk-addr-body">
+                        <span class="stk-addr-code">${worker.address}</span>
+                        ${worker.alias ? `<span class="stk-addr-alias">${worker.alias}</span>` : ''}
                     </div>
-                    <button class="btn btn-sm btn-danger" onclick="removeWorker('${worker.address}')">
-                        <i class="material-icons align-middle" style="font-size: 16px;">delete</i>
+                    <button class="stk-addr-remove" onclick="removeWorker('${worker.address}')" title="Remove worker" aria-label="Remove worker" type="button">
+                        <i class="material-icons">close</i>
                     </button>
                 `;
-                workerListEl.appendChild(workerItem);
+                workerListEl.appendChild(row);
             });
         } else {
             hasWorkers = false;
-            workerListEl.innerHTML = '<p class="text-muted">No workers</p>';
+            workerListEl.innerHTML = '<div class="stk-empty">No workers added yet</div>';
         }
 
         updateMutualExclusionUI();
@@ -499,47 +1221,32 @@
 
         if (result && result.lenders && result.lenders.length > 0) {
             lenderListEl.innerHTML = '';
-            result.lenders.forEach(lender => {
-                const lenderItem = document.createElement('div');
-                lenderItem.className = 'd-flex justify-content-between align-items-center mb-2 p-2 border rounded';
-                lenderItem.innerHTML = `
-                    <div>
-                        <small class="text-muted">Address:</small><br>
-                        <code class="small">${lender.address}</code>
-                        ${lender.alias ? `<br><span class="badge bg-secondary">${lender.alias}</span>` : ''}
+            result.lenders.forEach((lender) => {
+                const row = document.createElement('div');
+                row.className = 'stk-addr-row';
+                row.innerHTML = `
+                    <span class="stk-addr-dot"></span>
+                    <div class="stk-addr-body">
+                        <span class="stk-addr-code">${lender.address}</span>
+                        ${lender.alias ? `<span class="stk-addr-alias">${lender.alias}</span>` : ''}
                     </div>
+                    <span></span>
                 `;
-                lenderListEl.appendChild(lenderItem);
+                lenderListEl.appendChild(row);
             });
         } else {
-            lenderListEl.innerHTML = '<p class="text-muted">No pool stakers</p>';
+            lenderListEl.innerHTML = '<div class="stk-empty">No pool stakers yet</div>';
         }
     }
 
     function getCentralApiUrl() {
-        // Always use the production Satori network server for audit files
         return 'https://network.satorinet.io';
-    }
-
-    function downloadJSON(data, filename) {
-        const blob = new Blob([JSON.stringify(data, null, 2)], {
-            type: 'application/json'
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
     }
 
     async function downloadWorkersAudit() {
         try {
             const centralApiUrl = getCentralApiUrl();
             const response = await fetch(`${centralApiUrl}/api/v1/audit/workers/latest`);
-
             if (!response.ok) {
                 if (response.status === 404) {
                     showToast('No workers audit available yet', 'warning');
@@ -547,13 +1254,10 @@
                 }
                 throw new Error(`HTTP ${response.status}`);
             }
-
             const csvText = await response.text();
             const now = new Date();
             const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
             const filename = `workers_audit_${timestamp}.csv`;
-
-            // Download CSV file
             const blob = new Blob([csvText], { type: 'text/csv' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -561,7 +1265,6 @@
             a.download = filename;
             a.click();
             window.URL.revokeObjectURL(url);
-
             showToast('Workers audit downloaded');
         } catch (error) {
             console.error('Error downloading workers audit:', error);
@@ -573,7 +1276,6 @@
         try {
             const centralApiUrl = getCentralApiUrl();
             const response = await fetch(`${centralApiUrl}/api/v1/audit/stakers/latest`);
-
             if (!response.ok) {
                 if (response.status === 404) {
                     showToast('No pool stakers audit available yet', 'warning');
@@ -581,13 +1283,10 @@
                 }
                 throw new Error(`HTTP ${response.status}`);
             }
-
             const csvText = await response.text();
             const now = new Date();
             const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, -5);
             const filename = `stakers_audit_${timestamp}.csv`;
-
-            // Download CSV file
             const blob = new Blob([csvText], { type: 'text/csv' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -595,7 +1294,6 @@
             a.download = filename;
             a.click();
             window.URL.revokeObjectURL(url);
-
             showToast('Pool stakers audit downloaded');
         } catch (error) {
             console.error('Error downloading pool stakers audit:', error);
@@ -633,10 +1331,15 @@
         }
     }
 
-    // Load all data on page load
+    // Page load
     document.addEventListener('DOMContentLoaded', () => {
         applyStakeLayout();
         initStakeDragDrop();
+
+        const poolInput = document.getElementById('poolAddress');
+        if (poolInput) {
+            poolInput.addEventListener('input', reflectPoolAddressFilled);
+        }
 
         loadStakingStatus();
         loadWorkers();

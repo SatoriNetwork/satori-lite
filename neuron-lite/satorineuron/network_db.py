@@ -168,6 +168,13 @@ class NetworkDB:
                 "ALTER TABLE observations ADD COLUMN seq_num INTEGER")
             conn.execute(
                 "ALTER TABLE observations ADD COLUMN observed_at INTEGER")
+        # Migration: track what the subscriber has paid for (Fix F)
+        try:
+            conn.execute("SELECT last_paid_seq FROM subscriptions LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE subscriptions "
+                "ADD COLUMN last_paid_seq INTEGER NOT NULL DEFAULT 0")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS channels (
                 p2sh_address          TEXT PRIMARY KEY,
@@ -208,6 +215,27 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN receiver_nostr_pubkey TEXT")
+        # Migration: add utxo_checked_at to channels (sender-side UTXO
+        # liveness check timestamp).
+        try:
+            conn.execute("SELECT utxo_checked_at FROM channels LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE channels ADD COLUMN utxo_checked_at INTEGER NOT NULL DEFAULT 0")
+        # Persisted subscriber access state (provider side). Keyed by
+        # (stream_name, p2sh_address) so it survives provider restarts and
+        # Nostr key rotations. The nostr_pubkey column tracks the most
+        # recent Nostr identity associated with this channel+stream pair.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS subscriber_access (
+                stream_name    TEXT NOT NULL,
+                p2sh_address   TEXT NOT NULL,
+                nostr_pubkey   TEXT NOT NULL,
+                last_paid_seq  INTEGER NOT NULL DEFAULT 0,
+                updated_at     INTEGER NOT NULL,
+                PRIMARY KEY (stream_name, p2sh_address)
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS competition_predictions (
                 id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -399,6 +427,17 @@ class NetworkDB:
         ).fetchone()
         return row is not None and row['active'] == 1
 
+    def update_last_paid_seq(
+        self, stream_name: str, provider_pubkey: str, seq_num: int
+    ) -> None:
+        """Advance the subscriber's last_paid_seq for a paid stream."""
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE subscriptions SET last_paid_seq = ?
+            WHERE stream_name = ? AND provider_pubkey = ? AND active = 1
+        """, (seq_num, stream_name, provider_pubkey))
+        conn.commit()
+
     def mark_stale(self, stream_name: str, provider_pubkey: str):
         """Mark a subscription as stale (provider not delivering)."""
         conn = self._get_conn()
@@ -427,6 +466,17 @@ class NetworkDB:
         """, (relay_url, stream_name, provider_pubkey))
         conn.commit()
         self.upsert_relay(relay_url)
+
+    def update_subscription_price(self, stream_name: str,
+                                  provider_pubkey: str,
+                                  price_per_obs: int):
+        """Update the price for an active subscription."""
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE subscriptions SET price_per_obs = ?
+            WHERE stream_name = ? AND provider_pubkey = ? AND active = 1
+        """, (price_per_obs, stream_name, provider_pubkey))
+        conn.commit()
 
     def should_recheck_stale(self, stale_since: int,
                              interval: int = 86400) -> bool:
@@ -496,6 +546,16 @@ class NetworkDB:
             ORDER BY received_at DESC LIMIT 1
         """, (stream_name, provider_pubkey)).fetchone()
         return row['received_at'] if row else None
+
+    def max_observation_seq(self, stream_name: str,
+                           provider_pubkey: str) -> int:
+        """Return the highest seq_num we've received for this stream."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT MAX(seq_num) as max_seq FROM observations
+            WHERE stream_name = ? AND provider_pubkey = ?
+        """, (stream_name, provider_pubkey)).fetchone()
+        return row['max_seq'] if row and row['max_seq'] is not None else 0
 
     def is_locally_stale(self, stream_name: str, provider_pubkey: str,
                          cadence_seconds: int,
@@ -878,6 +938,17 @@ class NetworkDB:
         rows = conn.execute(
             "SELECT * FROM channels WHERE is_sender = 0 ORDER BY created_at DESC"
         ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_receiver_channels_by_sender_nostr(
+        self, sender_nostr_pubkey: str
+    ) -> list[dict]:
+        """Return receiver-side channels for a given sender Nostr pubkey."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM channels "
+            "WHERE is_sender = 0 AND sender_nostr_pubkey = ?",
+            (sender_nostr_pubkey,)).fetchall()
         return [dict(r) for r in rows]
 
     def update_channel_remainder(self, p2sh_address: str,
@@ -1348,3 +1419,63 @@ class NetworkDB:
             WHERE stream_name = ? AND active = 1
         """, (stream_name,)).fetchone()
         return bool(row and row['approval_required'])
+
+    def update_utxo_checked_at(self, p2sh_address: str) -> None:
+        """Stamp the current time as the last UTXO liveness check."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE channels SET utxo_checked_at = ? WHERE p2sh_address = ?",
+            (int(time.time()), p2sh_address))
+        conn.commit()
+
+    # ── Subscriber Access (provider side) ─────────────────────────
+
+    def save_subscriber_access(
+        self,
+        stream_name: str,
+        p2sh_address: str,
+        nostr_pubkey: str,
+        last_paid_seq: int,
+    ) -> None:
+        """Persist subscriber access state. Upserts on (stream_name, p2sh)."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO subscriber_access
+                (stream_name, p2sh_address, nostr_pubkey, last_paid_seq, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(stream_name, p2sh_address) DO UPDATE SET
+                nostr_pubkey  = excluded.nostr_pubkey,
+                last_paid_seq = excluded.last_paid_seq,
+                updated_at    = excluded.updated_at
+        """, (stream_name, p2sh_address, nostr_pubkey, last_paid_seq,
+              int(time.time())))
+        conn.commit()
+
+    def load_subscriber_access(self) -> list[dict]:
+        """Load all persisted subscriber access records."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM subscriber_access").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_subscriber_access_by_nostr(
+        self, stream_name: str, nostr_pubkey: str
+    ) -> dict | None:
+        """Look up access by Nostr pubkey (for subscription announcements)."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM subscriber_access "
+            "WHERE stream_name = ? AND nostr_pubkey = ?",
+            (stream_name, nostr_pubkey)).fetchone()
+        return dict(row) if row else None
+
+    def get_subscriber_access_by_channel(
+        self, stream_name: str, p2sh_address: str
+    ) -> dict | None:
+        """Look up access by channel address."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM subscriber_access "
+            "WHERE stream_name = ? AND p2sh_address = ?",
+            (stream_name, p2sh_address)).fetchone()
+        return dict(row) if row else None

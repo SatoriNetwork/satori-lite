@@ -189,6 +189,72 @@
         border-color: var(--border-color-focus);
     }
 
+    /* Subscription toggle pill */
+    .mkt-sub-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.4rem 0.75rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        font-weight: 600;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background .15s ease, color .15s ease, border-color .15s ease;
+    }
+    .mkt-sub-toggle:hover {
+        color: var(--text-primary);
+        border-color: var(--border-color-focus);
+    }
+    .mkt-sub-toggle .material-icons { font-size: 16px; opacity: 0.75; }
+    .mkt-sub-toggle .mkt-sub-check {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 14px; height: 14px;
+        border: 1.5px solid var(--border-color-focus);
+        border-radius: 4px;
+        color: transparent;
+        transition: background .15s ease, color .15s ease, border-color .15s ease;
+    }
+    .mkt-sub-toggle .mkt-sub-check .material-icons {
+        font-size: 12px !important;
+        opacity: 1;
+    }
+    .mkt-sub-toggle .mkt-sub-count {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.7rem;
+        font-weight: 700;
+        padding: 0.08rem 0.42rem;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.05);
+        color: var(--text-muted);
+        letter-spacing: 0.02em;
+        min-width: 1.6rem;
+        text-align: center;
+    }
+    [data-theme="light"] .mkt-sub-toggle .mkt-sub-count {
+        background: rgba(0,0,0,0.05);
+    }
+    .mkt-sub-toggle.is-active {
+        color: #fff;
+        background: var(--accent-primary);
+        border-color: var(--accent-primary);
+        box-shadow: 0 2px 10px rgba(90,90,255,0.25);
+    }
+    .mkt-sub-toggle.is-active .material-icons { opacity: 1; }
+    .mkt-sub-toggle.is-active .mkt-sub-check {
+        background: #fff;
+        border-color: #fff;
+        color: var(--accent-primary);
+    }
+    .mkt-sub-toggle.is-active .mkt-sub-count {
+        background: rgba(255,255,255,0.22);
+        color: #fff;
+    }
+
     /* Price segmented control */
     .mkt-price {
         display: inline-flex;
@@ -212,6 +278,36 @@
     .mkt-price button.is-active {
         background: var(--bg-card);
         color: var(--text-primary);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    }
+
+    /* Price-unit segmented control (sats / SATORI) */
+    .mkt-unit {
+        display: inline-flex;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 3px;
+        gap: 2px;
+    }
+    .mkt-unit button {
+        background: transparent;
+        border: 0;
+        color: var(--text-secondary);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        padding: 0.32rem 0.65rem;
+        border-radius: 7px;
+        cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        text-transform: lowercase;
+        transition: background .15s ease, color .15s ease;
+    }
+    .mkt-unit button[data-unit="satori"] { text-transform: uppercase; letter-spacing: 0.08em; }
+    .mkt-unit button.is-active {
+        background: var(--bg-card);
+        color: var(--accent-primary);
         box-shadow: 0 1px 2px rgba(0,0,0,0.25);
     }
 
@@ -673,10 +769,24 @@
                 <input id="mktSearch" type="text" placeholder="Search streams, descriptions, tags…"
                        autocomplete="off" oninput="currentPage=1; renderStreams()">
             </div>
+            <button class="mkt-sub-toggle" id="mktSubToggle"
+                    type="button" role="switch" aria-checked="false"
+                    onclick="toggleSubOnly(this)"
+                    title="Show only streams you are subscribed to">
+                <span class="mkt-sub-check" aria-hidden="true">
+                    <i class="material-icons">check</i>
+                </span>
+                <span>Subscribed</span>
+                <span class="mkt-sub-count" id="mktSubCount">0</span>
+            </button>
             <div class="mkt-price" role="group" aria-label="Price filter">
                 <button class="is-active" data-price="all"  onclick="setPriceFilter('all', this)">All</button>
                 <button data-price="free" onclick="setPriceFilter('free', this)">Free</button>
                 <button data-price="paid" onclick="setPriceFilter('paid', this)">Paid</button>
+            </div>
+            <div class="mkt-unit" role="group" aria-label="Price unit">
+                <button class="is-active" data-unit="sats"   onclick="setPriceUnit('sats', this)">sats</button>
+                <button                     data-unit="satori" onclick="setPriceUnit('satori', this)">SATORI</button>
             </div>
             <button class="mkt-refresh" id="mktRefreshBtn" onclick="refreshStreams({ discover: true })">
                 <i class="material-icons">refresh</i><span>Refresh</span>
@@ -705,6 +815,8 @@
 </main>
 
 <input type="hidden" id="nostrPubkey" value="{{ nostr_pubkey or '' }}">
+
+{% include 'partials/footer.html' %}
 {% endblock %}
 
 {% block extra_js %}
@@ -714,9 +826,19 @@
     let CLASSIFICATIONS = [];
     let activeClass = null;          // null = All
     let priceFilter = 'all';         // 'all' | 'free' | 'paid'
+    let subOnly = false;             // show only streams the user is subscribed to
+    let priceUnit = localStorage.getItem('mkt-price-unit') || 'sats'; // 'sats' | 'satori'
     let activeSegment = 'streams';   // 'streams' | 'predictions' (disabled)
     let currentPage = 1;
     let pageSize = 24;
+    const SATS_PER_SATORI = 100000000;
+
+    // Reflect stored price-unit in the segmented control on first paint
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.mkt-unit button').forEach(b => {
+            b.classList.toggle('is-active', b.dataset.unit === priceUnit);
+        });
+    });
 
     // ── Boot ────────────────────────────────────────────
     (async function init() {
@@ -769,6 +891,35 @@
         document.querySelectorAll('.mkt-price button').forEach(b => b.classList.remove('is-active'));
         btn.classList.add('is-active');
         renderStreams();
+    }
+
+    function toggleSubOnly(btn) {
+        subOnly = !subOnly;
+        currentPage = 1;
+        btn.classList.toggle('is-active', subOnly);
+        btn.setAttribute('aria-checked', subOnly ? 'true' : 'false');
+        renderStreams();
+    }
+
+    function setPriceUnit(val, btn) {
+        priceUnit = val;
+        try { localStorage.setItem('mkt-price-unit', val); } catch(e) {}
+        document.querySelectorAll('.mkt-unit button').forEach(b => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        renderStreams();
+    }
+
+    // Format a sats value in the currently selected display unit.
+    // Input is always in sats (as returned by the API).
+    function formatPrice(sats) {
+        if (!sats || sats <= 0) return '';
+        if (priceUnit === 'satori') {
+            const satori = sats / SATS_PER_SATORI;
+            // Trim trailing zeros after up to 8 decimals
+            const str = parseFloat(satori.toFixed(8)).toString();
+            return str + ' SATORI';
+        }
+        return sats.toLocaleString() + ' sats';
     }
 
     function goToPage(p) {
@@ -864,6 +1015,11 @@
         });
     }
 
+    function streamMatchesSubscribed(g) {
+        if (!subOnly) return true;
+        return g.pubs.some(p => p.subscribed);
+    }
+
     function streamMatchesSearch(g, q) {
         if (!q) return true;
         q = q.toLowerCase();
@@ -948,9 +1104,15 @@
 
         document.getElementById('mktTotal').textContent = groups.length;
 
+        // Subscribed count across all groups (independent of other filters)
+        const subscribedGroups = groups.filter(g => g.pubs.some(p => p.subscribed)).length;
+        const subCountEl = document.getElementById('mktSubCount');
+        if (subCountEl) subCountEl.textContent = subscribedGroups;
+
         const filtered = groups.filter(g =>
             streamMatchesClass(g, activeClass) &&
             streamMatchesPrice(g, priceFilter) &&
+            streamMatchesSubscribed(g) &&
             streamMatchesSearch(g, q));
 
         const subbed = filtered.filter(g => g.rep.subscribed).length;
@@ -1042,7 +1204,7 @@
             ? `<span class="mkt-card-class" title="${escapeHtml(classificationLabel(cls))}">${escapeHtml(classificationLabel(cls))}</span>`
             : '<span class="mkt-card-class" style="background:var(--bg-card);color:var(--text-muted);border-color:var(--border-color);">Uncategorized</span>';
         const priceChip = (p.price_per_obs > 0)
-            ? `<span class="mkt-card-price"><i class="material-icons">bolt</i>${p.price_per_obs} sats</span>`
+            ? `<span class="mkt-card-price"><i class="material-icons">bolt</i>${escapeHtml(formatPrice(p.price_per_obs))}</span>`
             : `<span class="mkt-card-price is-free"><i class="material-icons">check_circle</i>Free</span>`;
         return classBadge + priceChip;
     }
@@ -1070,7 +1232,7 @@
             : '';
 
         const priceChip = (s.price_per_obs > 0)
-            ? `<span class="mkt-card-price"><i class="material-icons">bolt</i>${s.price_per_obs} sats</span>`
+            ? `<span class="mkt-card-price"><i class="material-icons">bolt</i>${escapeHtml(formatPrice(s.price_per_obs))}</span>`
             : `<span class="mkt-card-price is-free"><i class="material-icons">check_circle</i>Free</span>`;
 
         const cadence = formatCadence(s.cadence_seconds);
