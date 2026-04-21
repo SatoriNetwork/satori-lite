@@ -248,11 +248,21 @@ class NetworkDB:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN utxo_checked_at INTEGER NOT NULL DEFAULT 0")
         # Migration: add offset_seconds to data_sources (existing DBs)
+        # Backfill existing rows with random offsets so sources don't all
+        # fire at offset 0 simultaneously.
         try:
             conn.execute("SELECT offset_seconds FROM data_sources LIMIT 1")
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE data_sources ADD COLUMN offset_seconds INTEGER")
+            rows = conn.execute(
+                "SELECT id, cadence_seconds FROM data_sources"
+            ).fetchall()
+            for row in rows:
+                cap = min(row[1], 86400) if row[1] else 86400
+                conn.execute(
+                    "UPDATE data_sources SET offset_seconds = ? WHERE id = ?",
+                    (random.randint(0, max(cap - 1, 0)), row[0]))
         # Persisted subscriber access state (provider side). Keyed by
         # (stream_name, p2sh_address) so it survives provider restarts and
         # Nostr key rotations. The nostr_pubkey column tracks the most
