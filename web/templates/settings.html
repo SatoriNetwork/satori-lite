@@ -830,7 +830,11 @@
                                 <label class="form-label" for="relayPublicPortInput">Public relay port</label>
                                 <input type="number" min="1" max="65535" class="form-control" id="relayPublicPortInput" value="{{ relay_status.public_port }}" onclick="event.stopPropagation()">
                                 <div class="invalid-feedback" id="relayPublicPortError"></div>
-                                <div class="mode-port-help">Default 7777 — changing this now requires recreating the neuron container.</div>
+                                <div class="mode-port-help">
+                                    This instance uses port
+                                    <span class="font-mono-small" id="relayPublicDefaultPortHelp">{{ relay_status.public_port }}</span>
+                                    — changing this now requires recreating the neuron container.
+                                </div>
                             </div>
                             <div class="mode-field-group">
                                 <label class="form-label" for="relayPublicHostInput">Advertised host / domain</label>
@@ -844,7 +848,10 @@
                             <div class="mode-head">
                                 <div>
                                     <div class="mode-title">Private relay</div>
-                                    <div class="mode-subtitle">Managed policy, same model as port 7171</div>
+                                    <div class="mode-subtitle">
+                                        Managed policy, same model as port
+                                        <span class="font-mono-small" id="relayPrivateSubtitlePort">{{ relay_status.private_port }}</span>
+                                    </div>
                                 </div>
                                 <span class="mode-radio"></span>
                                 <input class="form-check-input" type="radio" name="relayMode" id="relayModePrivate" value="private">
@@ -858,7 +865,11 @@
                                 <label class="form-label" for="relayPrivatePortInput">Private relay port</label>
                                 <input type="number" min="1" max="65535" class="form-control" id="relayPrivatePortInput" value="{{ relay_status.private_port }}" onclick="event.stopPropagation()">
                                 <div class="invalid-feedback" id="relayPrivatePortError"></div>
-                                <div class="mode-port-help">Default 7171 — changing this now requires recreating the neuron container.</div>
+                                <div class="mode-port-help">
+                                    This instance uses port
+                                    <span class="font-mono-small" id="relayPrivateDefaultPortHelp">{{ relay_status.private_port }}</span>
+                                    — changing this now requires recreating the neuron container.
+                                </div>
                             </div>
                             <div class="mode-field-group">
                                 <label class="form-label" for="relayPrivateHostInput">Advertised host / domain</label>
@@ -989,6 +1000,9 @@
         document.getElementById('relayPrivateUrl').textContent = status.private_url_hint || '-';
         document.getElementById('relayPublicPort').textContent = status.public_port ?? '-';
         document.getElementById('relayPrivatePort').textContent = status.private_port ?? '-';
+        document.getElementById('relayPublicDefaultPortHelp').textContent = status.public_port ?? '-';
+        document.getElementById('relayPrivateDefaultPortHelp').textContent = status.private_port ?? '-';
+        document.getElementById('relayPrivateSubtitlePort').textContent = status.private_port ?? '-';
         document.getElementById('relayPublicPortInput').value = status.public_port ?? '';
         document.getElementById('relayPrivatePortInput').value = status.private_port ?? '';
         document.getElementById('relayPublicHostInput').value = status.public_host || '';
