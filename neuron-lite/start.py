@@ -82,6 +82,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
+        self._channelPayLocks: dict = {}   # p2sh_address -> asyncio.Lock (Fix H)
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -523,6 +524,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """Send a channel payment immediately and reset the cooldown timer.
 
         Handles channel lookup, refund if exhausted, and open if none exists.
+        Fix H: the read-build-write is serialized per channel with an
+        asyncio.Lock so two concurrent observations don't produce duplicate
+        commitments referencing the same prior state.
         """
         await self._channelEnsureWallet()
         conn_rows = await asyncio.to_thread(self.networkDB.get_active)
@@ -541,40 +545,55 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             (c for c in channels
              if c['receiver_pubkey'] == provider_wallet_pubkey),
             None)
-        if channel and channel['remainder_sats'] < price_sats:
-            fund_sats = self._channelFundSats()
-            logging.info(
-                f'Channel: refunding {channel["p2sh_address"]} '
-                f'(remainder={channel["remainder_sats"]}) '
-                f'with {fund_sats} sats',
-                color='cyan')
-            await self.refundChannel(channel['p2sh_address'], fund_sats)
-            channel = await asyncio.to_thread(
-                self.networkDB.get_channel, channel['p2sh_address'])
-            if not channel or channel['remainder_sats'] < price_sats:
-                return
-        elif not channel:
-            fund_sats = self._channelFundSats()
-            timeout_minutes = self._channelTimeoutMinutes()
-            logging.info(
-                f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
-                f'fund={fund_sats} sats timeout={timeout_minutes} min',
-                color='cyan')
-            p2sh = await self.openChannel(
-                receiver_pubkey=provider_wallet_pubkey,
-                amount_sats=fund_sats,
-                minutes=timeout_minutes,
-                receiver_nostr_pubkey=provider_pubkey,
-            )
-            channel = await asyncio.to_thread(
-                self.networkDB.get_channel, p2sh)
-            if not channel or channel['remainder_sats'] < price_sats:
-                return
-        await self.sendChannelPayment(
-            channel['p2sh_address'], price_sats, stream_name,
-            price_per_obs=price_sats)
-        key = (stream_name, provider_pubkey)
-        self._paymentCooldowns[key] = time.time()
+        # Acquire a per-channel lock for the remainder read → build → write
+        p2sh = channel['p2sh_address'] if channel else None
+        if p2sh and p2sh not in self._channelPayLocks:
+            self._channelPayLocks[p2sh] = asyncio.Lock()
+        lock = self._channelPayLocks.get(p2sh) if p2sh else None
+        if lock:
+            await lock.acquire()
+        try:
+            # Re-read channel inside the lock so we see the latest remainder
+            if channel:
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, channel['p2sh_address'])
+            if channel and channel['remainder_sats'] < price_sats:
+                fund_sats = self._channelFundSats(price_sats)
+                logging.info(
+                    f'Channel: refunding {channel["p2sh_address"]} '
+                    f'(remainder={channel["remainder_sats"]}) '
+                    f'with {fund_sats} sats',
+                    color='cyan')
+                await self.refundChannel(channel['p2sh_address'], fund_sats)
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, channel['p2sh_address'])
+                if not channel or channel['remainder_sats'] < price_sats:
+                    return
+            elif not channel:
+                fund_sats = self._channelFundSats(price_sats)
+                timeout_minutes = self._channelTimeoutMinutes()
+                logging.info(
+                    f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
+                    f'fund={fund_sats} sats timeout={timeout_minutes} min',
+                    color='cyan')
+                new_p2sh = await self.openChannel(
+                    receiver_pubkey=provider_wallet_pubkey,
+                    amount_sats=fund_sats,
+                    minutes=timeout_minutes,
+                    receiver_nostr_pubkey=provider_pubkey,
+                )
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, new_p2sh)
+                if not channel or channel['remainder_sats'] < price_sats:
+                    return
+            await self.sendChannelPayment(
+                channel['p2sh_address'], price_sats, stream_name,
+                price_per_obs=price_sats)
+            key = (stream_name, provider_pubkey)
+            self._paymentCooldowns[key] = time.time()
+        finally:
+            if lock:
+                lock.release()
 
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
@@ -940,6 +959,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # The sender also knows about the channel (it opened it) and sees the
         # same commitment events on the relay — skip if we're the sender.
         if channel.get('receiver_pubkey') != self.wallet.pubkey:
+            return
+        # Fix I: require stream_name to prevent cross-stream over-granting
+        if not commitment.stream_name:
+            logging.warning(
+                f'Channel: rejecting commitment for {commitment.p2sh_address} — '
+                f'missing stream_name',
+                color='yellow')
             return
         # Bind the commitment envelope to the channel's known pubkeys. Nostr
         # kind 34604 is parameterized-replaceable by (kind, author, d_tag), so
@@ -1592,9 +1618,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Channel: expiry check failed: {e}')
 
-    def _channelFundSats(self) -> int:
-        """Return the configured channel funding amount in sats (default 0.01 SATORI)."""
-        return int(config.get().get('channel_fund_sats', 1_000_000))
+    def _channelFundSats(self, price_per_obs: int = 0) -> int:
+        """Return channel funding amount in sats, scaled by observation economics.
+
+        Fix K: instead of a hardcoded 1M sats, compute from price_per_obs *
+        observations_per_refill (configurable, default 500). Clamped between
+        100k (min) and 10M (max) sats. Falls back to the static config value
+        or 1M when price_per_obs is not supplied.
+        """
+        static = int(config.get().get('channel_fund_sats', 1_000_000))
+        if price_per_obs <= 0:
+            return static
+        obs_per_refill = int(config.get().get('observations_per_refill', 500))
+        computed = price_per_obs * obs_per_refill
+        return max(100_000, min(computed, 10_000_000))
 
     def _channelFetchUtxoSatori(
         self,
@@ -1635,8 +1672,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return fallback_sats
 
     def _channelTimeoutMinutes(self) -> int:
-        """Return the configured channel lifetime in minutes (default 90 days)."""
-        return int(config.get().get('channel_timeout_minutes', 129600))
+        """Return the configured channel lifetime in minutes (default 7 days).
+
+        Fix L: lowered from 90 days (129,600 min) to 7 days (10,080 min) so
+        subscriber funds aren't idle for a quarter year in the failure case.
+        """
+        return int(config.get().get('channel_timeout_minutes', 10080))
 
     @staticmethod
     def _channelVerifySenderSig(commitment, channel: dict) -> bool:
