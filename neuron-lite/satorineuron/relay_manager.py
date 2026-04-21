@@ -1,8 +1,18 @@
+import io
 import json
 import os
+import shutil
+import signal
+import socket
+import subprocess
+import tarfile
+import tempfile
 import threading
+import time
+import urllib.request
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -12,7 +22,7 @@ from satorineuron import logging
 try:
     import docker
     from docker.errors import DockerException, NotFound
-except Exception:  # pragma: no cover - handled in status paths
+except Exception:  # pragma: no cover - handled in migration paths
     docker = None
 
     class DockerException(Exception):
@@ -25,16 +35,19 @@ except Exception:  # pragma: no cover - handled in status paths
 RELAY_MODES = {"off", "public", "private"}
 DEFAULT_PUBLIC_PORT = 7777
 DEFAULT_PRIVATE_PORT = 7171
+STARTUP_WAIT_SECONDS = 10
+STOP_WAIT_SECONDS = 8
+DEFAULT_STRFRY_BIN = '/usr/local/bin/strfry'
+
+
 @dataclass(frozen=True)
 class RelayNames:
     mode: str
-    network: str
-    strfry: str
-    nginx: str
-    db_volume: str
-    assets_volume: str
-    nip11_volume: str
-    nginx_conf_volume: str
+    process_name: str
+    legacy_network: str
+    legacy_strfry: str
+    legacy_nginx: str
+    legacy_db_volume: str
 
 
 class LocalRelayManager:
@@ -43,6 +56,7 @@ class LocalRelayManager:
         self._lock = threading.Lock()
         self._last_error = None
         self._last_status = 'idle'
+        self._docker_base_url = None
         self.default_public_port = int(os.environ.get(
             'SATORI_RELAY_PUBLIC_PORT', DEFAULT_PUBLIC_PORT))
         self.default_private_port = int(os.environ.get(
@@ -52,7 +66,6 @@ class LocalRelayManager:
         self.public_host = ''
         self.private_host = ''
         self._base_name = f"satori-local-relay-{startup.uiPort}"
-        self._docker_base_url = None
 
     def _refresh_ports(self) -> None:
         cfg = config.get()
@@ -115,7 +128,7 @@ class LocalRelayManager:
     @staticmethod
     def _describe_endpoint(endpoint: str | None) -> str:
         if not endpoint:
-            return 'unknown'
+            return 'embedded-runtime'
         parsed = urlparse(endpoint)
         if parsed.scheme == 'unix':
             return parsed.path or endpoint
@@ -123,96 +136,18 @@ class LocalRelayManager:
             return endpoint
         return endpoint
 
-    def _docker_client(self):
+    def _docker_client_optional(self):
         if docker is None:
-            raise DockerException('python docker package is not installed')
-        errors = []
+            return None
         for endpoint in self._docker_candidate_endpoints():
             try:
                 client = docker.DockerClient(base_url=endpoint, version='auto')
                 client.ping()
                 self._docker_base_url = endpoint
                 return client
-            except Exception as exc:
-                errors.append(f'{self._describe_endpoint(endpoint)}: {exc}')
-        docker_host = os.environ.get('DOCKER_HOST', '').strip()
-        if docker_host:
-            message = (
-                'unable to connect to Docker using DOCKER_HOST '
-                f'{docker_host}: {" | ".join(errors) if errors else "connection failed"}'
-            )
-        else:
-            message = (
-                'unable to connect to Docker daemon; '
-                'set DOCKER_HOST or mount a supported socket '
-                '(/var/run/docker.sock, /run/docker.sock, '
-                f'/run/user/{os.getuid()}/docker.sock, npipe:////./pipe/docker_engine)'
-            )
-            if errors:
-                message += f' | checked: {" | ".join(errors)}'
-        raise DockerException(message)
-
-    def _docker_help(self) -> dict[str, Any]:
-        docker_host = os.environ.get('DOCKER_HOST', '').strip()
-        socket_candidates = [
-            path for path in (
-                os.environ.get('SATORI_DOCKER_SOCKET'),
-                '/var/run/docker.sock',
-                '/run/docker.sock',
-                f"/run/user/{os.getuid()}/docker.sock",
-                '/run/podman/podman.sock',
-            )
-            if path
-        ]
-        visible_sockets = [path for path in socket_candidates if os.path.exists(path)]
-        guidance = {
-            'cause': None,
-            'summary': None,
-            'details': [],
-        }
-        if docker is None:
-            guidance['cause'] = 'missing_python_package'
-            guidance['summary'] = 'The Python Docker package is not installed inside the neuron image.'
-            guidance['details'] = [
-                'Rebuild the image with the docker Python package available.',
-            ]
-            return guidance
-        if docker_host:
-            guidance['cause'] = 'docker_host_unreachable'
-            guidance['summary'] = f'DOCKER_HOST is set but the neuron cannot reach that Docker endpoint: {docker_host}'
-            guidance['details'] = [
-                'Verify the DOCKER_HOST value and ensure the endpoint is reachable from inside the neuron container.',
-                'If you intended to use a local socket instead, remove DOCKER_HOST and mount the Docker socket into the container.',
-            ]
-            return guidance
-        if visible_sockets:
-            guidance['cause'] = 'socket_visible_but_unreachable'
-            guidance['summary'] = 'A Docker socket path is visible inside the neuron container, but the Docker daemon is not reachable through it.'
-            guidance['details'] = [
-                f'Visible sockets: {", ".join(visible_sockets)}',
-                'Check Docker daemon permissions and confirm the container can access the mounted socket.',
-            ]
-            return guidance
-        guidance['cause'] = 'missing_socket_mount'
-        guidance['summary'] = 'No supported Docker socket is visible inside the neuron container.'
-        guidance['details'] = [
-            'Recreate the neuron container with a Docker socket mount, for example:',
-            '-v /var/run/docker.sock:/var/run/docker.sock',
-            'or set DOCKER_HOST to a reachable TCP or named-pipe endpoint.',
-        ]
-        return guidance
-
-    def docker_available(self) -> bool:
-        if docker is None:
-            self._last_error = 'python docker package is not installed'
-            return False
-        try:
-            client = self._docker_client()
-            client.close()
-            return True
-        except Exception as exc:
-            self._last_error = str(exc)
-            return False
+            except Exception:
+                continue
+        return None
 
     def desired_mode(self) -> str:
         self._refresh_ports()
@@ -237,6 +172,14 @@ class LocalRelayManager:
         private_port = self._coerce_port(
             private_port if private_port is not None else self.private_port,
             self.default_private_port)
+        if public_port != self.default_public_port:
+            raise ValueError(
+                f'embedded public relay currently requires container restart to use port {public_port}; '
+                f'this container publishes {self.default_public_port}')
+        if private_port != self.default_private_port:
+            raise ValueError(
+                f'embedded private relay currently requires container restart to use port {private_port}; '
+                f'this container publishes {self.default_private_port}')
         public_host = self._coerce_host(
             public_host if public_host is not None else self.public_host)
         private_host = self._coerce_host(
@@ -279,51 +222,53 @@ class LocalRelayManager:
 
     def status(self) -> dict[str, Any]:
         self._refresh_ports()
+        desired_mode = self.desired_mode()
+        public_status = self._service_status('public')
+        private_status = self._service_status('private')
+        running_mode = 'off'
+        running = False
+        if private_status.get('running'):
+            running_mode = 'private'
+            running = True
+        elif public_status.get('running'):
+            running_mode = 'public'
+            running = True
         status = {
-            'docker_available': self.docker_available(),
-            'docker_error': self._last_error,
-            'docker_endpoint': self._describe_endpoint(self._docker_base_url),
-            'docker_help': self._docker_help(),
+            'docker_available': True,
+            'docker_error': None,
+            'docker_endpoint': 'embedded strfry runtime',
+            'docker_help': {
+                'cause': 'embedded_runtime',
+                'summary': 'Relay runs as an embedded strfry process inside the neuron container.',
+                'details': [
+                    'Nginx sidecars are no longer required.',
+                    f'This container publishes public relay port {self.default_public_port} and private relay port {self.default_private_port}.',
+                ],
+            },
             'last_error': self._last_error,
             'last_status': self._last_status,
-            'desired_mode': self.desired_mode(),
-            'running_mode': 'off',
-            'running': False,
+            'desired_mode': desired_mode,
+            'running_mode': running_mode,
+            'running': running,
             'public_port': self.public_port,
             'private_port': self.private_port,
             'public_host': self.public_host,
             'private_host': self.private_host,
             'nostr_pubkey': self.startup.nostrPubkey,
-            'containers': {},
-            'port_conflicts': {},
-            'last_event_at': None,
-            'last_health_check_at': None,
+            'containers': {
+                'public': {'strfry': public_status},
+                'private': {'strfry': private_status},
+            },
+            'port_conflicts': self._port_conflicts(),
+            'last_event_at': self._last_event_time({
+                'public': {'strfry': public_status},
+                'private': {'strfry': private_status},
+            }),
+            'last_health_check_at': self._last_healthcheck_time({
+                'public': {'strfry': public_status},
+                'private': {'strfry': private_status},
+            }),
         }
-        if not status['docker_available']:
-            return status
-        client = self._docker_client()
-        try:
-            public_running = self._mode_running(client, 'public')
-            private_running = self._mode_running(client, 'private')
-            if private_running:
-                status['running_mode'] = 'private'
-                status['running'] = True
-            elif public_running:
-                status['running_mode'] = 'public'
-                status['running'] = True
-            for mode in ('public', 'private'):
-                names = self._names(mode)
-                host_port = self.public_port if mode == 'public' else self.private_port
-                status['containers'][mode] = {
-                    'strfry': self._container_status(client, names.strfry),
-                    'nginx': self._container_status(client, names.nginx),
-                }
-                status['port_conflicts'][mode] = self._port_owner(
-                    client, host_port, names.nginx)
-        finally:
-            client.close()
-        status['last_event_at'] = self._last_event_time(status['containers'])
-        status['last_health_check_at'] = self._last_healthcheck_time(status['containers'])
         return status
 
     def _ensure_state_locked(self) -> dict[str, Any]:
@@ -333,230 +278,221 @@ class LocalRelayManager:
             return self._stop_all_locked()
         if not self.startup.nostrPubkey:
             raise RuntimeError('cannot start local relay without nostr pubkey')
-        if not self.docker_available():
-            raise RuntimeError(self._last_error or 'docker is not available')
-        client = self._docker_client()
-        requested_port = self.public_port if mode == 'public' else self.private_port
-        port_owner = self._port_owner(client, requested_port, self._names(mode).nginx)
-        if port_owner:
-            self._last_error = (
-                f'relay {mode} port {requested_port} is already in use by {port_owner}')
+        if self._port_conflicts()[mode]:
+            self._last_error = self._port_conflicts()[mode]
             self._last_status = 'error'
-            logging.error(f'Relay: {self._last_error}')
             raise RuntimeError(self._last_error)
         self._last_status = f'starting-{mode}'
         self._last_error = None
         logging.info(
-            f'Relay: reconciling mode={mode} public_port={self.public_port} '
+            f'Relay: reconciling embedded mode={mode} public_port={self.public_port} '
             f'private_port={self.private_port}',
             color='blue')
         other_mode = 'private' if mode == 'public' else 'public'
-        self._stop_mode_locked(client, other_mode)
-        self._recreate_mode_locked(client, mode)
+        self._stop_mode_process(other_mode)
+        self._stop_legacy_mode(mode)
+        self._stop_legacy_mode(other_mode)
+        self._migrate_legacy_db_if_needed(mode)
+        self._write_mode_assets(mode)
+        self._start_mode_process(mode)
         status = self.status()
         self._last_status = f'running-{mode}' if status['running'] else 'stopped'
         logging.info(
-            f"Relay: active mode={mode} running={status['running']} "
+            f"Relay: active embedded mode={mode} running={status['running']} "
             f"public_port={self.public_port} private_port={self.private_port}",
             color='green')
         return status
 
     def _stop_all_locked(self) -> dict[str, Any]:
-        if not self.docker_available():
-            return self.status()
-        client = self._docker_client()
-        self._stop_mode_locked(client, 'public')
-        self._stop_mode_locked(client, 'private')
+        self._stop_mode_process('public')
+        self._stop_mode_process('private')
+        self._stop_legacy_mode('public')
+        self._stop_legacy_mode('private')
         self._last_status = 'off'
         self._last_error = None
-        logging.info('Relay: stopped all local relay sidecars', color='yellow')
+        logging.info('Relay: stopped embedded relay runtime', color='yellow')
         return self.status()
 
-    def _recreate_mode_locked(self, client, mode: str) -> None:
-        self._stop_mode_locked(client, mode)
-        names = self._names(mode)
-        self._ensure_network(client, names.network)
-        for volume_name in (
-            names.db_volume,
-            names.assets_volume,
-            names.nip11_volume,
-            names.nginx_conf_volume,
-        ):
-            self._ensure_volume(client, volume_name)
-        self._populate_mode_assets(client, mode, names)
-        self._start_strfry(client, mode, names)
-        self._start_nginx(client, mode, names)
+    def _port_conflicts(self) -> dict[str, str | None]:
+        conflicts = {'public': None, 'private': None}
+        if self.public_port != self.default_public_port:
+            conflicts['public'] = (
+                f'embedded public relay port {self.public_port} requires recreating the neuron container; '
+                f'current published port is {self.default_public_port}')
+        if self.private_port != self.default_private_port:
+            conflicts['private'] = (
+                f'embedded private relay port {self.private_port} requires recreating the neuron container; '
+                f'current published port is {self.default_private_port}')
+        return conflicts
 
-    def _start_strfry(self, client, mode: str, names: RelayNames) -> None:
-        labels = self._labels(mode)
-        container = client.containers.run(
-            'dockurr/strfry:latest',
-            name=names.strfry,
-            command=[
-                'sh', '-lc',
-                'cp /relay-assets/strfry.conf /etc/strfry.conf && '
-                'if [ -f /relay-assets/write-policy.py ]; then '
-                'cp /relay-assets/write-policy.py /app/write-policy.py && '
-                'chmod 755 /app/write-policy.py; fi && '
-                'exec /app/strfry relay'
-            ],
-            detach=True,
-            restart_policy={'Name': 'unless-stopped'},
-            network=names.network,
-            hostname='strfry',
-            labels=labels,
-            volumes={
-                names.db_volume: {'bind': '/app/strfry-db', 'mode': 'rw'},
-                names.assets_volume: {'bind': '/relay-assets', 'mode': 'ro'},
-            },
-            working_dir='/app',
-        )
-        logging.info(
-            f'Relay: started {mode} strfry sidecar {container.name}',
-            color='green')
+    def _mode_dir(self, mode: str) -> Path:
+        engine_db = Path('/Satori/Engine/db')
+        if engine_db.exists() and os.access(engine_db, os.W_OK):
+            return engine_db / 'relay' / mode
+        configured = Path(config.dataPath())
+        if configured.exists() and os.access(configured, os.W_OK):
+            return configured / 'relay' / mode
+        return engine_db / 'relay' / mode
 
-    def _start_nginx(self, client, mode: str, names: RelayNames) -> None:
-        labels = self._labels(mode)
-        host_port = self.public_port if mode == 'public' else self.private_port
-        port_owner = self._port_owner(client, host_port, names.nginx)
-        if port_owner:
-            raise RuntimeError(
-                f'relay {mode} port {host_port} is already in use by {port_owner}')
-        container = client.containers.run(
-            'nginx:alpine',
-            name=names.nginx,
-            detach=True,
-            restart_policy={'Name': 'unless-stopped'},
-            network=names.network,
-            labels=labels,
-            ports={'80/tcp': host_port},
-            volumes={
-                names.nip11_volume: {'bind': '/usr/share/nginx/nip11', 'mode': 'ro'},
-                names.nginx_conf_volume: {'bind': '/etc/nginx/conf.d', 'mode': 'ro'},
-            },
-        )
-        logging.info(
-            f'Relay: started {mode} nginx sidecar {container.name} on port {host_port}',
-            color='green')
+    def _db_dir(self, mode: str) -> Path:
+        return self._mode_dir(mode) / 'strfry-db'
 
-    def _populate_mode_assets(self, client, mode: str, names: RelayNames) -> None:
-        relay_name = f'Satori {mode.capitalize()} Relay'
-        relay_description = (
-            'A Satori Network relay managed by Satori Lite '
-            f'({mode} mode)'
-        )
-        nip11 = json.dumps({
-            'name': relay_name,
-            'description': relay_description,
-            'pubkey': self.startup.nostrPubkey,
-            'self': self.startup.nostrPubkey,
-            'contact': '',
-            'supported_nips': [1, 2, 4, 9, 11, 22, 28, 40, 70],
-            'software': 'https://github.com/hoytech/strfry',
-            'version': 'strfry',
-        }, indent=2) + '\n'
-        script = '\n'.join([
-            'set -e',
-            'mkdir -p /assets /nip11 /nginx',
-            "cat > /assets/strfry.conf <<'EOF_STRFRY'",
-            self._render_strfry_conf(mode, relay_name, relay_description),
-            'EOF_STRFRY',
-            "cat > /nginx/relay.conf <<'EOF_NGINX'",
-            self._render_nginx_conf(names.strfry),
-            'EOF_NGINX',
-            "cat > /nip11/nip11.json <<'EOF_NIP11'",
-            nip11.rstrip('\n'),
-            'EOF_NIP11',
-        ])
-        if mode == 'private':
-            script += '\n' + '\n'.join([
-                "cat > /assets/write-policy.py <<'EOF_POLICY'",
-                self._render_private_policy(self.startup.nostrPubkey),
-                'EOF_POLICY',
-                'chmod 755 /assets/write-policy.py',
-            ])
-        client.containers.run(
-            'alpine:latest',
-            command=['sh', '-lc', script],
-            remove=True,
-            volumes={
-                names.assets_volume: {'bind': '/assets', 'mode': 'rw'},
-                names.nip11_volume: {'bind': '/nip11', 'mode': 'rw'},
-                names.nginx_conf_volume: {'bind': '/nginx', 'mode': 'rw'},
-            },
-        )
-        logging.info(f'Relay: wrote {mode} relay assets', color='blue')
+    def _conf_path(self, mode: str) -> Path:
+        return self._mode_dir(mode) / 'strfry.conf'
 
-    def _stop_mode_locked(self, client, mode: str) -> None:
-        names = self._names(mode)
-        for container_name in (names.nginx, names.strfry):
-            try:
-                container = client.containers.get(container_name)
-                container.remove(force=True)
-                logging.info(
-                    f'Relay: removed {mode} sidecar {container_name}',
-                    color='yellow')
-            except NotFound:
-                pass
+    def _policy_path(self, mode: str) -> Path:
+        return self._mode_dir(mode) / 'write-policy.py'
+
+    def _log_path(self, mode: str) -> Path:
+        return self._mode_dir(mode) / 'strfry.log'
+
+    def _pid_path(self, mode: str) -> Path:
+        return self._mode_dir(mode) / 'strfry.pid'
+
+    def _migration_marker_path(self, mode: str) -> Path:
+        return self._mode_dir(mode) / 'migration.json'
+
+    def _runtime_port(self, mode: str) -> int:
+        return self.default_public_port if mode == 'public' else self.default_private_port
+
+    def _ensure_mode_dir(self, mode: str) -> Path:
+        root = self._mode_dir(mode)
+        root.mkdir(parents=True, exist_ok=True)
+        self._db_dir(mode).mkdir(parents=True, exist_ok=True)
+        return root
+
+    def _mode_process_name(self, mode: str) -> str:
+        return f'{self._base_name}-{mode}-embedded-strfry'
+
+    def _read_pid(self, mode: str) -> int | None:
+        path = self._pid_path(mode)
+        if not path.exists():
+            return None
         try:
-            network = client.networks.get(names.network)
-            network.remove()
-        except NotFound:
+            return int(path.read_text().strip())
+        except Exception:
+            return None
+
+    def _write_pid(self, mode: str, pid: int) -> None:
+        self._pid_path(mode).write_text(str(pid))
+
+    def _clear_pid(self, mode: str) -> None:
+        try:
+            self._pid_path(mode).unlink(missing_ok=True)
+        except Exception:
             pass
-        except DockerException as exc:
-            logging.warning(f'Relay: could not remove network {names.network}: {exc}')
 
-    def _port_owner(self, client, host_port: int, expected_container: str | None = None) -> str | None:
-        host_port = str(host_port)
-        for container in client.containers.list(all=True):
-            if expected_container and container.name == expected_container:
-                continue
-            ports = container.attrs.get('NetworkSettings', {}).get('Ports', {}) or {}
-            for bindings in ports.values():
-                if not bindings:
-                    continue
-                for binding in bindings:
-                    if str(binding.get('HostPort')) == host_port:
-                        return container.name
-        return None
-
-    def _mode_running(self, client, mode: str) -> bool:
-        names = self._names(mode)
-        return (
-            self._container_status(client, names.strfry).get('running', False) and
-            self._container_status(client, names.nginx).get('running', False)
-        )
-
-    def _container_status(self, client, container_name: str) -> dict[str, Any]:
+    @staticmethod
+    def _is_process_alive(pid: int | None) -> bool:
+        if not pid:
+            return False
         try:
-            container = client.containers.get(container_name)
-            container.reload()
-            ports = container.attrs.get('NetworkSettings', {}).get('Ports', {})
-            health = (
-                container.attrs.get('State', {})
-                .get('Health', {})
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    def _stop_mode_process(self, mode: str) -> None:
+        pid = self._read_pid(mode)
+        if not self._is_process_alive(pid):
+            self._clear_pid(mode)
+            return
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            self._clear_pid(mode)
+            return
+        deadline = time.time() + STOP_WAIT_SECONDS
+        while time.time() < deadline:
+            if not self._is_process_alive(pid):
+                break
+            time.sleep(0.2)
+        if self._is_process_alive(pid):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        self._clear_pid(mode)
+        logging.info(f'Relay: stopped embedded {mode} strfry process', color='yellow')
+
+    def _start_mode_process(self, mode: str) -> None:
+        strfry_bin = shutil.which('strfry') or (
+            DEFAULT_STRFRY_BIN if Path(DEFAULT_STRFRY_BIN).exists() else None
+        )
+        if strfry_bin is None:
+            raise RuntimeError('embedded strfry binary is missing from the neuron image')
+        self._ensure_mode_dir(mode)
+        port = self._runtime_port(mode)
+        if not self._can_bind_port(port):
+            raise RuntimeError(f'embedded {mode} relay cannot bind to port {port}')
+        log_path = self._log_path(mode)
+        with open(log_path, 'ab') as log_file:
+            process = subprocess.Popen(
+                [strfry_bin, f'--config={self._conf_path(mode)}', 'relay'],
+                cwd=str(self._mode_dir(mode)),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
-            health_logs = health.get('Log', []) or []
-            last_health = None
-            if health_logs:
-                last_health = (
-                    health_logs[-1].get('End') or
-                    health_logs[-1].get('Start')
-                )
-            return {
-                'exists': True,
-                'running': container.status == 'running',
-                'status': container.status,
-                'name': container.name,
-                'image': container.image.tags,
-                'ports': ports,
-                'health': health.get('Status'),
-                'last_health_check_at': last_health,
-            }
-        except NotFound:
-            return {'exists': False, 'running': False, 'status': 'missing', 'ports': {}}
-        except DockerException as exc:
-            return {'exists': False, 'running': False, 'status': f'error: {exc}', 'ports': {}}
+        self._write_pid(mode, process.pid)
+        if not self._wait_for_relay(port):
+            self._stop_mode_process(mode)
+            raise RuntimeError(f'embedded {mode} relay failed health check on port {port}')
+        logging.info(
+            f'Relay: started embedded {mode} strfry process on port {port}',
+            color='green')
+
+    @staticmethod
+    def _can_bind_port(port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(('0.0.0.0', port))
+            except OSError:
+                return False
+        return True
+
+    def _wait_for_relay(self, port: int) -> bool:
+        deadline = time.time() + STARTUP_WAIT_SECONDS
+        while time.time() < deadline:
+            if self._probe_nip11(port):
+                return True
+            time.sleep(0.3)
+        return False
+
+    @staticmethod
+    def _probe_nip11(port: int) -> bool:
+        req = urllib.request.Request(
+            f'http://127.0.0.1:{port}/',
+            headers={'Accept': 'application/nostr+json'},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    def _service_status(self, mode: str) -> dict[str, Any]:
+        pid = self._read_pid(mode)
+        port = self._runtime_port(mode)
+        running = self._is_process_alive(pid)
+        health = None
+        last_health = None
+        if running:
+            health = 'healthy' if self._probe_nip11(port) else 'starting'
+            last_health = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        return {
+            'exists': self._conf_path(mode).exists() or self._db_dir(mode).exists(),
+            'running': running,
+            'status': 'running' if running else 'stopped',
+            'name': self._mode_process_name(mode),
+            'image': ['embedded:strfry'],
+            'ports': {'tcp': [{'HostIp': '', 'HostPort': str(port)}]},
+            'health': health,
+            'last_health_check_at': last_health,
+            'pid': pid,
+            'backend': 'embedded',
+        }
 
     @staticmethod
     def _last_healthcheck_time(containers: dict[str, Any]) -> str | None:
@@ -570,34 +506,26 @@ class LocalRelayManager:
 
     def _last_event_time(self, containers: dict[str, Any]) -> str | None:
         latest = None
-        for mode_data in containers.values():
-            strfry = mode_data.get('strfry', {})
+        for mode in ('public', 'private'):
+            strfry = containers.get(mode, {}).get('strfry', {})
             if not strfry.get('exists'):
                 continue
-            candidate = self._container_last_event_time(strfry)
+            candidate = self._log_last_event_time(mode)
             if candidate and (latest is None or candidate > latest):
                 latest = candidate
         if latest is None:
             return None
-        return latest.isoformat() + 'Z'
+        return latest.isoformat().replace('+00:00', 'Z')
 
-    def _container_last_event_time(self, container_data: dict[str, Any]) -> datetime | None:
-        image_tags = container_data.get('image') or []
-        if not image_tags:
+    def _log_last_event_time(self, mode: str) -> datetime | None:
+        log_path = self._log_path(mode)
+        if not log_path.exists():
             return None
-        client = None
         try:
-            client = self._docker_client()
-            container = client.containers.get(
-                container_data.get('name') or image_tags[0]
-            )
-            logs = container.logs(tail=200).decode('utf-8', errors='ignore').splitlines()
+            lines = log_path.read_text(errors='ignore').splitlines()[-200:]
         except Exception:
             return None
-        finally:
-            if client is not None:
-                client.close()
-        for line in reversed(logs):
+        for line in reversed(lines):
             if 'Inserted event.' not in line and 'Deleting event (d-tag).' not in line:
                 continue
             try:
@@ -608,44 +536,152 @@ class LocalRelayManager:
                 continue
         return None
 
-    def _ensure_network(self, client, network_name: str) -> None:
-        try:
-            client.networks.get(network_name)
-        except NotFound:
-            client.networks.create(network_name, driver='bridge')
-
-    def _ensure_volume(self, client, volume_name: str) -> None:
-        try:
-            client.volumes.get(volume_name)
-        except NotFound:
-            client.volumes.create(name=volume_name)
-
     def _names(self, mode: str) -> RelayNames:
         return RelayNames(
             mode=mode,
-            network=f'{self._base_name}-{mode}-net',
-            strfry=f'{self._base_name}-{mode}-strfry',
-            nginx=f'{self._base_name}-{mode}-nginx',
-            db_volume=f'{self._base_name}-{mode}-db',
-            assets_volume=f'{self._base_name}-{mode}-assets',
-            nip11_volume=f'{self._base_name}-{mode}-nip11',
-            nginx_conf_volume=f'{self._base_name}-{mode}-nginx-conf',
+            process_name=self._mode_process_name(mode),
+            legacy_network=f'{self._base_name}-{mode}-net',
+            legacy_strfry=f'{self._base_name}-{mode}-strfry',
+            legacy_nginx=f'{self._base_name}-{mode}-nginx',
+            legacy_db_volume=f'{self._base_name}-{mode}-db',
         )
 
-    def _labels(self, mode: str) -> dict[str, str]:
-        return {
-            'satori.managed': 'true',
-            'satori.component': 'relay',
-            'satori.mode': mode,
-            'satori.ui_port': str(self.startup.uiPort),
-        }
+    def _stop_legacy_mode(self, mode: str) -> None:
+        client = self._docker_client_optional()
+        if client is None:
+            return
+        names = self._names(mode)
+        try:
+            for container_name in (names.legacy_nginx, names.legacy_strfry):
+                try:
+                    container = client.containers.get(container_name)
+                    container.remove(force=True)
+                    logging.info(
+                        f'Relay: removed legacy {mode} sidecar {container_name}',
+                        color='yellow')
+                except NotFound:
+                    pass
+            try:
+                network = client.networks.get(names.legacy_network)
+                network.remove()
+            except NotFound:
+                pass
+            except DockerException as exc:
+                logging.warning(f'Relay: could not remove legacy network {names.legacy_network}: {exc}')
+        finally:
+            client.close()
+
+    def _migrate_legacy_db_if_needed(self, mode: str) -> bool:
+        db_dir = self._db_dir(mode)
+        marker = self._migration_marker_path(mode)
+        if marker.exists():
+            return False
+        if db_dir.exists() and any(db_dir.iterdir()):
+            marker.write_text(json.dumps({'migrated_from': 'existing-local-db'}))
+            return False
+        client = self._docker_client_optional()
+        if client is None:
+            return False
+        try:
+            for volume_name in self._legacy_volume_candidates(mode):
+                if not self._volume_exists(client, volume_name):
+                    continue
+                self._copy_volume_tree(client, volume_name, db_dir)
+                marker.write_text(json.dumps({
+                    'migrated_from': volume_name,
+                    'migrated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                }, indent=2))
+                logging.info(
+                    f'Relay: migrated embedded {mode} DB from legacy volume {volume_name}',
+                    color='green')
+                return True
+        finally:
+            client.close()
+        return False
+
+    def _legacy_volume_candidates(self, mode: str) -> list[str]:
+        names = self._names(mode)
+        if mode == 'public':
+            candidates = [names.legacy_db_volume, 'satori-relay_strfry-db']
+        else:
+            # Prefer the long-lived dedicated 7171 relay volume over the
+            # later sidecar-private volume, which may be empty in migrated installs.
+            candidates = ['satori-relay-7171_strfry-db', names.legacy_db_volume]
+        deduped = []
+        seen = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            deduped.append(candidate)
+        return deduped
+
+    @staticmethod
+    def _volume_exists(client, volume_name: str) -> bool:
+        try:
+            client.volumes.get(volume_name)
+            return True
+        except NotFound:
+            return False
+        except DockerException:
+            return False
+
+    def _copy_volume_tree(self, client, volume_name: str, target_dir: Path) -> None:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        helper = client.containers.create(
+            'alpine:latest',
+            command=['sh', '-lc', 'sleep 60'],
+            volumes={volume_name: {'bind': '/src', 'mode': 'ro'}},
+        )
+        tar_path = None
+        extract_dir = None
+        try:
+            helper.start()
+            stream, _ = helper.get_archive('/src')
+            fd, tar_path = tempfile.mkstemp(prefix='relay-volume-', suffix='.tar')
+            os.close(fd)
+            with open(tar_path, 'wb') as handle:
+                for chunk in stream:
+                    handle.write(chunk)
+            extract_dir = Path(tempfile.mkdtemp(prefix='relay-extract-'))
+            with tarfile.open(tar_path) as archive:
+                archive.extractall(path=extract_dir)
+            roots = [child for child in extract_dir.iterdir()]
+            source_root = roots[0] if len(roots) == 1 and roots[0].is_dir() else extract_dir
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            shutil.copytree(source_root, target_dir)
+        finally:
+            try:
+                helper.remove(force=True)
+            except Exception:
+                pass
+            if tar_path and os.path.exists(tar_path):
+                os.unlink(tar_path)
+            if extract_dir and extract_dir.exists():
+                shutil.rmtree(extract_dir, ignore_errors=True)
+
+    def _write_mode_assets(self, mode: str) -> None:
+        root = self._ensure_mode_dir(mode)
+        relay_name = f'Satori {mode.capitalize()} Relay'
+        relay_description = (
+            'A Satori Network relay managed by Satori Lite '
+            f'({mode} mode)'
+        )
+        self._conf_path(mode).write_text(
+            self._render_strfry_conf(mode, relay_name, relay_description)
+        )
+        if mode == 'private':
+            policy_path = self._policy_path(mode)
+            policy_path.write_text(self._render_private_policy(self.startup.nostrPubkey))
+            os.chmod(policy_path, 0o755)
+        else:
+            self._policy_path(mode).unlink(missing_ok=True)
+        logging.info(f'Relay: wrote embedded {mode} relay assets', color='blue')
 
     def _render_strfry_conf(self, mode: str, relay_name: str, relay_description: str) -> str:
-        plugin = '"/app/write-policy.py"' if mode == 'private' else '""'
-        return f'''##\n## Satori Lite managed strfry configuration\n##\n\ndb = "./strfry-db/"\n\ndbParams {{\n    maxreaders = 256\n    mapsize = 10995116277760\n    noReadAhead = false\n}}\n\nevents {{\n    maxEventSize = 65536\n    rejectEventsNewerThanSeconds = 900\n    rejectEventsOlderThanSeconds = 94608000\n    rejectEphemeralEventsOlderThanSeconds = 60\n    ephemeralEventsLifetimeSeconds = 300\n    maxNumTags = 2000\n    maxTagValSize = 1024\n}}\n\nrelay {{\n    bind = "0.0.0.0"\n    port = 7777\n    nofiles = 0\n    realIpHeader = "x-real-ip"\n\n    info {{\n        name = "{relay_name}"\n        description = "{relay_description}"\n        pubkey = "{self.startup.nostrPubkey or ''}"\n        contact = ""\n        icon = ""\n        nips = ""\n    }}\n\n    maxWebsocketPayloadSize = 131072\n    maxReqFilterSize = 200\n    autoPingSeconds = 55\n    enableTcpKeepalive = false\n    queryTimesliceBudgetMicroseconds = 10000\n    maxFilterLimit = 500\n    maxSubsPerConnection = 20\n\n    writePolicy {{\n        plugin = {plugin}\n    }}\n\n    compression {{\n        enabled = true\n        slidingWindow = true\n    }}\n\n    logging {{\n        dumpInAll = false\n        dumpInEvents = false\n        dumpInReqs = false\n        dbScanPerf = false\n        invalidEvents = true\n    }}\n\n    numThreads {{\n        ingester = 3\n        reqWorker = 3\n        reqMonitor = 3\n        negentropy = 2\n    }}\n\n    negentropy {{\n        enabled = true\n        maxSyncEvents = 1000000\n    }}\n}}\n'''
-
-    def _render_nginx_conf(self, upstream_host: str) -> str:
-        return f'''upstream strfry {{\n    server {upstream_host}:7777;\n}}\n\nmap $http_accept $is_nip11 {{\n    default 0;\n    "application/nostr+json" 1;\n    "~application/nostr\\+json" 1;\n}}\n\nserver {{\n    listen 80;\n\n    location / {{\n        if ($is_nip11) {{\n            rewrite ^ /nip11 last;\n        }}\n\n        proxy_pass http://strfry;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection "upgrade";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_read_timeout 86400s;\n        proxy_send_timeout 86400s;\n    }}\n\n    location = /nip11 {{\n        internal;\n        alias /usr/share/nginx/nip11/nip11.json;\n        default_type application/nostr+json;\n        add_header Access-Control-Allow-Origin *;\n        add_header Access-Control-Allow-Headers "Accept";\n        add_header Cache-Control "max-age=300";\n    }}\n}}\n'''
+        plugin = f'"{self._policy_path(mode)}"' if mode == 'private' else '""'
+        return f'''##\n## Satori Lite managed embedded strfry configuration\n##\n\ndb = "{self._db_dir(mode)}/"\n\ndbParams {{\n    maxreaders = 256\n    mapsize = 10995116277760\n    noReadAhead = false\n}}\n\nevents {{\n    maxEventSize = 65536\n    rejectEventsNewerThanSeconds = 900\n    rejectEventsOlderThanSeconds = 94608000\n    rejectEphemeralEventsOlderThanSeconds = 60\n    ephemeralEventsLifetimeSeconds = 300\n    maxNumTags = 2000\n    maxTagValSize = 1024\n}}\n\nrelay {{\n    bind = "0.0.0.0"\n    port = {self._runtime_port(mode)}\n    nofiles = 0\n    realIpHeader = "x-real-ip"\n\n    info {{\n        name = "{relay_name}"\n        description = "{relay_description}"\n        pubkey = "{self.startup.nostrPubkey or ''}"\n        contact = ""\n        icon = ""\n        nips = ""\n    }}\n\n    maxWebsocketPayloadSize = 131072\n    maxReqFilterSize = 200\n    autoPingSeconds = 55\n    enableTcpKeepalive = false\n    queryTimesliceBudgetMicroseconds = 10000\n    maxFilterLimit = 500\n    maxSubsPerConnection = 20\n\n    writePolicy {{\n        plugin = {plugin}\n    }}\n\n    compression {{\n        enabled = true\n        slidingWindow = true\n    }}\n\n    logging {{\n        dumpInAll = false\n        dumpInEvents = false\n        dumpInReqs = false\n        dbScanPerf = false\n        invalidEvents = true\n    }}\n\n    numThreads {{\n        ingester = 3\n        reqWorker = 3\n        reqMonitor = 3\n        negentropy = 2\n    }}\n\n    negentropy {{\n        enabled = true\n        maxSyncEvents = 1000000\n    }}\n}}\n'''
 
     def _render_private_policy(self, pubkey: str) -> str:
-        return f'''#!/usr/bin/env python3\n\nimport json\nimport subprocess\nimport sys\nfrom typing import Any\n\n\nMY_PUBKEYS = {{\n    "{pubkey.lower()}",\n}}\n\nALLOWED_SOURCE_TYPES = {{\n    "Stream",\n    "Import",\n    "Sync",\n}}\n\nALLOWED_KINDS = {{\n    10002,\n}}\n\n\ndef eprint(message: str) -> None:\n    print(message, file=sys.stderr, flush=True)\n\n\ndef respond(event_id: str, action: str, msg: str | None = None) -> None:\n    payload = {{\n        "id": event_id,\n        "action": action,\n    }}\n    if msg:\n        payload["msg"] = msg\n    print(json.dumps(payload, separators=(",", ":")), file=sys.stdout, flush=True)\n\n\ndef get_d_tag(event: dict[str, Any]) -> str | None:\n    tags = event.get("tags")\n    if not isinstance(tags, list):\n        return None\n    for tag in tags:\n        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "d":\n            return str(tag[1])\n    return None\n\n\ndef is_prediction_event(event: dict[str, Any]) -> bool:\n    d_tag = get_d_tag(event)\n    return bool(d_tag and d_tag.endswith("_pred"))\n\n\ndef source_stream_from_prediction(d_tag: str | None) -> str | None:\n    if not d_tag or not d_tag.endswith("_pred"):\n        return None\n    return d_tag[:-5]\n\n\ndef parse_kind(event: dict[str, Any]) -> int | None:\n    kind = event.get("kind")\n    try:\n        return int(kind)\n    except (TypeError, ValueError):\n        return None\n\n\ndef relay_has_my_source_stream(source_stream: str) -> bool:\n    try:\n        raw = subprocess.check_output(\n            ["/app/strfry", "export"],\n            text=True,\n            stderr=subprocess.DEVNULL,\n        )\n    except Exception as exc:\n        eprint(f"error: failed to query relay db: {{exc}}")\n        return False\n\n    for line in raw.splitlines():\n        line = line.strip()\n        if not line.startswith("{{"):\n            continue\n        try:\n            event = json.loads(line)\n        except json.JSONDecodeError:\n            continue\n\n        event_pubkey = event.get("pubkey")\n        kind = parse_kind(event)\n        d_tag = get_d_tag(event)\n\n        if event_pubkey not in MY_PUBKEYS:\n            continue\n        if d_tag != source_stream:\n            continue\n        if kind not in {{34600, 34601}}:\n            continue\n\n        return True\n\n    return False\n\n\ndef accept(event_id: str, reason: str) -> None:\n    eprint(f"accept: {{reason}}")\n    respond(event_id, "accept")\n\n\ndef reject(event_id: str, reason: str) -> None:\n    eprint(f"reject: {{reason}}")\n    respond(event_id, "reject", reason)\n\n\ndef handle_request(request: dict[str, Any]) -> None:\n    request_type = request.get("type")\n\n    if request_type == "lookback":\n        return\n\n    if request_type != "new":\n        eprint(f"ignore: unexpected request type={{request_type!r}}")\n        return\n\n    event = request.get("event")\n    if not isinstance(event, dict):\n        eprint("reject: malformed request without event object")\n        return\n\n    event_id = event.get("id")\n    if not isinstance(event_id, str) or not event_id:\n        eprint("reject: missing event id")\n        return\n\n    event_pubkey = event.get("pubkey")\n    if not isinstance(event_pubkey, str) or not event_pubkey:\n        reject(event_id, "blocked: missing pubkey")\n        return\n\n    kind = parse_kind(event)\n    d_tag = get_d_tag(event)\n    source_type = request.get("sourceType")\n    source_info = request.get("sourceInfo")\n\n    if event_pubkey in MY_PUBKEYS:\n        accept(event_id, f"own pubkey={{event_pubkey[:12]}}")\n        return\n\n    if kind in ALLOWED_KINDS:\n        accept(event_id, f"allowed kind={{kind}}")\n        return\n\n    if source_type in ALLOWED_SOURCE_TYPES:\n        accept(event_id, f"allowed sourceType={{source_type}}")\n        return\n\n    if is_prediction_event(event):\n        source_stream = source_stream_from_prediction(d_tag)\n        if source_stream and relay_has_my_source_stream(source_stream):\n            accept(\n                event_id,\n                f"foreign prediction for owned source stream pubkey={{event_pubkey[:12]}} source={{source_stream}}",\n            )\n            return\n\n        reject(\n            event_id,\n            (\n                "blocked: foreign prediction does not target an owned source stream "\n                f"(pubkey={{event_pubkey[:12]}}, d={{d_tag}}, source={{source_stream}}, "\n                f"sourceType={{source_type}}, sourceInfo={{source_info}})"\n            ),\n        )\n        return\n\n    reject(\n        event_id,\n        (\n            "blocked: foreign pubkey may not publish non-prediction streams "\n            f"(pubkey={{event_pubkey[:12]}}, kind={{kind}}, d={{d_tag}}, "\n            f"sourceType={{source_type}}, sourceInfo={{source_info}})"\n        ),\n    )\n\n\ndef main() -> None:\n    for line in sys.stdin:\n        line = line.strip()\n        if not line:\n            continue\n\n        try:\n            request = json.loads(line)\n        except json.JSONDecodeError as exc:\n            eprint(f"ignore: invalid json input: {{exc}}")\n            continue\n\n        if not isinstance(request, dict):\n            eprint("ignore: request is not a JSON object")\n            continue\n\n        try:\n            handle_request(request)\n        except Exception as exc:\n            event = request.get("event", {{}})\n            event_id = event.get("id") if isinstance(event, dict) else None\n            eprint(f"error: unexpected exception: {{exc}}")\n            if isinstance(event_id, str) and event_id:\n                reject(event_id, "blocked: internal write policy error")\n\n\nif __name__ == "__main__":\n    main()\n'''
+        return f'''#!/usr/bin/env python3\n\nimport json\nimport subprocess\nimport sys\nfrom typing import Any\n\n\nSTRFRY_BIN = "{DEFAULT_STRFRY_BIN}"\nMY_PUBKEYS = {{\n    "{pubkey.lower()}",\n}}\n\nALLOWED_SOURCE_TYPES = {{\n    "Stream",\n    "Import",\n    "Sync",\n}}\n\nALLOWED_KINDS = {{\n    10002,\n}}\n\n\ndef eprint(message: str) -> None:\n    print(message, file=sys.stderr, flush=True)\n\n\ndef respond(event_id: str, action: str, msg: str | None = None) -> None:\n    payload = {{\n        "id": event_id,\n        "action": action,\n    }}\n    if msg:\n        payload["msg"] = msg\n    print(json.dumps(payload, separators=(",", ":")), file=sys.stdout, flush=True)\n\n\ndef get_d_tag(event: dict[str, Any]) -> str | None:\n    tags = event.get("tags")\n    if not isinstance(tags, list):\n        return None\n    for tag in tags:\n        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == "d":\n            return str(tag[1])\n    return None\n\n\ndef is_prediction_event(event: dict[str, Any]) -> bool:\n    d_tag = get_d_tag(event)\n    return bool(d_tag and d_tag.endswith("_pred"))\n\n\ndef source_stream_from_prediction(d_tag: str | None) -> str | None:\n    if not d_tag or not d_tag.endswith("_pred"):\n        return None\n    return d_tag[:-5]\n\n\ndef parse_kind(event: dict[str, Any]) -> int | None:\n    kind = event.get("kind")\n    try:\n        return int(kind)\n    except (TypeError, ValueError):\n        return None\n\n\ndef relay_has_my_source_stream(source_stream: str) -> bool:\n    try:\n        raw = subprocess.check_output(\n            [STRFRY_BIN, f"--config={self._conf_path('private')}", "export"],\n            text=True,\n            stderr=subprocess.DEVNULL,\n        )\n    except Exception as exc:\n        eprint(f"error: failed to query relay db: {{exc}}")\n        return False\n\n    for line in raw.splitlines():\n        line = line.strip()\n        if not line.startswith("{{"):\n            continue\n        try:\n            event = json.loads(line)\n        except json.JSONDecodeError:\n            continue\n\n        event_pubkey = event.get("pubkey")\n        kind = parse_kind(event)\n        d_tag = get_d_tag(event)\n\n        if event_pubkey not in MY_PUBKEYS:\n            continue\n        if d_tag != source_stream:\n            continue\n        if kind not in {{34600, 34601}}:\n            continue\n\n        return True\n\n    return False\n\n\ndef accept(event_id: str, reason: str) -> None:\n    eprint(f"accept: {{reason}}")\n    respond(event_id, "accept")\n\n\ndef reject(event_id: str, reason: str) -> None:\n    eprint(f"reject: {{reason}}")\n    respond(event_id, "reject", reason)\n\n\ndef handle_request(request: dict[str, Any]) -> None:\n    request_type = request.get("type")\n\n    if request_type == "lookback":\n        return\n\n    if request_type != "new":\n        eprint(f"ignore: unexpected request type={{request_type!r}}")\n        return\n\n    event = request.get("event")\n    if not isinstance(event, dict):\n        eprint("reject: malformed request without event object")\n        return\n\n    event_id = event.get("id")\n    if not isinstance(event_id, str) or not event_id:\n        eprint("reject: missing event id")\n        return\n\n    event_pubkey = event.get("pubkey")\n    if not isinstance(event_pubkey, str) or not event_pubkey:\n        reject(event_id, "blocked: missing pubkey")\n        return\n\n    kind = parse_kind(event)\n    d_tag = get_d_tag(event)\n    source_type = request.get("sourceType")\n    source_info = request.get("sourceInfo")\n\n    if event_pubkey in MY_PUBKEYS:\n        accept(event_id, f"own pubkey={{event_pubkey[:12]}}")\n        return\n\n    if kind in ALLOWED_KINDS:\n        accept(event_id, f"allowed kind={{kind}}")\n        return\n\n    if source_type in ALLOWED_SOURCE_TYPES:\n        accept(event_id, f"allowed sourceType={{source_type}}")\n        return\n\n    if is_prediction_event(event):\n        source_stream = source_stream_from_prediction(d_tag)\n        if source_stream and relay_has_my_source_stream(source_stream):\n            accept(\n                event_id,\n                f"foreign prediction for owned source stream pubkey={{event_pubkey[:12]}} source={{source_stream}}",\n            )\n            return\n\n        reject(\n            event_id,\n            (\n                "blocked: foreign prediction does not target an owned source stream "\n                f"(pubkey={{event_pubkey[:12]}}, d={{d_tag}}, source={{source_stream}}, "\n                f"sourceType={{source_type}}, sourceInfo={{source_info}})"\n            ),\n        )\n        return\n\n    reject(\n        event_id,\n        (\n            "blocked: foreign pubkey may not publish non-prediction streams "\n            f"(pubkey={{event_pubkey[:12]}}, kind={{kind}}, d={{d_tag}}, "\n            f"sourceType={{source_type}}, sourceInfo={{source_info}})"\n        ),\n    )\n\n\ndef main() -> None:\n    for line in sys.stdin:\n        line = line.strip()\n        if not line:\n            continue\n\n        try:\n            request = json.loads(line)\n        except json.JSONDecodeError as exc:\n            eprint(f"ignore: invalid json input: {{exc}}")\n            continue\n\n        if not isinstance(request, dict):\n            eprint("ignore: request is not a JSON object")\n            continue\n\n        try:\n            handle_request(request)\n        except Exception as exc:\n            event = request.get("event", {{}})\n            event_id = event.get("id") if isinstance(event, dict) else None\n            eprint(f"error: unexpected exception: {{exc}}")\n            if isinstance(event_id, str) and event_id:\n                reject(event_id, "blocked: internal write policy error")\n\n\nif __name__ == "__main__":\n    main()\n'''

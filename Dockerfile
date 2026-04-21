@@ -4,11 +4,28 @@ FROM python:3.10-slim
 # System dependencies
 RUN apt-get update && \
     apt-get install -y \
+        ca-certificates \
         build-essential \
         cmake \
-        libleveldb-dev && \
+        git \
+        libflatbuffers-dev \
+        libleveldb-dev \
+        liblmdb-dev \
+        libsecp256k1-dev \
+        libssl-dev \
+        libzstd-dev \
+        zlib1g-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# Build a glibc-compatible strfry binary for the embedded relay runtime.
+RUN git clone --depth 1 https://github.com/hoytech/strfry.git /tmp/strfry && \
+    cd /tmp/strfry && \
+    git submodule update --init && \
+    make setup-golpe && \
+    make -j"$(nproc)" && \
+    cp /tmp/strfry/strfry /usr/local/bin/strfry && \
+    rm -rf /tmp/strfry
 
 # Create directory structure
 RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web

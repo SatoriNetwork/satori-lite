@@ -76,6 +76,8 @@ create_container() {
     docker run -d --name $CONTAINER_NAME \
         --restart unless-stopped \
         -p 5001:5001 \
+        -p ${PUBLIC_RELAY_PORT}:${PUBLIC_RELAY_PORT} \
+        -p ${PRIVATE_RELAY_PORT}:${PRIVATE_RELAY_PORT} \
         ${RELAY_DOCKER_MOUNT_ARGS} \
         -e SATORI_UI_PORT=5001 \
         -e SATORI_RELAY_PUBLIC_PORT=${PUBLIC_RELAY_PORT} \
