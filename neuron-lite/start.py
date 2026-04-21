@@ -3012,12 +3012,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not inactive:
             return
 
-        # 3. Build hunt list: inactive subs not recently marked stale
+        # 3. Build hunt list: inactive subs not recently marked stale.
+        # Paid subs bypass the cooldown — an open channel is an authoritative
+        # declaration of intent, and relay freshness for a paid stream is a
+        # chicken-and-egg signal (see Fix M).
         hunting = {}  # stream_name -> sub dict
         for sub in inactive:
             stale_since = sub.get('stale_since')
-            if stale_since and not self.networkDB.should_recheck_stale(
-                    stale_since):
+            is_paid = int(sub.get('price_per_obs', 0) or 0) > 0
+            if (stale_since and not is_paid
+                    and not self.networkDB.should_recheck_stale(stale_since)):
                 continue
             hunting[sub['stream_name']] = sub
 
