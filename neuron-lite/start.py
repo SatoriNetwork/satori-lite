@@ -240,7 +240,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 await self._channelExpiryCheck()
             except Exception as e:
                 logging.error(f'Channel expiry check error: {e}')
-            await asyncio.sleep(300)
+            await asyncio.sleep(3600)
 
     async def _networkEnsurePublisherConnections(self, ConfigClass):
         """Connect to all known relays if we have active publications.
