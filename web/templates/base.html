@@ -71,9 +71,24 @@
             min-height: 100vh;
             font-weight: 400;
             letter-spacing: -0.01em;
+            position: relative;
+            overflow-x: hidden;
         }
 
-        /* ── Navbar ──────────────────────────────────────────── */
+        /* ──────────────────────────────────────────────────────
+           NAVBAR — progressive enhancement
+           BASELINE: the original flat navbar. Zero GPU cost.
+                     Runs everywhere, including Pi-class boxes
+                     that view the UI via a local browser.
+           ENHANCED: liquid glass, only when `html.glass-nav` is
+                     set by the capability-detect script below.
+                     That script opts in when the browser supports
+                     backdrop-filter AND the user hasn't asked for
+                     reduced transparency AND the device reports
+                     enough cores/memory to composite smoothly.
+           ────────────────────────────────────────────────────── */
+
+        /* ── Baseline flat navbar ───────────────────────────── */
         .satori-navbar {
             display: flex;
             align-items: center;
@@ -91,15 +106,17 @@
         .satori-brand {
             display: flex;
             align-items: center;
-            gap: 0.55rem;
+            gap: 0.6rem;
             flex-shrink: 0;
             margin-right: 0.25rem;
             text-decoration: none;
+            line-height: 1;
         }
         .satori-brand-logo {
-            height: 26px;
+            height: 34px;
             width: auto;
             flex-shrink: 0;
+            display: block;
         }
         [data-theme="dark"] .satori-brand-logo {
             filter: invert(1);
@@ -107,20 +124,24 @@
         .satori-brand-text {
             display: flex;
             flex-direction: column;
-            line-height: 1.1;
+            justify-content: center;
+            gap: 0.15rem;
+            line-height: 1;
         }
         .satori-brand-title {
-            font-size: 0.95rem;
+            font-size: 1.15rem;
             font-weight: 700;
             color: var(--text-primary);
-            letter-spacing: -0.03em;
+            letter-spacing: -0.035em;
+            line-height: 1;
         }
         .satori-brand-version {
-            font-size: 0.6rem;
+            font-size: 0.65rem;
             color: var(--text-muted);
             font-weight: 500;
-            letter-spacing: 0.03em;
+            letter-spacing: 0.05em;
             font-variant-numeric: tabular-nums;
+            line-height: 1;
         }
 
         /* Status chip */
@@ -187,7 +208,6 @@
             font-size: 14px;
             opacity: 0.8;
         }
-        /* When pill must shrink, hide labels and keep icons */
         @media (max-width: 1100px) {
             .snp-item span { display: none; }
             .snp-item { padding: 0.36rem 0.55rem; }
@@ -206,9 +226,7 @@
             color: #fff;
             box-shadow: 0 1px 8px rgba(90,90,255,0.3);
         }
-        .snp-item.snp-active i {
-            opacity: 1;
-        }
+        .snp-item.snp-active i { opacity: 1; }
 
         /* Utility group */
         .satori-util-group {
@@ -242,6 +260,7 @@
             font-size: 13px !important;
             opacity: 0.55;
             margin-left: -0.1rem;
+            transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .util-btn:hover, .util-btn:focus, .util-btn.show {
             background: rgba(255,255,255,0.07);
@@ -249,6 +268,8 @@
             border-color: var(--border-color-focus);
             outline: none;
         }
+        .util-btn:active { transform: scale(0.97); }
+        .util-btn.show .util-chevron { transform: rotate(180deg); }
         [data-theme="light"] .util-btn:hover,
         [data-theme="light"] .util-btn.show {
             background: rgba(0,0,0,0.05);
@@ -263,7 +284,6 @@
             border-color: var(--border-color);
         }
 
-        /* Vertical divider */
         .nav-vdivider {
             display: inline-block;
             width: 1px;
@@ -271,6 +291,438 @@
             background: var(--border-color);
             margin: 0 0.1rem;
             flex-shrink: 0;
+        }
+
+        /* ══════════════════════════════════════════════════════
+           LIQUID GLASS ENHANCEMENT — only on capable devices
+           All rules below only apply when html.glass-nav is set.
+           ══════════════════════════════════════════════════════ */
+
+        /* Ambient orbs — only rendered in glass mode */
+        html.glass-nav body::before {
+            content: '';
+            position: absolute;
+            top: -160px;
+            left: 5%;
+            width: 55vmax;
+            height: 300px;
+            background: radial-gradient(
+                ellipse 60% 80% at 50% 50%,
+                rgba(90, 90, 255, 0.28),
+                rgba(90, 90, 255, 0) 70%
+            );
+            filter: blur(30px);
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.75;
+        }
+        html.glass-nav body::after {
+            content: '';
+            position: absolute;
+            top: -140px;
+            right: 8%;
+            width: 45vmax;
+            height: 280px;
+            background: radial-gradient(
+                ellipse 60% 80% at 50% 50%,
+                rgba(180, 90, 255, 0.22),
+                rgba(180, 90, 255, 0) 70%
+            );
+            filter: blur(30px);
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.7;
+        }
+        html.glass-nav[data-theme="light"] body::before {
+            background: radial-gradient(
+                ellipse 60% 80% at 50% 50%,
+                rgba(120, 120, 255, 0.25),
+                rgba(120, 120, 255, 0) 70%
+            );
+            opacity: 0.9;
+        }
+        html.glass-nav[data-theme="light"] body::after {
+            background: radial-gradient(
+                ellipse 60% 80% at 50% 50%,
+                rgba(255, 170, 220, 0.28),
+                rgba(255, 170, 220, 0) 70%
+            );
+            opacity: 0.85;
+        }
+        html.glass-nav body > * { position: relative; z-index: 1; }
+
+        /* Navbar glass shell */
+        html.glass-nav .satori-navbar {
+            padding: 0 14px;
+            height: 58px;
+            position: relative;
+            z-index: 5;
+            margin: 12px 12px 0;
+            border-radius: 20px;
+            isolation: isolate;
+            overflow: visible;
+            background:
+                linear-gradient(
+                    135deg,
+                    rgba(255, 255, 255, 0.12) 0%,
+                    rgba(255, 255, 255, 0.03) 45%,
+                    rgba(255, 255, 255, 0.07) 100%
+                ),
+                rgba(22, 22, 28, 0.48);
+            -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.05);
+            backdrop-filter: blur(28px) saturate(200%) brightness(1.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow:
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.22),
+                inset 1px 0 0 0 rgba(255, 255, 255, 0.08),
+                inset -1px 0 0 0 rgba(0, 0, 0, 0.18),
+                inset 0 -1px 0 0 rgba(0, 0, 0, 0.35),
+                0 12px 40px -10px rgba(0, 0, 0, 0.55),
+                0 2px 8px -2px rgba(0, 0, 0, 0.35);
+        }
+        html.glass-nav[data-theme="light"] .satori-navbar {
+            background:
+                linear-gradient(
+                    135deg,
+                    rgba(255, 255, 255, 0.85) 0%,
+                    rgba(255, 255, 255, 0.55) 50%,
+                    rgba(255, 255, 255, 0.78) 100%
+                ),
+                rgba(245, 245, 255, 0.35);
+            border: 1px solid rgba(255, 255, 255, 0.65);
+            box-shadow:
+                inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+                inset 1px 0 0 0 rgba(255, 255, 255, 0.5),
+                inset -1px 0 0 0 rgba(0, 0, 0, 0.03),
+                inset 0 -1px 0 0 rgba(0, 0, 0, 0.06),
+                0 12px 40px -10px rgba(60, 60, 110, 0.18),
+                0 2px 8px -2px rgba(0, 0, 0, 0.08);
+        }
+
+        /* Cursor-tracked top specular */
+        html.glass-nav .satori-navbar::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: radial-gradient(
+                700px 140px at var(--mx, 30%) -10%,
+                rgba(255, 255, 255, 0.18),
+                rgba(255, 255, 255, 0) 55%
+            );
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0.95;
+        }
+        html.glass-nav[data-theme="light"] .satori-navbar::before {
+            background: radial-gradient(
+                700px 140px at var(--mx, 30%) -10%,
+                rgba(255, 255, 255, 0.8),
+                rgba(255, 255, 255, 0) 55%
+            );
+        }
+
+        /* Slow ambient sweep */
+        html.glass-nav .satori-navbar::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: linear-gradient(
+                115deg,
+                rgba(255, 255, 255, 0) 30%,
+                rgba(255, 255, 255, 0.14) 45%,
+                rgba(255, 255, 255, 0.22) 50%,
+                rgba(255, 255, 255, 0.14) 55%,
+                rgba(255, 255, 255, 0) 70%
+            );
+            background-size: 220% 100%;
+            background-position: 120% 0;
+            background-repeat: no-repeat;
+            pointer-events: none;
+            z-index: 1;
+            opacity: 0;
+            animation: sgn-sheen 11s ease-in-out infinite;
+            animation-delay: 4s;
+        }
+        html.glass-nav[data-theme="light"] .satori-navbar::after {
+            background: linear-gradient(
+                115deg,
+                rgba(255, 255, 255, 0) 30%,
+                rgba(255, 255, 255, 0.55) 45%,
+                rgba(255, 255, 255, 0.8) 50%,
+                rgba(255, 255, 255, 0.55) 55%,
+                rgba(255, 255, 255, 0) 70%
+            );
+            background-size: 220% 100%;
+            background-position: 120% 0;
+            background-repeat: no-repeat;
+        }
+        @keyframes sgn-sheen {
+            0%        { background-position: 120% 0; opacity: 0; }
+            8%        { opacity: 0.9; }
+            48%       { background-position: -20% 0; opacity: 0.9; }
+            55%, 100% { background-position: -20% 0; opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            html.glass-nav .satori-navbar::after { animation: none; opacity: 0; }
+        }
+        html.glass-nav .satori-navbar > * { position: relative; z-index: 2; }
+
+        /* Logo glow (glass only) */
+        html.glass-nav .satori-brand { padding: 0 0.15rem; }
+        html.glass-nav .satori-brand-logo {
+            filter: drop-shadow(0 1px 4px rgba(90, 90, 255, 0.25));
+        }
+        html.glass-nav[data-theme="dark"] .satori-brand-logo {
+            filter: invert(1) drop-shadow(0 1px 4px rgba(140, 140, 255, 0.35));
+        }
+
+        /* Status chip as glass capsule */
+        html.glass-nav .satori-status-chip {
+            gap: 0.4rem;
+            padding: 0.32rem 0.7rem;
+            border-radius: 999px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02)),
+                rgba(0,0,0,0.12);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.15),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+        }
+        html.glass-nav[data-theme="light"] .satori-status-chip {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.6)),
+                rgba(0,0,0,0.02);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+        }
+
+        /* Inset glass capsule for the primary nav */
+        html.glass-nav .satori-nav-pill {
+            padding: 4px;
+            gap: 2px;
+            max-width: 760px;
+            border-radius: 999px;
+            position: relative;
+            background:
+                linear-gradient(180deg, rgba(0,0,0,0.22), rgba(0,0,0,0.08)),
+                rgba(255,255,255,0.015);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.38),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+        }
+        html.glass-nav[data-theme="light"] .satori-nav-pill {
+            background:
+                linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.01)),
+                rgba(255,255,255,0.25);
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            box-shadow:
+                inset 0 1px 2px rgba(0, 0, 0, 0.07),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        /* Nav items become glass buttons with animated hover bubbles */
+        html.glass-nav .snp-item {
+            position: relative;
+            gap: 0.35rem;
+            padding: 0.42rem 0.7rem;
+            border-radius: 999px;
+            z-index: 1;
+            background: transparent;
+            transition:
+                color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        html.glass-nav .snp-item i.material-icons {
+            font-size: 15px;
+            opacity: 0.78;
+            transition: opacity 0.2s;
+        }
+        @media (max-width: 1100px) {
+            html.glass-nav .snp-item { padding: 0.5rem 0.55rem; }
+            html.glass-nav .snp-item i.material-icons { font-size: 17px; }
+        }
+        html.glass-nav .snp-item::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.12),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+            opacity: 0;
+            transform: scale(0.94);
+            transition:
+                opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: -1;
+        }
+        html.glass-nav[data-theme="light"] .snp-item::before {
+            background: rgba(255, 255, 255, 0.7);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+        }
+        html.glass-nav .snp-item:hover {
+            background: transparent;
+            color: var(--text-primary);
+        }
+        html.glass-nav[data-theme="light"] .snp-item:hover {
+            background: transparent;
+        }
+        html.glass-nav .snp-item:hover::before {
+            opacity: 1;
+            transform: scale(1);
+        }
+        html.glass-nav .snp-item.snp-active {
+            background: transparent;
+            box-shadow: none;
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(30, 30, 120, 0.3);
+        }
+        html.glass-nav .snp-item.snp-active::before {
+            opacity: 1;
+            transform: scale(1);
+            background:
+                linear-gradient(
+                    160deg,
+                    rgba(255, 255, 255, 0.42) 0%,
+                    rgba(255, 255, 255, 0.16) 26%,
+                    rgba(255, 255, 255, 0.02) 52%,
+                    rgba(255, 255, 255, 0) 100%
+                ),
+                linear-gradient(135deg, #6e6eff 0%, #4a4add 100%);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.5),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+                0 4px 14px rgba(90, 90, 255, 0.5),
+                0 1px 2px rgba(30, 30, 100, 0.25);
+            animation: sgn-bubble 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes sgn-bubble {
+            0%   { transform: scale(0.82); opacity: 0; }
+            60%  { transform: scale(1.04); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Utility buttons become glass chips */
+        html.glass-nav .util-btn {
+            position: relative;
+            gap: 0.32rem;
+            padding: 0.4rem 0.65rem;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 11px;
+            overflow: visible;
+            transition:
+                color 0.2s ease,
+                transform 0.14s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        html.glass-nav .util-btn:active::before {
+            transform: scale(0.96);
+            transition: transform 0.08s ease-out;
+        }
+        html.glass-nav .util-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03)),
+                rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.18),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+            opacity: 0;
+            transform: scale(0.94);
+            transition:
+                opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: -1;
+        }
+        html.glass-nav[data-theme="light"] .util-btn::before {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.55)),
+                rgba(0, 0, 0, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.85);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+        }
+        html.glass-nav .util-btn .util-chevron {
+            opacity: 0.6;
+            transition: transform 0.22s;
+        }
+        html.glass-nav .util-btn:hover,
+        html.glass-nav .util-btn:focus,
+        html.glass-nav .util-btn.show {
+            background: transparent;
+            border-color: transparent;
+        }
+        html.glass-nav[data-theme="light"] .util-btn:hover,
+        html.glass-nav[data-theme="light"] .util-btn.show {
+            background: transparent;
+        }
+        html.glass-nav .util-btn:hover::before,
+        html.glass-nav .util-btn.show::before {
+            opacity: 1;
+            transform: scale(1);
+        }
+        html.glass-nav .util-btn.show .util-chevron {
+            transform: rotate(180deg);
+        }
+        html.glass-nav .util-icon-only { padding: 0.4rem 0.45rem; }
+        html.glass-nav .util-ghost { border-color: transparent; }
+        html.glass-nav .util-ghost::before {
+            background: transparent;
+            border-color: transparent;
+            box-shadow: none;
+        }
+        html.glass-nav .util-ghost:hover { border-color: transparent; }
+        html.glass-nav .util-ghost:hover::before {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03)),
+                rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.18),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+        }
+        html.glass-nav[data-theme="light"] .util-ghost:hover::before {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.55)),
+                rgba(0, 0, 0, 0.02);
+            border-color: rgba(255, 255, 255, 0.85);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+        }
+
+        /* Glowing divider rod */
+        html.glass-nav .nav-vdivider {
+            height: 22px;
+            background: linear-gradient(
+                180deg,
+                transparent 0%,
+                rgba(255, 255, 255, 0.18) 50%,
+                transparent 100%
+            );
+            margin: 0 0.2rem;
+        }
+        html.glass-nav[data-theme="light"] .nav-vdivider {
+            background: linear-gradient(
+                180deg,
+                transparent 0%,
+                rgba(0, 0, 0, 0.18) 50%,
+                transparent 100%
+            );
         }
         .dashboard-widget-col,
         .p2p-widget-col {
@@ -353,7 +805,13 @@
             color: var(--text-secondary);
             font-size: 0.95rem;
         }
-        /* Dropdowns */
+        /* ── Dropdowns: baseline flat ──
+           NOTE: Bootstrap/Popper writes an inline `transform` to
+           position the menu. We therefore animate the STANDALONE
+           `translate` property (not `transform`) so the two
+           compose cleanly — otherwise the animation would wipe
+           out Popper's positioning and the menu pops-then-drops
+           into place. `translate` also animates on the compositor. */
         .satori-dropdown {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
@@ -361,6 +819,11 @@
             padding: 5px;
             box-shadow: var(--shadow);
             min-width: 160px;
+            animation: sgn-dd-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes sgn-dd-in {
+            from { opacity: 0; translate: 0 -6px; }
+            to   { opacity: 1; translate: 0 0; }
         }
         .satori-dd-item {
             display: flex !important;
@@ -371,7 +834,7 @@
             color: var(--text-secondary) !important;
             font-size: 0.8rem;
             font-weight: 500;
-            transition: background 0.1s, color 0.1s;
+            transition: background 0.12s ease, color 0.12s ease;
         }
         .satori-dd-item i.material-icons {
             font-size: 16px;
@@ -387,6 +850,97 @@
         .satori-dd-divider {
             border-color: var(--border-color);
             margin: 4px 0;
+        }
+
+        /* ── Dropdowns: glass enhancement ── */
+        html.glass-nav .satori-dropdown {
+            background:
+                linear-gradient(
+                    160deg,
+                    rgba(255, 255, 255, 0.10) 0%,
+                    rgba(255, 255, 255, 0.03) 50%,
+                    rgba(255, 255, 255, 0.07) 100%
+                ),
+                rgba(20, 20, 28, 0.7);
+            -webkit-backdrop-filter: blur(32px) saturate(200%);
+            backdrop-filter: blur(32px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            padding: 6px;
+            margin-top: 8px !important;
+            min-width: 180px;
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.18),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+                0 12px 40px -6px rgba(0, 0, 0, 0.6),
+                0 4px 12px -4px rgba(0, 0, 0, 0.35);
+        }
+        html.glass-nav[data-theme="light"] .satori-dropdown {
+            background:
+                linear-gradient(
+                    160deg,
+                    rgba(255, 255, 255, 0.9) 0%,
+                    rgba(255, 255, 255, 0.65) 50%,
+                    rgba(255, 255, 255, 0.82) 100%
+                ),
+                rgba(245, 245, 255, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.04),
+                0 12px 40px -6px rgba(60, 60, 110, 0.2),
+                0 4px 12px -4px rgba(0, 0, 0, 0.1);
+        }
+        html.glass-nav .satori-dd-item {
+            gap: 0.5rem;
+            padding: 0.5rem 0.7rem !important;
+            border-radius: 9px;
+            position: relative;
+        }
+        html.glass-nav .satori-dd-item:hover {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.03)) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
+        }
+        html.glass-nav[data-theme="light"] .satori-dd-item:hover {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.5)) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,1);
+        }
+        html.glass-nav .satori-dd-divider {
+            border: none;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            margin: 5px 2px;
+            opacity: 1;
+        }
+        html.glass-nav[data-theme="light"] .satori-dd-divider {
+            border: none;
+            border-top: 1px solid rgba(0, 0, 0, 0.08);
+        }
+
+        /* Training-frequency panel needs higher opacity so the slider
+           ticks, labels, and numbers stay readable over any scrolling
+           content. We keep the glass edge-lighting but drop most of the
+           see-through. */
+        html.glass-nav .satori-dropdown.training-menu {
+            background:
+                linear-gradient(
+                    160deg,
+                    rgba(255, 255, 255, 0.05) 0%,
+                    rgba(255, 255, 255, 0.01) 50%,
+                    rgba(255, 255, 255, 0.04) 100%
+                ),
+                rgba(16, 16, 22, 0.99);
+        }
+        html.glass-nav[data-theme="light"] .satori-dropdown.training-menu {
+            background:
+                linear-gradient(
+                    160deg,
+                    rgba(255, 255, 255, 0.35) 0%,
+                    rgba(255, 255, 255, 0.2) 50%,
+                    rgba(255, 255, 255, 0.3) 100%
+                ),
+                rgba(250, 250, 254, 0.99);
         }
         .training-menu {
             min-width: 300px;
@@ -656,7 +1210,7 @@
             opacity: 0.55;
         }
 
-        /* Navbar responsive */
+        /* Navbar responsive — baseline */
         @media (max-width: 991.98px) {
             .satori-navbar {
                 flex-wrap: wrap;
@@ -677,6 +1231,21 @@
         @media (max-width: 640px) {
             .util-label { display: none; }
             .util-btn .util-chevron { display: none; }
+        }
+        /* Navbar responsive — glass */
+        @media (max-width: 991.98px) {
+            html.glass-nav .satori-navbar {
+                padding: 0.6rem 0.9rem;
+                gap: 0.45rem;
+                margin: 10px 10px 0;
+                border-radius: 18px;
+            }
+        }
+        @media (max-width: 640px) {
+            html.glass-nav .satori-navbar {
+                margin: 8px 8px 0;
+                padding: 0.55rem 0.7rem;
+            }
         }
 
         /* Cards - sharp edges, minimal */
@@ -967,25 +1536,6 @@
         }
 
         @media (max-width: 991.98px) {
-            .satori-navbar {
-                align-items: flex-start;
-            }
-            .satori-navbar .navbar-brand {
-                width: auto;
-                margin-bottom: 0.45rem;
-            }
-            .satori-connection {
-                width: 100%;
-                margin-bottom: 0.4rem;
-            }
-            .satori-nav-actions {
-                width: 100%;
-                justify-content: flex-start;
-                gap: 0.4rem;
-            }
-            .satori-nav-actions .btn {
-                padding: 0.4rem 0.65rem;
-            }
             .training-menu {
                 min-width: min(92vw, 320px) !important;
             }
@@ -1298,6 +1848,36 @@
             .legal-doc-title { font-size: 1.35rem; }
         }
     </style>
+    <script>
+        /* Liquid-glass capability detect — runs BEFORE body renders
+           to avoid a flash. Opts in only when the browser can
+           composite backdrop-filter smoothly AND the user hasn't
+           asked for reduced transparency AND the device reports
+           enough cores/memory to sustain it. Otherwise the navbar
+           falls back to the original flat design. */
+        (function () {
+            try {
+                const stored = localStorage.getItem('satori-glass-nav');
+                if (stored === 'off') return;
+                if (stored === 'on') {
+                    document.documentElement.classList.add('glass-nav');
+                    return;
+                }
+                const supportsBackdrop =
+                    (window.CSS && CSS.supports &&
+                        (CSS.supports('backdrop-filter', 'blur(1px)') ||
+                         CSS.supports('-webkit-backdrop-filter', 'blur(1px)')));
+                const reducedTransparency =
+                    window.matchMedia && matchMedia('(prefers-reduced-transparency: reduce)').matches;
+                const cores = navigator.hardwareConcurrency || 4;
+                const mem   = navigator.deviceMemory || 4;
+                const okHardware = cores >= 4 && mem >= 2;
+                if (supportsBackdrop && !reducedTransparency && okHardware) {
+                    document.documentElement.classList.add('glass-nav');
+                }
+            } catch (_) { /* no-op — fall back to flat */ }
+        })();
+    </script>
     {% block extra_css %}{% endblock %}
 </head>
 <body>

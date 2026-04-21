@@ -240,4 +240,54 @@
     }
 
     document.addEventListener('DOMContentLoaded', loadTrainingDelay);
+
+    /* ─── Liquid-glass cursor tracking ────────────────────────
+       Only runs when html.glass-nav is set. The capability-detect
+       script in base.html adds that class on supporting devices;
+       this script is a no-op on low-powered / unsupported systems. */
+    (function () {
+        if (!document.documentElement.classList.contains('glass-nav')) return;
+        const nav = document.querySelector('.satori-navbar');
+        if (!nav) return;
+
+        let targetMx = 30;
+        let currentMx = 30;
+        let rafId = null;
+        let hasPointer = false;
+
+        function tick() {
+            const diff = targetMx - currentMx;
+            if (Math.abs(diff) < 0.05) {
+                currentMx = targetMx;
+                rafId = null;
+                nav.style.setProperty('--mx', currentMx + '%');
+                return;
+            }
+            currentMx += diff * 0.14;
+            nav.style.setProperty('--mx', currentMx.toFixed(2) + '%');
+            rafId = requestAnimationFrame(tick);
+        }
+
+        function schedule() {
+            if (rafId === null) rafId = requestAnimationFrame(tick);
+        }
+
+        nav.addEventListener('pointermove', (e) => {
+            const rect = nav.getBoundingClientRect();
+            const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+            targetMx = pct;
+            hasPointer = true;
+            schedule();
+        });
+
+        nav.addEventListener('pointerleave', () => {
+            hasPointer = false;
+            setTimeout(() => {
+                if (!hasPointer) {
+                    targetMx = 30;
+                    schedule();
+                }
+            }, 600);
+        });
+    })();
 </script>
