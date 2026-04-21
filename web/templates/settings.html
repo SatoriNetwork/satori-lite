@@ -816,7 +816,7 @@
                             <div class="mode-head">
                                 <div>
                                     <div class="mode-title">Public relay</div>
-                                    <div class="mode-subtitle">Open-write, same model as port 7777</div>
+                                    <div class="mode-subtitle">Open relay for general traffic</div>
                                 </div>
                                 <span class="mode-radio"></span>
                                 <input class="form-check-input" type="radio" name="relayMode" id="relayModePublic" value="public">
@@ -824,18 +824,20 @@
                             <ul>
                                 <li>Accepts general relay traffic</li>
                                 <li>Publishes your Nostr identity via NIP-11</li>
-                                <li>Suggested port: <span class="font-mono-small" id="relayPublicPort">{{ relay_status.public_port }}</span></li>
+                                <li>Runtime port: <span class="font-mono-small" id="relayPublicPort">{{ relay_status.public_port }}</span></li>
                             </ul>
                             <div class="mode-port-group">
                                 <label class="form-label" for="relayPublicPortInput">Public relay port</label>
                                 <input type="number" min="1" max="65535" class="form-control" id="relayPublicPortInput" value="{{ relay_status.public_port }}" onclick="event.stopPropagation()">
                                 <div class="invalid-feedback" id="relayPublicPortError"></div>
-                                <div class="mode-port-help">Default 7777 — changing this now requires recreating the neuron container.</div>
+                                <div class="mode-port-help">
+                                    Assigned to this instance. Changing it requires recreating the container.
+                                </div>
                             </div>
                             <div class="mode-field-group">
                                 <label class="form-label" for="relayPublicHostInput">Advertised host / domain</label>
-                                <input type="text" class="form-control" id="relayPublicHostInput" value="{{ relay_status.public_host or '' }}" placeholder="testnet.satorinet.io" onclick="event.stopPropagation()">
-                                <div class="mode-port-help">Optional — used in the public URL shown to peers instead of the current request IP.</div>
+                                <input type="text" class="form-control" id="relayPublicHostInput" value="{{ relay_status.public_host or '' }}" placeholder="yourdomain.example" onclick="event.stopPropagation()">
+                                <div class="mode-port-help">Optional. Use your public domain if peers should connect through DNS instead of the current IP.</div>
                             </div>
                         </div>
 
@@ -844,7 +846,7 @@
                             <div class="mode-head">
                                 <div>
                                     <div class="mode-title">Private relay</div>
-                                    <div class="mode-subtitle">Managed policy, same model as port 7171</div>
+                                    <div class="mode-subtitle">Managed relay with restricted write policy</div>
                                 </div>
                                 <span class="mode-radio"></span>
                                 <input class="form-check-input" type="radio" name="relayMode" id="relayModePrivate" value="private">
@@ -852,18 +854,20 @@
                             <ul>
                                 <li>Your pubkey owns the source streams</li>
                                 <li>Foreign predictions are limited to your owned streams</li>
-                                <li>Suggested port: <span class="font-mono-small" id="relayPrivatePort">{{ relay_status.private_port }}</span></li>
+                                <li>Runtime port: <span class="font-mono-small" id="relayPrivatePort">{{ relay_status.private_port }}</span></li>
                             </ul>
                             <div class="mode-port-group">
                                 <label class="form-label" for="relayPrivatePortInput">Private relay port</label>
                                 <input type="number" min="1" max="65535" class="form-control" id="relayPrivatePortInput" value="{{ relay_status.private_port }}" onclick="event.stopPropagation()">
                                 <div class="invalid-feedback" id="relayPrivatePortError"></div>
-                                <div class="mode-port-help">Default 7171 — changing this now requires recreating the neuron container.</div>
+                                <div class="mode-port-help">
+                                    Assigned to this instance. Changing it requires recreating the container.
+                                </div>
                             </div>
                             <div class="mode-field-group">
                                 <label class="form-label" for="relayPrivateHostInput">Advertised host / domain</label>
-                                <input type="text" class="form-control" id="relayPrivateHostInput" value="{{ relay_status.private_host or '' }}" placeholder="testnet.satorinet.io" onclick="event.stopPropagation()">
-                                <div class="mode-port-help">Use a public domain when peers should discover this relay via DNS instead of an IP.</div>
+                                <input type="text" class="form-control" id="relayPrivateHostInput" value="{{ relay_status.private_host or '' }}" placeholder="private.yourdomain.example" onclick="event.stopPropagation()">
+                                <div class="mode-port-help">Optional. Use a domain if this private relay should be advertised through DNS.</div>
                             </div>
                         </div>
                     </div>

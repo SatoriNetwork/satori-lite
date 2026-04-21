@@ -231,6 +231,29 @@
     .login-submit:disabled { cursor: not-allowed; opacity: 0.82; }
     .login-submit .material-icons { font-size: 18px; }
 
+    @keyframes btn-glow-pulse {
+        0%, 100% {
+            box-shadow: 0 12px 30px color-mix(in oklab, var(--accent-primary) 32%, transparent),
+                        0 1px 0 rgba(255,255,255,0.08) inset;
+        }
+        50% {
+            box-shadow: 0 14px 48px color-mix(in oklab, var(--accent-primary) 62%, transparent),
+                        0 0 32px color-mix(in oklab, var(--accent-primary) 22%, transparent),
+                        0 1px 0 rgba(255,255,255,0.1) inset;
+        }
+    }
+    @keyframes dot-blink {
+        0%, 60%, 100% { opacity: 0.18; }
+        30%            { opacity: 1; }
+    }
+    .login-submit.is-loading { animation: btn-glow-pulse 1.8s ease-in-out infinite; }
+    .unlock-dot {
+        display: inline-block;
+        animation: dot-blink 1.4s ease-in-out infinite;
+    }
+    .unlock-dot:nth-child(2) { animation-delay: 0.18s; }
+    .unlock-dot:nth-child(3) { animation-delay: 0.36s; }
+
     /* ── Flash / error messages ──────────────────────────── */
     .login-flash {
         display: flex;
@@ -259,62 +282,156 @@
         color: #22c55e;
     }
 
-    /* ── Auth loading overlay (kept, polished) ─────────────── */
+    /* ── Auth loading overlay ─────────────────────────────── */
+    @keyframes overlay-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+    }
+    @keyframes unlock-card-spring {
+        0%   { opacity: 0; transform: scale(0.88) translateY(22px); }
+        55%  { opacity: 1; transform: scale(1.025) translateY(-4px); }
+        75%  { transform: scale(0.99) translateY(1px); }
+        100% { transform: scale(1) translateY(0); }
+    }
+    @keyframes bar-shimmer {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(600%); }
+    }
+
     .auth-loading-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(8, 8, 12, 0.82);
-        backdrop-filter: blur(4px);
+        background: rgba(8, 8, 12, 0.86);
+        backdrop-filter: blur(7px);
+        -webkit-backdrop-filter: blur(7px);
         display: none;
         align-items: center;
         justify-content: center;
         z-index: 3000;
     }
-    [data-theme="light"] .auth-loading-overlay { background: rgba(245, 245, 247, 0.85); }
+    [data-theme="light"] .auth-loading-overlay { background: rgba(238, 238, 243, 0.9); }
+    .auth-loading-overlay.is-active {
+        display: flex;
+        animation: overlay-in 0.28s ease forwards;
+    }
+
     .auth-loading-card {
-        width: min(92vw, 440px);
+        width: min(92vw, 400px);
         background: var(--bg-card);
         border: 1px solid var(--border-color);
-        border-radius: 14px;
-        padding: 1.15rem 1.2rem;
-        box-shadow: var(--shadow);
-    }
-    .auth-loading-title {
-        font-size: 0.85rem;
-        font-weight: 600;
-        margin-bottom: 0.6rem;
-        color: var(--text-primary);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        display: inline-flex;
+        border-radius: 20px;
+        padding: 2.2rem 1.85rem 1.75rem;
+        box-shadow:
+            0 36px 90px rgba(0,0,0,0.5),
+            0 1px 0 rgba(255,255,255,0.05) inset;
+        display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 0.4rem;
-    }
-    .auth-loading-title .material-icons {
-        font-size: 15px;
-        color: var(--accent-primary);
-    }
-    .auth-loading-progress {
-        height: 6px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
+        animation: unlock-card-spring 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+        animation-delay: 0.05s;
+        position: relative;
         overflow: hidden;
     }
-    [data-theme="light"] .auth-loading-progress { background: rgba(0, 0, 0, 0.08); }
+    [data-theme="light"] .auth-loading-card {
+        box-shadow: 0 28px 70px rgba(0,0,0,0.12), 0 1px 0 rgba(0,0,0,0.04) inset;
+    }
+    .auth-loading-card::before {
+        content: '';
+        position: absolute;
+        left: 2.5rem; right: 2.5rem; top: -1px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, var(--accent-primary), transparent);
+        opacity: 0.65;
+    }
+
+    /* SVG lock */
+    .unlock-anim-svg {
+        width: 68px;
+        height: 78px;
+        color: var(--accent-primary);
+        margin-bottom: 1.2rem;
+        filter: drop-shadow(0 4px 14px color-mix(in oklab, var(--accent-primary) 45%, transparent));
+        transition: color 0.55s ease, filter 0.55s ease;
+    }
+    .unlock-anim-svg.phase-success {
+        color: #22c55e;
+        filter: drop-shadow(0 4px 20px rgba(34, 197, 94, 0.6));
+    }
+    .unlock-anim-svg .lock-shackle-g {
+        transform-box: fill-box;
+        transform-origin: 100% 100%;
+        transition: transform 0.72s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .unlock-anim-svg.phase-lift .lock-shackle-g {
+        transform: translateY(-5px);
+    }
+    .unlock-anim-svg.phase-open .lock-shackle-g {
+        transform: translateY(-3px) rotate(52deg);
+    }
+
+    .auth-loading-label {
+        font-size: 0.66rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.24em;
+        color: var(--text-muted);
+        margin-bottom: 1.4rem;
+    }
+
+    .auth-loading-progress {
+        width: 100%;
+        height: 5px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+        overflow: hidden;
+        position: relative;
+        margin-bottom: 0.85rem;
+    }
+    [data-theme="light"] .auth-loading-progress { background: rgba(0, 0, 0, 0.07); }
+
     .auth-loading-progress-bar {
         height: 100%;
         width: 0%;
         background: var(--accent-gradient);
-        transition: width 0.22s ease;
+        transition: width 0.22s ease, background 0.5s ease, box-shadow 0.5s ease;
+        position: relative;
+        border-radius: 999px;
+        box-shadow: 0 0 9px color-mix(in oklab, var(--accent-primary) 72%, transparent);
     }
+    .auth-loading-progress-bar::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        width: 18%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+        animation: bar-shimmer 1.9s ease-in-out infinite;
+        border-radius: 999px;
+    }
+    .auth-loading-progress-bar.is-success {
+        background: linear-gradient(90deg, #15803d, #22c55e);
+        box-shadow: 0 0 14px rgba(34, 197, 94, 0.72);
+    }
+
     .auth-loading-meta {
-        margin-top: 0.6rem;
+        width: 100%;
         display: flex;
         justify-content: space-between;
         align-items: center;
         color: var(--text-secondary);
-        font-size: 0.76rem;
-        letter-spacing: 0.05em;
+        font-size: 0.74rem;
+        letter-spacing: 0.04em;
+    }
+    .auth-step-wrap {
+        flex: 1;
+        overflow: hidden;
+    }
+    #authLoadingStep {
+        display: block;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    #authLoadingStep.fade-out {
+        opacity: 0;
+        transform: translateY(-5px);
     }
 </style>
 {% endblock %}
@@ -377,15 +494,24 @@
 
 <div id="authLoadingOverlay" class="auth-loading-overlay" aria-hidden="true">
     <div class="auth-loading-card">
-        <div class="auth-loading-title">
-            <i class="material-icons">lock_open</i>
-            Unlocking vault
-        </div>
+        <!-- Animated padlock: shackle swings open as progress advances -->
+        <svg class="unlock-anim-svg" id="unlockSvg" viewBox="0 0 64 72" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <g class="lock-shackle-g" id="lockShackleG">
+                <path d="M18 32V22C18 13.2 24.3 7 32 7C39.7 7 46 13.2 46 22V32"
+                      stroke="currentColor" stroke-width="8.5" stroke-linecap="round"/>
+            </g>
+            <rect x="6" y="32" width="52" height="36" rx="7" fill="currentColor"/>
+            <circle cx="32" cy="50" r="5.2" fill="var(--bg-card)"/>
+            <rect x="29.5" y="50" width="5" height="9" rx="2.5" fill="var(--bg-card)"/>
+        </svg>
+        <div class="auth-loading-label">Unlocking vault</div>
         <div class="auth-loading-progress">
             <div id="authLoadingProgressBar" class="auth-loading-progress-bar"></div>
         </div>
         <div class="auth-loading-meta">
-            <span id="authLoadingStep">Verifying credentials…</span>
+            <div class="auth-step-wrap">
+                <span id="authLoadingStep">Verifying credentials…</span>
+            </div>
             <strong id="authLoadingPercent">0%</strong>
         </div>
     </div>
@@ -399,6 +525,7 @@
         const bar         = document.getElementById('authLoadingProgressBar');
         const percent     = document.getElementById('authLoadingPercent');
         const step        = document.getElementById('authLoadingStep');
+        const unlockSvg   = document.getElementById('unlockSvg');
         const passwordEl  = document.getElementById('password');
         const revealBtn   = document.getElementById('loginRevealBtn');
         const revealIcon  = document.getElementById('loginRevealIcon');
@@ -433,26 +560,53 @@
             themeIcon.textContent = current === 'dark' ? 'light_mode' : 'dark_mode';
         }
 
-        // Submit: show overlay + simulated progress
+        // Submit: show overlay + simulated progress with lock animation phases
         if (!form || !button || !overlay || !bar || !percent || !step) return;
+
+        function setStep(text) {
+            step.classList.add('fade-out');
+            setTimeout(() => {
+                step.textContent = text;
+                step.classList.remove('fade-out');
+            }, 210);
+        }
+
         form.addEventListener('submit', function () {
             button.disabled = true;
-            button.innerHTML = '<i class="material-icons">hourglass_top</i><span>Unlocking…</span>';
-            overlay.style.display = 'flex';
+            button.classList.add('is-loading');
+            button.innerHTML = '<i class="material-icons">lock_open</i><span>Unlocking<span class="unlock-dot">.</span><span class="unlock-dot">.</span><span class="unlock-dot">.</span></span>';
+
+            overlay.classList.add('is-active');
             overlay.setAttribute('aria-hidden', 'false');
 
             let current = 8;
+            let liftDone = false, openDone = false, successDone = false;
             bar.style.width = current + '%';
             percent.textContent = current + '%';
-            step.textContent = 'Verifying credentials…';
 
             timer = setInterval(() => {
                 if (current < 92) {
                     current += Math.max(1, Math.round((92 - current) * 0.14));
                     bar.style.width = current + '%';
                     percent.textContent = current + '%';
-                    if (current > 55) {
-                        step.textContent = 'Preparing dashboard…';
+
+                    if (current > 38 && !liftDone) {
+                        liftDone = true;
+                        if (unlockSvg) unlockSvg.classList.add('phase-lift');
+                        setStep('Decrypting wallet data…');
+                    }
+                    if (current > 65 && !openDone) {
+                        openDone = true;
+                        if (unlockSvg) {
+                            unlockSvg.classList.remove('phase-lift');
+                            unlockSvg.classList.add('phase-open');
+                        }
+                        setStep('Preparing dashboard…');
+                    }
+                    if (current > 82 && !successDone) {
+                        successDone = true;
+                        bar.classList.add('is-success');
+                        if (unlockSvg) unlockSvg.classList.add('phase-success');
                     }
                 } else if (timer) {
                     clearInterval(timer);
