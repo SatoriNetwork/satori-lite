@@ -110,23 +110,44 @@
             </button>
             <div class="dropdown-menu dropdown-menu-end satori-dropdown training-menu"
                  aria-labelledby="trainingFrequencyDropdown">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                    <label class="form-label mb-0" style="font-size:0.8rem;">Training Frequency</label>
-                    <span title="Controls how frequently the AI engine trains new models. Lower = less CPU.">
-                        <i class="material-icons text-muted" style="font-size:15px;cursor:help;">info</i>
-                    </span>
-                </div>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="text-muted small">Slow</span>
-                    <input type="range" class="form-range flex-grow-1 mb-0"
-                           id="trainingDelaySlider"
-                           min="0" max="100" step="1" value="50"
-                           oninput="updateTrainingDelayLabel(this.value)"
-                           onchange="setTrainingDelay(this.value)">
-                    <span class="text-muted small">Fast</span>
-                </div>
-                <div class="text-center mt-2">
-                    <span class="badge bg-secondary" id="trainingDelayLabel">10 minutes</span>
+                <div class="tf-panel">
+                    <div class="tf-head">
+                        <span class="tf-eyebrow">
+                            <i class="material-icons">tune</i>
+                            Training frequency
+                        </span>
+                        <span class="tf-info"
+                              data-tip="Controls how frequently the AI engine trains new models. Lower = less CPU."
+                              aria-label="Controls how frequently the AI engine trains new models. Lower = less CPU."
+                              tabindex="0">
+                            <i class="material-icons">info</i>
+                        </span>
+                    </div>
+                    <div class="tf-readout">
+                        <span class="tf-readout-value" id="trainingDelayLabel">10 minutes</span>
+                        <span class="tf-readout-cap">between runs</span>
+                    </div>
+                    <div class="tf-track-wrap">
+                        <input type="range" class="tf-range"
+                               id="trainingDelaySlider"
+                               min="0" max="100" step="1" value="50"
+                               style="--tf-fill: 50%;"
+                               oninput="this.style.setProperty('--tf-fill', this.value + '%'); updateTrainingDelayLabel(this.value)"
+                               onchange="setTrainingDelay(this.value)">
+                        <div class="tf-ticks" aria-hidden="true">
+                            <span></span><span></span><span></span><span></span><span></span>
+                        </div>
+                    </div>
+                    <div class="tf-legend">
+                        <span class="tf-legend-item">
+                            <i class="material-icons">eco</i>
+                            Slow
+                        </span>
+                        <span class="tf-legend-item tf-legend-right">
+                            Fast
+                            <i class="material-icons">bolt</i>
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -148,3 +169,21 @@
     </div>
 
 </nav>
+
+<script>
+    // Keep the training-frequency slider's fill in sync even when the
+    // value is set programmatically (e.g. loadTrainingDelay on page load).
+    (function () {
+        document.addEventListener('DOMContentLoaded', function () {
+            const slider = document.getElementById('trainingDelaySlider');
+            if (!slider) return;
+            const syncFill = () => slider.style.setProperty('--tf-fill', (slider.value || 0) + '%');
+            syncFill();
+            const orig = window.updateTrainingDelayLabel;
+            window.updateTrainingDelayLabel = function (v) {
+                if (typeof orig === 'function') orig(v);
+                syncFill();
+            };
+        });
+    })();
+</script>
