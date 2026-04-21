@@ -192,13 +192,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 time.sleep(delay)
 
     async def _networkReconcileLoop(self):
-        """Reconciliation loop: ensures we are subscribed to all desired streams
-        and fetches data sources on their cadence.
+        """Reconciliation loop: ensures we are subscribed to all desired streams.
 
-        Every 5 minutes:
+        Every hour:
         1. Reconcile subscriptions (connect, discover, subscribe)
         2. Ensure relay connections exist for active publications
-        3. Fetch any data sources that are due
+        3. Restore subscriber access
+        4. Check channel expiries
+
+        Data source polling runs on a separate faster loop
+        (_networkDataSourceFetchLoop) so per-source cadences shorter than
+        the reconcile interval can fire on time.
         """
         from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
 
@@ -219,28 +223,39 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkSubscribed.clear()
         self._networkFirstRun = True
 
-        while True:
-            try:
-                await self._networkReconcile(SatoriNostrConfig)
-            except Exception as e:
-                logging.error(f'Network reconcile error: {e}')
-            try:
-                await self._networkEnsurePublisherConnections(SatoriNostrConfig)
-            except Exception as e:
-                logging.error(f'Network publisher connect error: {e}')
-            try:
-                await self._networkRestoreSubscriberAccess()
-            except Exception as e:
-                logging.error(f'Network subscriber access restore error: {e}')
-            try:
-                await self._networkFetchDataSources()
-            except Exception as e:
-                logging.error(f'Network data source fetch error: {e}')
-            try:
-                await self._channelExpiryCheck()
-            except Exception as e:
-                logging.error(f'Channel expiry check error: {e}')
-            await asyncio.sleep(3600)
+        fetch_task = None
+        try:
+            while True:
+                try:
+                    await self._networkReconcile(SatoriNostrConfig)
+                except Exception as e:
+                    logging.error(f'Network reconcile error: {e}')
+                try:
+                    await self._networkEnsurePublisherConnections(SatoriNostrConfig)
+                except Exception as e:
+                    logging.error(f'Network publisher connect error: {e}')
+                try:
+                    await self._networkRestoreSubscriberAccess()
+                except Exception as e:
+                    logging.error(f'Network subscriber access restore error: {e}')
+                # Start the dedicated data source fetch loop after the first
+                # reconcile cycle so publisher relay connections exist before
+                # the first fetch attempts to publish.
+                if fetch_task is None or fetch_task.done():
+                    fetch_task = asyncio.create_task(
+                        self._networkDataSourceFetchLoop())
+                try:
+                    await self._channelExpiryCheck()
+                except Exception as e:
+                    logging.error(f'Channel expiry check error: {e}')
+                await asyncio.sleep(3600)
+        finally:
+            if fetch_task is not None and not fetch_task.done():
+                fetch_task.cancel()
+                try:
+                    await fetch_task
+                except BaseException:
+                    pass
 
     async def _networkEnsurePublisherConnections(self, ConfigClass):
         """Connect to all known relays if we have active publications.
@@ -2728,6 +2743,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             finally:
                 if relay_url not in self._neededRelays():
                     await self._networkDisconnect(relay_url)
+
+    async def _networkDataSourceFetchLoop(self):
+        """Dedicated loop that polls active data sources every 5 minutes.
+
+        Runs in parallel with the hourly reconciliation loop so per-source
+        cadences shorter than the reconcile interval actually fire on time.
+        The first tick runs immediately; thereafter every 300 seconds.
+        """
+        while True:
+            try:
+                await self._networkFetchDataSources()
+            except Exception as e:
+                logging.error(f'Network data source fetch error: {e}')
+            await asyncio.sleep(300)
 
     async def _networkFetchDataSources(self):
         """Poll active data sources and publish values that are due.
