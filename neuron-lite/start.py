@@ -227,6 +227,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.error(f'Network publisher connect error: {e}')
             try:
+                await self._networkRestoreSubscriberAccess()
+            except Exception as e:
+                logging.error(f'Network subscriber access restore error: {e}')
+            try:
                 await self._networkFetchDataSources()
             except Exception as e:
                 logging.error(f'Network data source fetch error: {e}')
@@ -261,6 +265,40 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 client = await self._networkConnect(relay_url, ConfigClass)
                 if client:
                     await self._networkAnnouncePublications(relay_url)
+
+    async def _networkRestoreSubscriberAccess(self):
+        """Restore persisted subscriber access into connected clients.
+
+        On provider restart, _subscribers in each SatoriNostr client is empty.
+        This reloads the subscriber_access table and populates every connected
+        client so that subscribers who already paid don't lose their access
+        rights while waiting for a new subscription announcement.
+
+        Called every reconcile cycle but is idempotent — record_payment only
+        advances last_paid_seq, never regresses it.
+        """
+        records = await asyncio.to_thread(
+            self.networkDB.load_subscriber_access)
+        if not records:
+            return
+        restored = 0
+        for rec in records:
+            stream_name = rec['stream_name']
+            nostr_pubkey = rec['nostr_pubkey']
+            last_paid_seq = rec['last_paid_seq']
+            if not nostr_pubkey or last_paid_seq <= 0:
+                continue
+            for client in self._networkClients.values():
+                if nostr_pubkey not in client._subscribers.get(
+                        stream_name, {}):
+                    client.record_subscription(stream_name, nostr_pubkey)
+                client.record_payment(stream_name, nostr_pubkey, last_paid_seq)
+            restored += 1
+        if restored:
+            logging.info(
+                f'Channel: restored {restored} subscriber access records '
+                f'from DB',
+                color='cyan')
 
     async def _networkConnect(self, relay_url: str, ConfigClass):
         """Connect to a relay if not already connected. Returns client or None."""
@@ -1003,7 +1041,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             await self._grantChannelAccess(
                 sender_nostr_pubkey=sender_nostr_pubkey,
                 total_paid_sats=commitment.pay_amount_sats,
-                stream_name=commitment.stream_name)
+                stream_name=commitment.stream_name,
+                p2sh_address=commitment.p2sh_address)
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -1210,7 +1249,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         await self._grantChannelAccess(
             sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
             total_paid_sats=commitment.pay_amount_sats,
-            stream_name=commitment.stream_name)
+            stream_name=commitment.stream_name,
+            p2sh_address=p2sh_address)
         logging.info(
             f'Channel: claimed {commitment.pay_amount_sats} sats '
             f'from {p2sh_address} — txid={txid}',
@@ -1425,6 +1465,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         sender_nostr_pubkey: str,
         total_paid_sats: int,
         stream_name: str = '',
+        p2sh_address: str = '',
     ) -> None:
         """Update subscriber access rights after a successful channel claim.
 
@@ -1440,6 +1481,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         The provider's publish_observation() only sends encrypted data to
         subscribers whose last_paid_seq >= current seq_num, so this is what
         unlocks the next batch of observations for the paying subscriber.
+
+        When p2sh_address is supplied, the granted last_paid_seq is persisted
+        to the subscriber_access table so it survives provider restarts and
+        Nostr key rotations (Fix C).
         """
         if not sender_nostr_pubkey or total_paid_sats <= 0:
             return
@@ -1475,6 +1520,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     base_seq = max(base_seq, existing.last_paid_seq)
                 grant_to_seq = base_seq + paid_count
                 client.record_payment(pub_stream, sender_nostr_pubkey, grant_to_seq)
+            # Persist to DB so access survives provider restarts (Fix C).
+            if p2sh_address:
+                try:
+                    await asyncio.to_thread(
+                        self.networkDB.save_subscriber_access,
+                        pub_stream, p2sh_address,
+                        sender_nostr_pubkey, grant_to_seq)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: failed to persist subscriber access: {e}')
             logging.info(
                 f'Channel: granted {sender_nostr_pubkey[:16]}… access to '
                 f'{pub_stream} up to seq={grant_to_seq} '

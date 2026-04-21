@@ -207,6 +207,20 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN receiver_nostr_pubkey TEXT")
+        # Persisted subscriber access state (provider side). Keyed by
+        # (stream_name, p2sh_address) so it survives provider restarts and
+        # Nostr key rotations. The nostr_pubkey column tracks the most
+        # recent Nostr identity associated with this channel+stream pair.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS subscriber_access (
+                stream_name    TEXT NOT NULL,
+                p2sh_address   TEXT NOT NULL,
+                nostr_pubkey   TEXT NOT NULL,
+                last_paid_seq  INTEGER NOT NULL DEFAULT 0,
+                updated_at     INTEGER NOT NULL,
+                PRIMARY KEY (stream_name, p2sh_address)
+            )
+        """)
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -761,6 +775,17 @@ class NetworkDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_receiver_channels_by_sender_nostr(
+        self, sender_nostr_pubkey: str
+    ) -> list[dict]:
+        """Return receiver-side channels for a given sender Nostr pubkey."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM channels "
+            "WHERE is_sender = 0 AND sender_nostr_pubkey = ?",
+            (sender_nostr_pubkey,)).fetchall()
+        return [dict(r) for r in rows]
+
     def update_channel_remainder(self, p2sh_address: str,
                                  remainder_sats: int) -> None:
         """Update remaining balance after a commitment is claimed."""
@@ -798,4 +823,56 @@ class NetworkDB:
         """, (funding_txid, funding_vout, locked_sats, locked_sats,
               ts, p2sh_address))
         conn.commit()
+
+    # ── Subscriber Access (provider side) ─────────────────────────
+
+    def save_subscriber_access(
+        self,
+        stream_name: str,
+        p2sh_address: str,
+        nostr_pubkey: str,
+        last_paid_seq: int,
+    ) -> None:
+        """Persist subscriber access state. Upserts on (stream_name, p2sh)."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO subscriber_access
+                (stream_name, p2sh_address, nostr_pubkey, last_paid_seq, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(stream_name, p2sh_address) DO UPDATE SET
+                nostr_pubkey  = excluded.nostr_pubkey,
+                last_paid_seq = excluded.last_paid_seq,
+                updated_at    = excluded.updated_at
+        """, (stream_name, p2sh_address, nostr_pubkey, last_paid_seq,
+              int(time.time())))
+        conn.commit()
+
+    def load_subscriber_access(self) -> list[dict]:
+        """Load all persisted subscriber access records."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM subscriber_access").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_subscriber_access_by_nostr(
+        self, stream_name: str, nostr_pubkey: str
+    ) -> dict | None:
+        """Look up access by Nostr pubkey (for subscription announcements)."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM subscriber_access "
+            "WHERE stream_name = ? AND nostr_pubkey = ?",
+            (stream_name, nostr_pubkey)).fetchone()
+        return dict(row) if row else None
+
+    def get_subscriber_access_by_channel(
+        self, stream_name: str, p2sh_address: str
+    ) -> dict | None:
+        """Look up access by channel address."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM subscriber_access "
+            "WHERE stream_name = ? AND p2sh_address = ?",
+            (stream_name, p2sh_address)).fetchone()
+        return dict(row) if row else None
 
