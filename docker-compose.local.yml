@@ -29,6 +29,8 @@ services:
       - ${SATORI_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     ports:
       - "24601:24601"
+      - "7777:7777"
+      - "7171:7171"
     networks:
       - default
     command: python /Satori/Neuron/start.py
@@ -62,6 +64,8 @@ services:
       - ./tests:/Satori/tests
     ports:
       - "24601:24601"
+      - "7777:7777"
+      - "7171:7171"
     networks:
       - default
     command: python /Satori/Neuron/start.py

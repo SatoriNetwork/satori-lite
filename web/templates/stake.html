@@ -904,50 +904,6 @@
         }
     }
 
-    function sliderToSeconds(sliderValue) {
-        const percentage = sliderValue / 100.0;
-        if (percentage <= 0.0) return 86400;
-        if (percentage >= 1.0) return 0;
-        return Math.round(86400 * Math.pow(1 - percentage, 7));
-    }
-    function secondsToSlider(seconds) {
-        if (seconds >= 86400) return 0;
-        if (seconds <= 0) return 100;
-        const percentage = 1 - Math.pow(seconds / 86400, 1 / 7);
-        return Math.round(percentage * 100);
-    }
-    function formatDelay(seconds) {
-        if (seconds === 0) return "Continuous";
-        if (seconds < 60) return `${seconds} seconds`;
-        if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
-        if (seconds < 86400) return `${Math.round(seconds / 3600)} hours`;
-        return `${Math.round(seconds / 86400)} days`;
-    }
-    function updateTrainingDelayLabel(sliderValue) {
-        const seconds = sliderToSeconds(sliderValue);
-        const label = document.getElementById('trainingDelayLabel');
-        if (label) {
-            label.textContent = formatDelay(seconds);
-        }
-    }
-    async function setTrainingDelay(sliderValue) {
-        const seconds = sliderToSeconds(sliderValue);
-        const result = await apiCall('/engine/training-delay', 'POST', { delay_seconds: seconds });
-        if (result && !result.error) {
-            showToast(`Training frequency updated: ${formatDelay(seconds)}`);
-        }
-    }
-    async function loadTrainingDelay() {
-        const slider = document.getElementById('trainingDelaySlider');
-        if (!slider) return;
-        const result = await apiCall('/engine/training-delay');
-        if (result && result.delay_seconds !== undefined) {
-            const sliderValue = secondsToSlider(result.delay_seconds);
-            slider.value = sliderValue;
-            updateTrainingDelayLabel(sliderValue);
-        }
-    }
-
     /* ── Hero meta ─────────────────────────────────────── */
     function updateStakingHeroPill() {
         const pill = document.getElementById('stkStakingPill');
@@ -1346,9 +1302,6 @@
         loadLenders();
         loadAvailablePools();
         loadPoolCommission();
-        if (document.getElementById('trainingDelaySlider')) {
-            loadTrainingDelay();
-        }
     });
 </script>
 {% endblock %}

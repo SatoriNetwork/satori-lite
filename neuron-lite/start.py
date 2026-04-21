@@ -86,6 +86,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
         self._channelPayLocks: dict = {}   # p2sh_address -> asyncio.Lock (Fix H)
         self._mundoCache: dict = {}        # p2sh_address -> {signed_hex, incomplete_hex, ...} (Fix J)
+        self._dataSourceTasks: dict = {}  # stream_name -> (asyncio.Task, cadence)
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -194,13 +195,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 time.sleep(delay)
 
     async def _networkReconcileLoop(self):
-        """Reconciliation loop: ensures we are subscribed to all desired streams
-        and fetches data sources on their cadence.
+        """Reconciliation loop: ensures we are subscribed to all desired streams.
 
-        Every 5 minutes:
+        Every hour:
         1. Reconcile subscriptions (connect, discover, subscribe)
         2. Ensure relay connections exist for active publications
-        3. Fetch any data sources that are due
+        3. Restore subscriber access
+        4. Check channel expiries
+
+        Each data source gets its own asyncio task (managed by
+        _networkDataSourceManager) that fires at exactly its cadence.
         """
         from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
 
@@ -221,30 +225,47 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._accessRequestListeners.clear()
         self._settledChannels.clear()
         self._networkSubscribed.clear()
+        for _sn, (task, _cad) in list(self._dataSourceTasks.items()):
+            task.cancel()
+        self._dataSourceTasks.clear()
         self._networkFirstRun = True
 
-        while True:
-            try:
-                await self._networkReconcile(SatoriNostrConfig)
-            except Exception as e:
-                logging.error(f'Network reconcile error: {e}')
-            try:
-                await self._networkEnsurePublisherConnections(SatoriNostrConfig)
-            except Exception as e:
-                logging.error(f'Network publisher connect error: {e}')
-            try:
-                await self._networkRestoreSubscriberAccess()
-            except Exception as e:
-                logging.error(f'Network subscriber access restore error: {e}')
-            try:
-                await self._networkFetchDataSources()
-            except Exception as e:
-                logging.error(f'Network data source fetch error: {e}')
-            try:
-                await self._channelExpiryCheck()
-            except Exception as e:
-                logging.error(f'Channel expiry check error: {e}')
-            await asyncio.sleep(3600)
+        fetch_task = None
+        try:
+            while True:
+                try:
+                    await self._networkReconcile(SatoriNostrConfig)
+                except Exception as e:
+                    logging.error(f'Network reconcile error: {e}')
+                try:
+                    await self._networkEnsurePublisherConnections(SatoriNostrConfig)
+                except Exception as e:
+                    logging.error(f'Network publisher connect error: {e}')
+                try:
+                    await self._networkRestoreSubscriberAccess()
+                except Exception as e:
+                    logging.error(f'Network subscriber access restore error: {e}')
+                # Start the data source manager after the first reconcile
+                # cycle so publisher relay connections exist before the
+                # first fetch attempts to publish.
+                if fetch_task is None or fetch_task.done():
+                    fetch_task = asyncio.create_task(
+                        self._networkDataSourceManager())
+                try:
+                    await self._channelExpiryCheck()
+                except Exception as e:
+                    logging.error(f'Channel expiry check error: {e}')
+                await asyncio.sleep(3600)
+        finally:
+            if fetch_task is not None and not fetch_task.done():
+                fetch_task.cancel()
+                try:
+                    await fetch_task
+                except BaseException:
+                    pass
+            for _sn, (task, _cad) in list(self._dataSourceTasks.items()):
+                task.cancel()
+            self._dataSourceTasks.clear()
 
     async def _networkEnsurePublisherConnections(self, ConfigClass):
         """Connect to all known relays if we have active publications.
@@ -3036,117 +3057,174 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if relay_url not in self._neededRelays():
                     await self._networkDisconnect(relay_url)
 
-    async def _networkFetchDataSources(self):
-        """Poll active data sources and publish values that are due.
+    async def _networkDataSourceManager(self):
+        """Reconcile per-source fetch tasks with the DB every 60s.
 
-        For each active data source, checks whether enough time has passed
-        since the last publish (based on cadence_seconds). If due, fetches the
-        URL, runs the parser, and publishes the extracted value.
+        Each active data source gets its own asyncio.Task that fires at
+        exactly its cadence.  This manager spawns new tasks, cancels tasks
+        for removed/deactivated sources, and respawns crashed workers.
+        """
+        while True:
+            try:
+                sources = await asyncio.to_thread(
+                    self.networkDB.get_active_data_sources)
+                pubs = await asyncio.to_thread(
+                    self.networkDB.get_active_publications)
+                pub_map = {p['stream_name']: p for p in pubs}
+
+                desired = {}  # stream_name -> (source_row, pub_row)
+                for src in sources:
+                    sn = src['stream_name']
+                    if not src.get('url') or not src.get('cadence_seconds'):
+                        continue
+                    pub = pub_map.get(sn)
+                    if not pub:
+                        continue
+                    desired[sn] = (src, pub)
+
+                # Cancel tasks for sources no longer desired
+                for sn in list(self._dataSourceTasks):
+                    if sn not in desired:
+                        task, _ = self._dataSourceTasks.pop(sn)
+                        task.cancel()
+
+                # Spawn or respawn tasks
+                for sn, (src, pub) in desired.items():
+                    cadence = src['cadence_seconds']
+                    existing = self._dataSourceTasks.get(sn)
+                    if existing is not None:
+                        task, prev_cadence = existing
+                        if not task.done() and prev_cadence == cadence:
+                            continue  # healthy, no change
+                        task.cancel()  # crashed or cadence changed
+                    new_task = asyncio.create_task(
+                        self._networkDataSourceWorker(src, pub))
+                    self._dataSourceTasks[sn] = (new_task, cadence)
+
+            except Exception as e:
+                logging.error(f'Network data source manager error: {e}')
+            await asyncio.sleep(60)
+
+    async def _networkDataSourceWorker(self, src: dict, pub: dict):
+        """Fetch a single data source at its exact cadence.
+
+        Scheduling is clock-anchored to UTC: the fire-time grid is
+        defined by offset_seconds (position within each cadence cycle
+        relative to UTC epoch 0).  Drift never accumulates regardless
+        of fetch duration or sleep overshoot.
         """
         import json as json_mod
         import requests as http_requests
 
-        sources = await asyncio.to_thread(
-            self.networkDB.get_active_data_sources)
-        if not sources:
-            return
+        stream_name = src['stream_name']
+        cadence = src['cadence_seconds']
+        offset = src.get('offset_seconds') or 0
 
-        # Build a lookup of publications by stream_name for last_published_at
-        pubs = await asyncio.to_thread(
-            self.networkDB.get_active_publications)
-        pub_map = {p['stream_name']: p for p in pubs}
+        # Build the UTC-anchored fire grid:
+        # fire at every T where T % cadence == offset % cadence
+        now = time.time()
+        remainder = offset % cadence
+        next_fire = now - (now % cadence) + remainder
+        if next_fire <= now:
+            next_fire += cadence
+        # Don't re-fire a cycle we already published in
+        last = pub.get('last_published_at') or 0
+        while next_fire <= last:
+            next_fire += cadence
 
-        now = int(time.time())
+        while True:
+            delay = max(0, next_fire - time.time())
+            await asyncio.sleep(delay)
+            await self._networkFetchOneDataSource(src)
+            next_fire += cadence
 
-        for src in sources:
-            stream_name = src['stream_name']
-            cadence = src['cadence_seconds']
-            # Skip externally-fed sources (no URL or no cadence)
-            if not src.get('url') or not cadence:
-                continue
-            pub = pub_map.get(stream_name)
-            if not pub:
-                continue
+    async def _networkFetchOneDataSource(self, src: dict):
+        """Fetch, parse, and publish a single data source once.
 
-            last = pub.get('last_published_at') or 0
-            if now - last < cadence:
-                continue  # not due yet
+        Returns True on successful publish, False otherwise.
+        """
+        import json as json_mod
+        import requests as http_requests
 
-            # Fetch
-            try:
-                url = src['url']
-                method = src.get('method', 'GET').upper()
-                headers = None
-                if src.get('headers'):
-                    try:
-                        headers = json_mod.loads(src['headers'])
-                    except Exception:
-                        headers = None
+        stream_name = src['stream_name']
 
-                if method == 'POST':
-                    resp = await asyncio.to_thread(
-                        lambda: http_requests.post(
-                            url, headers=headers, timeout=15))
-                else:
-                    resp = await asyncio.to_thread(
-                        lambda: http_requests.get(
-                            url, headers=headers, timeout=15))
-                resp.raise_for_status()
-                raw = resp.text
-            except Exception as e:
-                logging.warning(
-                    f'Network: fetch failed for {stream_name}: {e}')
-                continue
+        # -- Fetch --
+        try:
+            url = src['url']
+            method = src.get('method', 'GET').upper()
+            headers = None
+            if src.get('headers'):
+                try:
+                    headers = json_mod.loads(src['headers'])
+                except Exception:
+                    headers = None
 
-            # Parse
-            try:
-                parser_type = src.get('parser_type', 'json_path')
-                parser_config = src.get('parser_config', '')
+            if method == 'POST':
+                resp = await asyncio.to_thread(
+                    lambda: http_requests.post(
+                        url, headers=headers, timeout=15))
+            else:
+                resp = await asyncio.to_thread(
+                    lambda: http_requests.get(
+                        url, headers=headers, timeout=15))
+            resp.raise_for_status()
+            raw = resp.text
+        except Exception as e:
+            logging.warning(
+                f'Network: fetch failed for {stream_name}: {e}')
+            return False
 
-                if parser_type == 'json_path':
-                    obj = json_mod.loads(raw)
-                    for key in parser_config.split('.'):
-                        if key.isdigit():
-                            obj = obj[int(key)]
-                        else:
-                            obj = obj[key]
-                    value = str(obj)
-                elif parser_type == 'python':
-                    local_vars = {'text': raw}
-                    exec_code = parser_config.strip()
-                    if ('return ' in exec_code
-                            and not exec_code.startswith('def ')):
-                        exec_code = (
-                            'def _parse(text):\n' +
-                            '\n'.join(
-                                '    ' + l
-                                for l in exec_code.split('\n')) +
-                            '\n_result = _parse(text)')
-                        exec(exec_code, {}, local_vars)
-                        value = str(local_vars.get('_result', ''))
+        # -- Parse --
+        try:
+            parser_type = src.get('parser_type', 'json_path')
+            parser_config = src.get('parser_config', '')
+
+            if parser_type == 'json_path':
+                obj = json_mod.loads(raw)
+                for key in parser_config.split('.'):
+                    if key.isdigit():
+                        obj = obj[int(key)]
                     else:
-                        exec(exec_code, {}, local_vars)
-                        value = str(local_vars.get(
-                            'result', local_vars.get('_result', '')))
+                        obj = obj[key]
+                value = str(obj)
+            elif parser_type == 'python':
+                local_vars = {'text': raw}
+                exec_code = parser_config.strip()
+                if ('return ' in exec_code
+                        and not exec_code.startswith('def ')):
+                    exec_code = (
+                        'def _parse(text):\n' +
+                        '\n'.join(
+                            '    ' + l
+                            for l in exec_code.split('\n')) +
+                        '\n_result = _parse(text)')
+                    exec(exec_code, {}, local_vars)
+                    value = str(local_vars.get('_result', ''))
                 else:
-                    logging.warning(
-                        f'Network: unknown parser type '
-                        f'{parser_type} for {stream_name}')
-                    continue
-            except Exception as e:
+                    exec(exec_code, {}, local_vars)
+                    value = str(local_vars.get(
+                        'result', local_vars.get('_result', '')))
+            else:
                 logging.warning(
-                    f'Network: parse failed for {stream_name}: {e}')
-                continue
+                    f'Network: unknown parser type '
+                    f'{parser_type} for {stream_name}')
+                return False
+        except Exception as e:
+            logging.warning(
+                f'Network: parse failed for {stream_name}: {e}')
+            return False
 
-            # Publish
-            try:
-                await self._networkPublishObservation(stream_name, value)
-                logging.info(
-                    f'Network: data source {stream_name} published',
-                    color='green')
-            except Exception as e:
-                logging.warning(
-                    f'Network: publish failed for {stream_name}: {e}')
+        # -- Publish --
+        try:
+            await self._networkPublishObservation(stream_name, value)
+            logging.info(
+                f'Network: data source {stream_name} published',
+                color='green')
+            return True
+        except Exception as e:
+            logging.warning(
+                f'Network: publish failed for {stream_name}: {e}')
+            return False
 
     async def _networkDiscover(self, ConfigClass):
         """On-demand discovery: connect to all relays, find all streams.
@@ -3579,12 +3657,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not inactive:
             return
 
-        # 3. Build hunt list: inactive subs not recently marked stale
+        # 3. Build hunt list: inactive subs not recently marked stale.
+        # Paid subs bypass the cooldown — an open channel is an authoritative
+        # declaration of intent, and relay freshness for a paid stream is a
+        # chicken-and-egg signal (see Fix M).
         hunting = {}  # stream_name -> sub dict
         for sub in inactive:
             stale_since = sub.get('stale_since')
-            if stale_since and not self.networkDB.should_recheck_stale(
-                    stale_since):
+            is_paid = int(sub.get('price_per_obs', 0) or 0) > 0
+            if (stale_since and not is_paid
+                    and not self.networkDB.should_recheck_stale(stale_since)):
                 continue
             hunting[sub['stream_name']] = sub
 

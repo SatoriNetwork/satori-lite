@@ -1,10 +1,15 @@
 """Local SQLite storage for network datastream subscriptions."""
 
 import os
+import random
 import sqlite3
 import threading
 import time
 from typing import Optional
+
+SQLITE_BUSY_TIMEOUT_MS = 30000
+SQLITE_READ_RETRIES = 3
+SQLITE_READ_RETRY_DELAY_SECONDS = 0.2
 
 
 class NetworkDB:
@@ -18,9 +23,29 @@ class NetworkDB:
 
     def _get_conn(self) -> sqlite3.Connection:
         if not hasattr(self._local, 'conn') or self._local.conn is None:
-            self._local.conn = sqlite3.connect(self._db_path)
+            self._local.conn = sqlite3.connect(
+                self._db_path,
+                timeout=SQLITE_BUSY_TIMEOUT_MS / 1000,
+            )
             self._local.conn.row_factory = sqlite3.Row
+            self._local.conn.execute(
+                f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+            self._local.conn.execute("PRAGMA journal_mode = WAL")
+            self._local.conn.execute("PRAGMA synchronous = NORMAL")
         return self._local.conn
+
+    def _fetchall_with_retry(self, query: str, params: tuple = ()) -> list[sqlite3.Row]:
+        conn = self._get_conn()
+        for attempt in range(SQLITE_READ_RETRIES):
+            try:
+                return conn.execute(query, params).fetchall()
+            except sqlite3.OperationalError as exc:
+                if 'database is locked' not in str(exc).lower():
+                    raise
+                if attempt == SQLITE_READ_RETRIES - 1:
+                    raise
+                time.sleep(SQLITE_READ_RETRY_DELAY_SECONDS)
+        return []
 
     def _init_schema(self):
         conn = self._get_conn()
@@ -112,6 +137,7 @@ class NetworkDB:
                 method TEXT NOT NULL DEFAULT 'GET',
                 headers TEXT,
                 cadence_seconds INTEGER NOT NULL,
+                offset_seconds INTEGER,
                 parser_type TEXT NOT NULL DEFAULT 'json_path',
                 parser_config TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1,
@@ -222,6 +248,22 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN utxo_checked_at INTEGER NOT NULL DEFAULT 0")
+        # Migration: add offset_seconds to data_sources (existing DBs)
+        # Backfill existing rows with random offsets so sources don't all
+        # fire at offset 0 simultaneously.
+        try:
+            conn.execute("SELECT offset_seconds FROM data_sources LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE data_sources ADD COLUMN offset_seconds INTEGER")
+            rows = conn.execute(
+                "SELECT id, cadence_seconds FROM data_sources"
+            ).fetchall()
+            for row in rows:
+                cap = min(row[1], 86400) if row[1] else 86400
+                conn.execute(
+                    "UPDATE data_sources SET offset_seconds = ? WHERE id = ?",
+                    (random.randint(0, max(cap - 1, 0)), row[0]))
         # Persisted subscriber access state (provider side). Keyed by
         # (stream_name, p2sh_address) so it survives provider restarts and
         # Nostr key rotations. The nostr_pubkey column tracks the most
@@ -589,10 +631,9 @@ class NetworkDB:
 
     def get_relays(self) -> list[dict]:
         """Return all known relays."""
-        conn = self._get_conn()
-        rows = conn.execute(
+        rows = self._fetchall_with_retry(
             "SELECT * FROM relays ORDER BY last_active DESC"
-        ).fetchall()
+        )
         return [dict(r) for r in rows]
 
     def delete_relay(self, relay_url: str):
@@ -753,15 +794,24 @@ class NetworkDB:
                         cadence_seconds: int = 0, parser_type: str = '',
                         parser_config: str = '', name: str = '',
                         description: str = '', method: str = 'GET',
-                        headers: str = None) -> int:
-        """Register an external data source. Returns row id."""
+                        headers: str = None,
+                        offset_seconds: int = None) -> int:
+        """Register an external data source. Returns row id.
+
+        offset_seconds is the position within each cadence cycle relative
+        to UTC 0.  If not provided a random offset is generated (up to
+        min(cadence_seconds, 86400), capped at 24 h).
+        """
+        if offset_seconds is None:
+            cap = min(cadence_seconds, 86400) if cadence_seconds else 86400
+            offset_seconds = random.randint(0, max(cap - 1, 0))
         conn = self._get_conn()
         conn.execute("""
             INSERT INTO data_sources
                 (stream_name, name, description, url, method, headers,
-                 cadence_seconds, parser_type, parser_config, active,
-                 created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                 cadence_seconds, offset_seconds, parser_type, parser_config,
+                 active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             ON CONFLICT(stream_name) DO UPDATE SET
                 active = 1,
                 name = excluded.name,
@@ -770,11 +820,12 @@ class NetworkDB:
                 method = excluded.method,
                 headers = excluded.headers,
                 cadence_seconds = excluded.cadence_seconds,
+                offset_seconds = excluded.offset_seconds,
                 parser_type = excluded.parser_type,
                 parser_config = excluded.parser_config
         """, (
             stream_name, name, description, url, method, headers,
-            cadence_seconds, parser_type, parser_config,
+            cadence_seconds, offset_seconds, parser_type, parser_config,
             int(time.time()),
         ))
         conn.commit()

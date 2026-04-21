@@ -638,7 +638,7 @@
             <h1 class="set-hero-h1">Network <span class="set-accent">Settings</span></h1>
             <p class="set-hero-sub">
                 Manage relays your neuron talks to, register your own Nostr relay, and run a local
-                public or private relay sidecar directly from Satori Lite.
+                public or private embedded relay directly from Satori Lite.
             </p>
         </div>
         <div class="set-hero-meta">
@@ -800,13 +800,13 @@
                             <div class="mode-head">
                                 <div>
                                     <div class="mode-title">Off</div>
-                                    <div class="mode-subtitle">Stop all managed relay sidecars</div>
+                                    <div class="mode-subtitle">Stop the embedded relay runtime</div>
                                 </div>
                                 <span class="mode-radio"></span>
                                 <input class="form-check-input" type="radio" name="relayMode" id="relayModeOff" value="off">
                             </div>
                             <ul>
-                                <li>No local relay container running</li>
+                                <li>No local relay process running</li>
                                 <li>Satori Lite stays fully functional</li>
                             </ul>
                         </div>
@@ -830,7 +830,7 @@
                                 <label class="form-label" for="relayPublicPortInput">Public relay port</label>
                                 <input type="number" min="1" max="65535" class="form-control" id="relayPublicPortInput" value="{{ relay_status.public_port }}" onclick="event.stopPropagation()">
                                 <div class="invalid-feedback" id="relayPublicPortError"></div>
-                                <div class="mode-port-help">Default 7777 — change before starting.</div>
+                                <div class="mode-port-help">Default 7777 — changing this now requires recreating the neuron container.</div>
                             </div>
                             <div class="mode-field-group">
                                 <label class="form-label" for="relayPublicHostInput">Advertised host / domain</label>
@@ -858,7 +858,7 @@
                                 <label class="form-label" for="relayPrivatePortInput">Private relay port</label>
                                 <input type="number" min="1" max="65535" class="form-control" id="relayPrivatePortInput" value="{{ relay_status.private_port }}" onclick="event.stopPropagation()">
                                 <div class="invalid-feedback" id="relayPrivatePortError"></div>
-                                <div class="mode-port-help">Default 7171 — change before starting.</div>
+                                <div class="mode-port-help">Default 7171 — changing this now requires recreating the neuron container.</div>
                             </div>
                             <div class="mode-field-group">
                                 <label class="form-label" for="relayPrivateHostInput">Advertised host / domain</label>
@@ -894,7 +894,7 @@
                             <thead>
                                 <tr>
                                     <th>Mode</th>
-                                    <th>Container</th>
+                                    <th>Service</th>
                                     <th>Status</th>
                                     <th>Health</th>
                                     <th>Ports</th>
@@ -909,7 +909,7 @@
                     <div class="set-alert set-alert-muted mb-0">
                         <i class="material-icons">article</i>
                         <div>
-                            Relay lifecycle events are written into the standard neuron log
+                            Embedded relay lifecycle events are written into the standard neuron log
                             with the prefix <span class="font-mono-small" style="color: var(--accent-primary);">Relay:</span>
                             so you can verify start, stop, mode selection, and runtime issues from the normal Satori logs.
                         </div>
@@ -983,7 +983,7 @@
     function renderRelayStatus(status) {
         currentRelayStatus = status;
         document.getElementById('relayNostrPubkey').textContent = status.nostr_pubkey || 'Not generated';
-        document.getElementById('relayDockerStatus').textContent = status.docker_available ? 'Available' : ('Unavailable' + (status.docker_error ? ' - ' + status.docker_error : ''));
+        document.getElementById('relayDockerStatus').textContent = status.docker_available ? 'Embedded' : ('Unavailable' + (status.docker_error ? ' - ' + status.docker_error : ''));
         document.getElementById('relayDockerEndpoint').textContent = status.docker_endpoint || '-';
         document.getElementById('relayPublicUrl').textContent = status.public_url_hint || '-';
         document.getElementById('relayPrivateUrl').textContent = status.private_url_hint || '-';
@@ -1013,7 +1013,7 @@
         ['public', 'private'].forEach((mode) => {
             if (conflicts[mode]) {
                 const port = mode === 'public' ? status.public_port : status.private_port;
-                warnings.push(`${mode} port ${port} is already used by ${conflicts[mode]}`);
+                warnings.push(conflicts[mode]);
             }
         });
         ['public', 'private'].forEach((mode) => {
@@ -1021,7 +1021,7 @@
             const error = document.getElementById(mode === 'public' ? 'relayPublicPortError' : 'relayPrivatePortError');
             if (conflicts[mode]) {
                 input.classList.add('is-invalid');
-                error.textContent = `Port ${mode === 'public' ? status.public_port : status.private_port} is already used by ${conflicts[mode]}`;
+                error.textContent = conflicts[mode];
             } else {
                 input.classList.remove('is-invalid');
                 error.textContent = '';
@@ -1035,7 +1035,7 @@
             warningBox.textContent = '';
         }
         const dockerHelp = status.docker_help || {};
-        if (!status.docker_available && (dockerHelp.summary || status.docker_error)) {
+        if ((dockerHelp.summary || status.docker_error) && dockerHelp.cause !== 'embedded_runtime') {
             dockerHelpBox.classList.remove('d-none');
             dockerHelpSummary.textContent = dockerHelp.summary || status.docker_error || 'Docker is unavailable';
             const details = Array.isArray(dockerHelp.details) ? dockerHelp.details : [];
@@ -1052,8 +1052,7 @@
         tbody.innerHTML = '';
         ['public', 'private'].forEach((mode) => {
             const modeData = (status.containers || {})[mode] || {};
-            ['strfry', 'nginx'].forEach((service) => {
-                const item = modeData[service] || {};
+            Object.entries(modeData).forEach(([service, item]) => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${mode}</td>
@@ -1066,9 +1065,9 @@
             });
         });
         const applyBtn = document.getElementById('relayApplyBtn');
-        const dockerReady = Boolean(status.docker_available);
-        applyBtn.disabled = !dockerReady;
-        if (!dockerReady) {
+        const relayReady = !status.last_error || !(status.last_error || '').includes('requires recreating the neuron container');
+        applyBtn.disabled = false;
+        if (status.docker_error && !status.docker_available) {
             document.getElementById('relayApplyStatus').className = 'text-danger';
             document.getElementById('relayApplyStatus').textContent = status.docker_error || 'Docker is unavailable';
         }

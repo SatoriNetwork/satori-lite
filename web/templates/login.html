@@ -259,31 +259,6 @@
         color: #22c55e;
     }
 
-    /* ── Floating theme toggle (top right of the viewport) ── */
-    .login-theme-toggle {
-        position: fixed;
-        top: 18px;
-        right: 18px;
-        z-index: 10;
-        width: 34px; height: 34px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
-        border-radius: 9px;
-        color: var(--text-secondary);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        padding: 0;
-        transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
-    }
-    .login-theme-toggle:hover {
-        color: var(--text-primary);
-        border-color: var(--border-color-focus);
-        transform: translateY(-1px);
-    }
-    .login-theme-toggle .material-icons { font-size: 17px; }
-
     /* ── Auth loading overlay (kept, polished) ─────────────── */
     .auth-loading-overlay {
         position: fixed;
@@ -345,10 +320,6 @@
 {% endblock %}
 
 {% block content %}
-<button type="button" class="login-theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
-    <i class="material-icons" id="themeIcon">light_mode</i>
-</button>
-
 <div class="login-stage">
     <div class="login-card">
         <div class="login-brand">
