@@ -903,71 +903,6 @@ function setActiveRangeButton(daysValue) {
     });
 }
 
-function sliderToSeconds(sliderValue) {
-    const percentage = sliderValue / 100.0;
-    if (percentage <= 0.0) return 86400;
-    if (percentage >= 1.0) return 0;
-    return Math.round(86400 * Math.pow(1 - percentage, 7));
-}
-
-function secondsToSlider(seconds) {
-    if (seconds >= 86400) return 0;
-    if (seconds <= 0) return 100;
-    const percentage = 1 - Math.pow(seconds / 86400, 1 / 7);
-    return Math.round(percentage * 100);
-}
-
-function formatDelay(seconds) {
-    if (seconds === 0) return "Continuous";
-    if (seconds < 60) return `${seconds} seconds`;
-    if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
-    if (seconds < 86400) return `${Math.round(seconds / 3600)} hours`;
-    return `${Math.round(seconds / 86400)} days`;
-}
-
-function updateTrainingDelayLabel(sliderValue) {
-    const seconds = sliderToSeconds(sliderValue);
-    const label = document.getElementById('trainingDelayLabel');
-    if (label) {
-        label.textContent = formatDelay(seconds);
-    }
-}
-
-async function setTrainingDelay(sliderValue) {
-    const seconds = sliderToSeconds(sliderValue);
-    try {
-        const response = await fetch('/api/engine/training-delay', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ delay_seconds: seconds }),
-        });
-        if (response.ok) {
-            showToast(`Training frequency updated: ${formatDelay(seconds)}`);
-        } else {
-            showToast('Failed to update training frequency', true);
-        }
-    } catch (error) {
-        console.error('Error setting training delay:', error);
-        showToast('Failed to update training frequency', true);
-    }
-}
-
-async function loadTrainingDelay() {
-    try {
-        const slider = document.getElementById('trainingDelaySlider');
-        if (!slider) return;
-        const response = await fetch('/api/engine/training-delay');
-        const result = await response.json();
-        if (response.ok && result.delay_seconds !== undefined) {
-            const sliderValue = secondsToSlider(result.delay_seconds);
-            slider.value = sliderValue;
-            updateTrainingDelayLabel(sliderValue);
-        }
-    } catch (error) {
-        console.error('Error loading training delay:', error);
-    }
-}
-
 function shortUuid(uuid) {
     if (!uuid || uuid.length < 16) return uuid || '-';
     return `${uuid.slice(0, 8)}...${uuid.slice(-6)}`;
@@ -1501,9 +1436,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderStreamDropdownOptions(event.target.value || '');
     });
 
-    if (document.getElementById('trainingDelaySlider')) {
-        await loadTrainingDelay();
-    }
     await loadStreams();
 });
 </script>
