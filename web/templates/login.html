@@ -78,14 +78,22 @@
     [data-theme="dark"] .login-logo-wrap img { filter: invert(1); }
 
     .login-version {
-        display: block;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.66rem;
         letter-spacing: 0.14em;
         color: var(--text-muted);
         opacity: 0.55;
-        text-align: center;
+    }
+
+    /* ── Footer row below the card: version + theme toggle ── */
+    .login-footer {
+        width: min(100%, 440px);
         margin-top: 1.1rem;
+        padding: 0 0.2rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
     }
 
     .login-title {
@@ -259,30 +267,28 @@
         color: #22c55e;
     }
 
-    /* ── Floating theme toggle (top right of the viewport) ── */
+    /* ── Inline theme toggle (in login footer row) ── */
     .login-theme-toggle {
-        position: fixed;
-        top: 18px;
-        right: 18px;
-        z-index: 10;
-        width: 34px; height: 34px;
-        background: var(--bg-card);
+        width: 28px; height: 28px;
+        background: transparent;
         border: 1px solid var(--border-color);
-        border-radius: 9px;
-        color: var(--text-secondary);
+        border-radius: 8px;
+        color: var(--text-muted);
         display: inline-flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
         padding: 0;
-        transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
+        opacity: 0.7;
+        transition: color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, transform 0.12s ease;
     }
     .login-theme-toggle:hover {
         color: var(--text-primary);
         border-color: var(--border-color-focus);
+        opacity: 1;
         transform: translateY(-1px);
     }
-    .login-theme-toggle .material-icons { font-size: 17px; }
+    .login-theme-toggle .material-icons { font-size: 15px; }
 
     /* ── Auth loading overlay (kept, polished) ─────────────── */
     .auth-loading-overlay {
@@ -345,10 +351,6 @@
 {% endblock %}
 
 {% block content %}
-<button type="button" class="login-theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
-    <i class="material-icons" id="themeIcon">light_mode</i>
-</button>
-
 <div class="login-stage">
     <div class="login-card">
         <div class="login-brand">
@@ -401,7 +403,12 @@
         </form>
 
     </div>
-    <span class="login-version">{{ version }}</span>
+    <div class="login-footer">
+        <span class="login-version">{{ version }}</span>
+        <button type="button" class="login-theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+            <i class="material-icons" id="themeIcon">light_mode</i>
+        </button>
+    </div>
 </div>
 
 <div id="authLoadingOverlay" class="auth-loading-overlay" aria-hidden="true">
