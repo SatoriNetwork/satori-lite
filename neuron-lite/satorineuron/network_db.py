@@ -214,6 +214,13 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN receiver_nostr_pubkey TEXT")
+        # Migration: add utxo_checked_at to channels (sender-side UTXO
+        # liveness check timestamp).
+        try:
+            conn.execute("SELECT utxo_checked_at FROM channels LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE channels ADD COLUMN utxo_checked_at INTEGER NOT NULL DEFAULT 0")
         # Persisted subscriber access state (provider side). Keyed by
         # (stream_name, p2sh_address) so it survives provider restarts and
         # Nostr key rotations. The nostr_pubkey column tracks the most
@@ -850,6 +857,14 @@ class NetworkDB:
             WHERE p2sh_address = ?
         """, (funding_txid, funding_vout, locked_sats, locked_sats,
               ts, p2sh_address))
+        conn.commit()
+
+    def update_utxo_checked_at(self, p2sh_address: str) -> None:
+        """Stamp the current time as the last UTXO liveness check."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE channels SET utxo_checked_at = ? WHERE p2sh_address = ?",
+            (int(time.time()), p2sh_address))
         conn.commit()
 
     # ── Subscriber Access (provider side) ─────────────────────────

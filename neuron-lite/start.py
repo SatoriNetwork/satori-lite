@@ -1291,11 +1291,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             f'from {p2sh_address} — txid={txid}',
             color='green')
         # Notify sender so they can update their funding UTXO.
-        # Fix A: if settlement is published to zero relays, the sender never
-        # learns the UTXO moved and keeps building commitments against a spent
-        # output. Keep pending_commitment so the operator can retry, and raise.
         sender_nostr_pubkey = channel.get('sender_nostr_pubkey')
-        published_count = 0
         if sender_nostr_pubkey:
             from satorilib.satori_nostr.models import ChannelSettlement
             settlement = ChannelSettlement(
@@ -1308,7 +1304,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             for relay_url, client in self._networkClients.items():
                 try:
                     await client.publish_settlement(settlement, sender_nostr_pubkey)
-                    published_count += 1
                     logging.info(
                         f'Channel: published settlement on {relay_url} '
                         f'to sender {sender_nostr_pubkey[:16]}…', color='cyan')
@@ -1319,25 +1314,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(
                 f'Channel: {p2sh_address} has no sender_nostr_pubkey — '
                 f'cannot notify sender of settlement')
-        # Tombstone the commitment on all relays (backup signal for the
-        # sender's stale-tombstone detector even if settlement publish failed)
+        # Tombstone the old commitment on all relays
         for client in self._networkClients.values():
             try:
                 await client.remove_commitment(p2sh_address)
             except Exception:
                 pass
-        # Only clear the pending commitment if the sender was notified.
-        # On restart the stale-tombstone fix detects the UTXO mismatch and
-        # cleans up, so keeping it is safe and allows a manual retry.
-        if published_count > 0 or not sender_nostr_pubkey:
-            await asyncio.to_thread(
-                self.networkDB.clear_pending_commitment, p2sh_address)
-        else:
-            raise RuntimeError(
-                f'Channel: settlement for {p2sh_address} published to 0 '
-                f'relays — pending commitment kept for retry. The tx '
-                f'({txid}) was broadcast on-chain; only the Nostr '
-                f'notification failed.')
+        await asyncio.to_thread(
+            self.networkDB.clear_pending_commitment, p2sh_address)
         return txid
 
     async def _claimChannelViaMundo(
@@ -1728,6 +1712,67 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(f'Channel: could not parse UTXO amount for {txid[:12]}: {e}')
             return fallback_sats
 
+    async def _channelVerifyUtxo(self, channel: dict) -> dict:
+        """Check on-chain that the channel's funding UTXO still exists.
+
+        Queries electrum for unspent outputs at the P2SH address. If the
+        recorded funding_txid:funding_vout is missing, looks for the newest
+        SATORI UTXO at that address and updates the DB to point at it.
+        Always stamps utxo_checked_at so we don't re-check for 24 hours.
+
+        Returns the (possibly updated) channel dict.
+        """
+        p2sh = channel['p2sh_address']
+        funding_txid = channel['funding_txid']
+        funding_vout = channel['funding_vout']
+        try:
+            scripthash = EvrmoreWallet.p2shScripthash(p2sh)
+            unspents = await asyncio.to_thread(
+                self.wallet.electrumx.api.getUnspentAssets,
+                scripthash, 'SATORI')
+            unspents = unspents or []
+            found = any(
+                u.get('tx_hash') == funding_txid
+                and u.get('tx_pos') == funding_vout
+                for u in unspents)
+            if found:
+                await asyncio.to_thread(
+                    self.networkDB.update_utxo_checked_at, p2sh)
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, p2sh)
+                return channel
+            # UTXO is gone — find the replacement (newest by block height)
+            if unspents:
+                best = max(unspents, key=lambda u: u.get('height', 0))
+                new_txid = best['tx_hash']
+                new_vout = best['tx_pos']
+                new_sats = self._channelFetchUtxoSatori(
+                    new_txid, new_vout, best.get('value', 0))
+                await asyncio.to_thread(
+                    self.networkDB.update_channel_funding,
+                    p2sh, new_txid, new_vout, new_sats)
+                logging.info(
+                    f'Channel: UTXO liveness check — {p2sh} funding moved '
+                    f'from {funding_txid[:12]}…:{funding_vout} to '
+                    f'{new_txid[:12]}…:{new_vout} ({new_sats} sats)',
+                    color='yellow')
+            else:
+                # No SATORI UTXOs at this address at all — channel is drained
+                await asyncio.to_thread(
+                    self.networkDB.update_channel_remainder, p2sh, 0)
+                logging.info(
+                    f'Channel: UTXO liveness check — {p2sh} has no '
+                    f'unspent SATORI, zeroing remainder',
+                    color='yellow')
+            await asyncio.to_thread(
+                self.networkDB.update_utxo_checked_at, p2sh)
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, p2sh)
+        except Exception as e:
+            logging.warning(
+                f'Channel: UTXO liveness check failed for {p2sh}: {e}')
+        return channel
+
     def _channelTimeoutMinutes(self) -> int:
         """Return the configured channel lifetime in minutes (default 7 days).
 
@@ -2025,6 +2070,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Channel {p2sh_address} has expired — the sender can now '
                 f'reclaim, so new commitments would race that reclaim and '
                 f'are not safe to send')
+        # UTXO liveness check: if we haven't verified the funding UTXO
+        # on-chain in the last 24 hours, query electrum to make sure it's
+        # still unspent. If the receiver claimed and we missed the Nostr
+        # settlement, this catches it from the source of truth.
+        UTXO_CHECK_INTERVAL = 86400  # 24 hours
+        utxo_checked_at = channel.get('utxo_checked_at', 0) or 0
+        if int(time.time()) - utxo_checked_at > UTXO_CHECK_INTERVAL:
+            channel = await self._channelVerifyUtxo(channel)
         if pay_amount_sats > channel['remainder_sats']:
             raise ValueError(
                 f'Pay amount {pay_amount_sats} exceeds channel remainder '
