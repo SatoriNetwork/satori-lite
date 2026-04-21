@@ -83,6 +83,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
         self._channelPayLocks: dict = {}   # p2sh_address -> asyncio.Lock (Fix H)
+        self._mundoCache: dict = {}        # p2sh_address -> {signed_hex, incomplete_hex, ...} (Fix J)
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -1349,15 +1350,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> str:
         """PATH C claim: receiver has no EVR — pay SATORI fee to Mundo.
 
-        Flow:
-          1. Find receiver's SATORI UTXO.
-          2. Compute final tx shape and request Mundo fee params.
-          3. Rebuild tx: P2SH inputs + SATORI input + existing outputs
-             + SATORI fee output + SATORI change output + EVR change output.
-          4. Sign P2SH vin[0] and SATORI input with SIGHASH_ALL|ANYONECANPAY (0x81).
-          5. POST to Mundo (signOnly=true) — Mundo adds EVR input and returns
-             the fully signed tx hex.
-          6. Broadcast the returned tx and return the txid.
+        Fix J — idempotent retry: the built tx and Mundo params are cached in
+        _mundoCache[p2sh] so a retry after a mid-flow failure reuses the same
+        tx rather than rebuilding with potentially different UTXOs/params.
+
+        Three retry tiers:
+          a) signed_hex cached → skip to broadcast (Step 6).
+          b) incomplete_hex cached → skip to Mundo POST (Step 5).
+          c) nothing cached → full build (Steps 1-6).
         """
         import requests as _requests
         from evrmore.core import (
@@ -1371,6 +1371,53 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from functools import partial as funcpartial
 
         MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
+        p2sh = channel['p2sh_address']
+        cached = self._mundoCache.get(p2sh, {})
+
+        # ── Tier A: fully-signed tx from Mundo already cached ───────────
+        if cached.get('signed_hex'):
+            logging.info(
+                f'Channel: Mundo retry tier A — broadcasting cached tx '
+                f'for {p2sh}', color='cyan')
+            try:
+                txid = await asyncio.to_thread(
+                    self.wallet.broadcast, cached['signed_hex'])
+                self._mundoCache.pop(p2sh, None)
+                return txid
+            except Exception as e:
+                logging.warning(
+                    f'Channel: cached signed tx failed: {e} — rebuilding')
+                self._mundoCache.pop(p2sh, None)
+
+        # ── Tier B: signed incomplete tx cached, re-post to Mundo ───────
+        if cached.get('incomplete_hex') and cached.get('fee_sats_reserved'):
+            logging.info(
+                f'Channel: Mundo retry tier B — re-posting to Mundo '
+                f'for {p2sh}', color='cyan')
+            try:
+                def _mundo_post_cached():
+                    resp = _requests.post(
+                        f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
+                        f'/{cached["fee_sats_reserved"]}/{cached["fee_sats"]}/0',
+                        params={'signOnly': 'true'},
+                        data=cached['incomplete_hex'],
+                        headers={'Content-Type': 'text/plain'},
+                        timeout=30)
+                    resp.raise_for_status()
+                    return resp.text
+                signed_hex = await asyncio.to_thread(_mundo_post_cached)
+                self._mundoCache[p2sh] = {
+                    **cached, 'signed_hex': signed_hex}
+                txid = await asyncio.to_thread(
+                    self.wallet.broadcast, signed_hex)
+                self._mundoCache.pop(p2sh, None)
+                return txid
+            except Exception as e:
+                logging.warning(
+                    f'Channel: Mundo tier B failed: {e} — full rebuild')
+                self._mundoCache.pop(p2sh, None)
+
+        # ── Tier C: full build ──────────────────────────────────────────
 
         # Step 1: find receiver's SATORI UTXO
         satori_utxo = None
@@ -1487,9 +1534,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.wallet._signInput,
             new_tx, satori_vin_idx, satori_txin, satori_script, mundo_sighash)
 
-        # Step 5: serialize and POST to Mundo (signOnly=true)
+        # Cache the signed incomplete tx (tier B on retry)
         incomplete_hex = new_tx.serialize().hex()
+        self._mundoCache[p2sh] = {
+            'incomplete_hex': incomplete_hex,
+            'fee_sats_reserved': fee_sats_reserved,
+            'fee_sats': fee_sats,
+        }
 
+        # Step 5: POST to Mundo (signOnly=true)
         def _broadcast_via_mundo():
             resp = _requests.post(
                 f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
@@ -1502,9 +1555,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return resp.text
 
         signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
+        # Cache the fully-signed tx (tier A on retry)
+        self._mundoCache[p2sh] = {
+            **self._mundoCache.get(p2sh, {}), 'signed_hex': signed_hex}
 
         # Step 6: broadcast the fully-signed tx and return txid
         txid = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
+        self._mundoCache.pop(p2sh, None)
         return txid
 
     async def _grantChannelAccess(
@@ -2176,16 +2233,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> str:
         """PATH B reclaim: sender has no EVR — pay SATORI fee to Mundo.
 
-        Flow:
-          1. Find sender's SATORI UTXO for the fee.
-          2. Request Mundo fee params for final tx shape.
-          3. Build tx: [P2SH vin, SATORI vin] +
-             [SATORI→sender, SATORI fee→Mundo, SATORI change, EVR change].
-          4. Set nVersion=2, nSequence=csv_value on the tx (CSV requirement).
-          5. Sign P2SH vin[0] with 0x81 (SIGHASH_ALL|ANYONECANPAY, CSV branch).
-          6. Sign SATORI vin[1] with 0x81.
-          7. POST to Mundo (signOnly=true) — Mundo adds its EVR input.
-          8. Broadcast the returned fully-signed hex and return the txid.
+        Fix J — idempotent retry: same tier A/B/C cache pattern as
+        _claimChannelViaMundo. Uses 'reclaim_' prefix in _mundoCache key.
         """
         import requests as _requests
         from evrmore.core import (
@@ -2198,6 +2247,59 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from satorilib.wallet.utils.transaction import TxUtils
 
         MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
+        cache_key = f'reclaim_{channel["p2sh_address"]}'
+        cached = self._mundoCache.get(cache_key, {})
+
+        # ── Tier A: fully-signed tx cached ──────────────────────────────
+        if cached.get('signed_hex'):
+            logging.info(
+                f'Channel: Mundo reclaim retry tier A for '
+                f'{channel["p2sh_address"]}', color='cyan')
+            try:
+                result = await asyncio.to_thread(
+                    self.wallet.broadcast, cached['signed_hex'])
+                if isinstance(result, dict) and result.get('code') is not None:
+                    raise TransactionFailure(
+                        f'broadcast rejected: {result.get("message", result)}')
+                self._mundoCache.pop(cache_key, None)
+                return result
+            except Exception as e:
+                logging.warning(
+                    f'Channel: cached reclaim tx failed: {e} — rebuilding')
+                self._mundoCache.pop(cache_key, None)
+
+        # ── Tier B: incomplete tx cached, re-post to Mundo ──────────────
+        if cached.get('incomplete_hex') and cached.get('fee_sats_reserved'):
+            logging.info(
+                f'Channel: Mundo reclaim retry tier B for '
+                f'{channel["p2sh_address"]}', color='cyan')
+            try:
+                def _mundo_post_cached():
+                    resp = _requests.post(
+                        f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
+                        f'/{cached["fee_sats_reserved"]}/{cached["fee_sats"]}/0',
+                        params={'signOnly': 'true'},
+                        data=cached['incomplete_hex'],
+                        headers={'Content-Type': 'text/plain'},
+                        timeout=30)
+                    resp.raise_for_status()
+                    return resp.text
+                signed_hex = await asyncio.to_thread(_mundo_post_cached)
+                self._mundoCache[cache_key] = {
+                    **cached, 'signed_hex': signed_hex}
+                result = await asyncio.to_thread(
+                    self.wallet.broadcast, signed_hex)
+                if isinstance(result, dict) and result.get('code') is not None:
+                    raise TransactionFailure(
+                        f'broadcast rejected: {result.get("message", result)}')
+                self._mundoCache.pop(cache_key, None)
+                return result
+            except Exception as e:
+                logging.warning(
+                    f'Channel: Mundo reclaim tier B failed: {e} — full rebuild')
+                self._mundoCache.pop(cache_key, None)
+
+        # ── Tier C: full build ──────────────────────────────────────────
 
         # Step 1: find sender's SATORI UTXO
         satori_utxo = None
@@ -2300,9 +2402,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             new_tx, satori_vin_idx, satori_txin,
             satori_scripts[0], mundo_sighash)
 
-        # Step 7: serialize and POST to Mundo (signOnly=true)
+        # Cache the signed incomplete tx (tier B on retry)
         incomplete_hex = new_tx.serialize().hex()
+        self._mundoCache[cache_key] = {
+            'incomplete_hex': incomplete_hex,
+            'fee_sats_reserved': fee_sats_reserved,
+            'fee_sats': fee_sats,
+        }
 
+        # Step 7: POST to Mundo (signOnly=true)
         def _broadcast_via_mundo():
             resp = _requests.post(
                 f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
@@ -2315,12 +2423,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return resp.text
 
         signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
+        # Cache the fully-signed tx (tier A on retry)
+        self._mundoCache[cache_key] = {
+            **self._mundoCache.get(cache_key, {}), 'signed_hex': signed_hex}
 
         # Step 8: broadcast the fully-signed tx
         result = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
         if isinstance(result, dict) and result.get('code') is not None:
             raise TransactionFailure(
                 f'broadcast rejected: {result.get("message", result)}')
+        self._mundoCache.pop(cache_key, None)
         return result
 
     # ── End channel support ───────────────────────────────────────────────────
