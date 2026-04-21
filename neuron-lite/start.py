@@ -2390,6 +2390,37 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkPublishObservation(stream_name, value),
             loop)
 
+    def publishUnsubscribeSync(
+        self, stream_name: str, provider_pubkey: str
+    ) -> None:
+        """Publish an unsubscribe announcement to all connected relays (Fix G).
+
+        Non-blocking — submits to the network event loop.
+        """
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            logging.warning(
+                'Network: cannot publish unsubscribe — loop not running')
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._publishUnsubscribeNow(stream_name, provider_pubkey),
+            loop)
+
+    async def _publishUnsubscribeNow(
+        self, stream_name: str, provider_pubkey: str
+    ) -> None:
+        """Publish unsubscribe to all connected relays."""
+        for relay_url, client in self._networkClients.items():
+            try:
+                await client.unsubscribe_datastream(
+                    stream_name, provider_pubkey)
+                logging.info(
+                    f'Network: published unsubscribe for {stream_name} '
+                    f'on {relay_url}', color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: unsubscribe publish failed on {relay_url}: {e}')
+
     def tombstonePublicationSync(self, stream_name: str):
         """Publish a tombstone (deleted) Kind 34600 announcement for a removed
         publication to all known relays. Non-blocking — runs in a background thread.

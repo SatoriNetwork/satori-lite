@@ -2272,6 +2272,8 @@ def register_routes(app):
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
         startup.networkDB.unsubscribe(data['stream_name'], data['nostr_pubkey'])
+        # Notify the provider so they stop encrypting for us (Fix G)
+        startup.publishUnsubscribeSync(data['stream_name'], data['nostr_pubkey'])
         pred_name = data['stream_name'] + '_pred'
         startup.networkDB.remove_publication(pred_name)
         startup.tombstonePublicationSync(pred_name)
