@@ -1622,20 +1622,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 color='cyan')
 
     async def _channelExpiryCheck(self):
-        """Auto-claim receiver channels that expire within 24 hours.
+        """Auto-claim receiver channels every 15 days.
 
         Called from the reconcile loop but throttled to run at most every
-        12 hours. Protects the receiver from losing accrued micropayments
-        when a channel times out.
+        15 days. Ensures the provider collects accrued micropayments well
+        before the 31-day CSV timeout.
         """
         now = time.time()
         last = getattr(self, '_lastChannelExpiryCheck', 0)
-        if now - last < 43200:  # 12 hours
+        if now - last < 1296000:  # 15 days
             return
         self._lastChannelExpiryCheck = now
         try:
             near_expiry = await asyncio.to_thread(
-                self.networkDB.get_channels_near_expiry, 86400)
+                self.networkDB.get_channels_near_expiry, 1296000)
             for channel in near_expiry:
                 p2sh = channel['p2sh_address']
                 logging.info(
@@ -1662,7 +1662,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return static
         obs_per_refill = int(config.get().get('observations_per_refill', 500))
         computed = price_per_obs * obs_per_refill
-        return max(100_000, min(computed, 10_000_000))
+        return max(100_000, min(computed, 1_000_000))
 
     def _channelFetchUtxoSatori(
         self,
@@ -1769,7 +1769,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Fix L: lowered from 90 days (129,600 min) to 7 days (10,080 min) so
         subscriber funds aren't idle for a quarter year in the failure case.
         """
-        return int(config.get().get('channel_timeout_minutes', 10080))
+        return int(config.get().get('channel_timeout_minutes', 44640))
 
     @staticmethod
     def _channelVerifySenderSig(commitment, channel: dict) -> bool:
