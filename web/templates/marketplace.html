@@ -576,6 +576,68 @@
     }
     .mkt-card-action[disabled] { cursor: not-allowed; opacity: 0.6; }
 
+    /* Loading state — used while the subscribe API checks wallet balance */
+    .mkt-card-action.is-loading {
+        position: relative;
+        overflow: hidden;
+        cursor: progress;
+        opacity: 1;
+    }
+    .mkt-card-action.is-loading[disabled] { opacity: 1; }
+    .mkt-card-action.is-loading::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(110deg,
+            transparent 15%,
+            rgba(255,255,255,0.28) 45%,
+            rgba(255,255,255,0.28) 55%,
+            transparent 85%);
+        background-size: 220% 100%;
+        background-repeat: no-repeat;
+        animation: mkt-shimmer 1.15s linear infinite;
+        pointer-events: none;
+    }
+    [data-theme="light"] .mkt-card-action.is-loading::after {
+        background: linear-gradient(110deg,
+            transparent 15%,
+            rgba(255,255,255,0.55) 45%,
+            rgba(255,255,255,0.55) 55%,
+            transparent 85%);
+        background-size: 220% 100%;
+        background-repeat: no-repeat;
+    }
+    @keyframes mkt-shimmer {
+        from { background-position: 220% 0; }
+        to   { background-position: -120% 0; }
+    }
+    .mkt-load-inline {
+        position: relative;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.38rem;
+        letter-spacing: 0.01em;
+    }
+    .mkt-load-inline .material-icons {
+        font-size: 13px;
+        animation: mkt-spin 0.9s linear infinite;
+    }
+    .mkt-load-inline .mkt-load-dots::after {
+        content: '';
+        display: inline-block;
+        width: 0.9em;
+        text-align: left;
+        animation: mkt-dots 1.2s steps(4, end) infinite;
+    }
+    @keyframes mkt-dots {
+        0%   { content: ''; }
+        25%  { content: '.'; }
+        50%  { content: '..'; }
+        75%  { content: '...'; }
+        100% { content: ''; }
+    }
+
     /* "Yours" ribbon */
     .mkt-card.is-mine .mkt-card-action {
         background: var(--bg-input);
@@ -816,11 +878,27 @@
 
 <input type="hidden" id="nostrPubkey" value="{{ nostr_pubkey or '' }}">
 
+<div id="statusToast" class="toast position-fixed bottom-0 end-0 m-3" role="alert" style="z-index:1100;">
+    <div class="toast-header">
+        <strong class="me-auto" style="font-size:0.8rem;font-weight:600;">Satori</strong>
+        <button type="button" class="btn-close" data-bs-dismiss="toast" style="filter: var(--btn-close-filter, none);"></button>
+    </div>
+    <div class="toast-body" id="toastMessage"></div>
+</div>
+
 {% include 'partials/footer.html' %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
+    function showToast(message, isError = false) {
+        const toast = document.getElementById('statusToast');
+        const toastBody = document.getElementById('toastMessage');
+        toastBody.textContent = message;
+        toastBody.className = 'toast-body ' + (isError ? 'text-danger' : 'text-success');
+        new bootstrap.Toast(toast).show();
+    }
+
     // ── State ───────────────────────────────────────────
     let allStreams = [];
     let CLASSIFICATIONS = [];
@@ -1338,7 +1416,17 @@
 
     // ── Subscribe / unsubscribe ─────────────────────────
     async function doSubscribe(stream, btn) {
-        btn.disabled = true; btn.textContent = '…';
+        // Preserve the button's width so swapping text doesn't jank the card foot.
+        const lockedWidth = Math.ceil(btn.getBoundingClientRect().width);
+        btn.style.minWidth = lockedWidth + 'px';
+        btn.classList.add('is-loading');
+        btn.setAttribute('aria-busy', 'true');
+        btn.disabled = true;
+        const isPaid = (stream.price_per_obs || 0) > 0;
+        const label = isPaid ? 'Checking balance' : 'Subscribing';
+        btn.innerHTML = `<span class="mkt-load-inline">
+            <i class="material-icons">sync</i>${label}<span class="mkt-load-dots"></span>
+        </span>`;
         try {
             const resp = await fetch('/api/network/subscribe', {
                 method: 'POST',
@@ -1353,7 +1441,10 @@
                     s.subscribed = true;
                 }
             }
-        } catch (e) { /* fall through to render */ }
+        } catch (e) {
+            showToast(e.message || 'Subscribe failed', true);
+        }
+        // renderStreams() rebuilds the card, so the loading state is dropped naturally.
         renderStreams();
     }
 

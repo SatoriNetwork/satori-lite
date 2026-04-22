@@ -18,11 +18,13 @@ from satorineuron.init.wallet import WalletManager
 log = logging.getLogger(__name__)
 
 _BALANCE_KEY = "balance"
+_WALLET_KEY = "wallet_only"
 
 _manager: Optional[WalletManager] = None
 _manager_lock = threading.Lock()
 _cache: Dict[str, Any] = {}
 _fetch_lock = threading.Lock()
+_wallet_fetch_lock = threading.Lock()
 
 
 def _get_manager() -> WalletManager:
@@ -92,11 +94,37 @@ def get_balance_snapshot(force: bool = False) -> Dict[str, Any]:
             return snap
         snapshot = _fetch_snapshot()
         _cache[_BALANCE_KEY] = snapshot
+        _cache[_WALLET_KEY] = snapshot["wallet_balance"]
         out = dict(snapshot)
         out["cache_hit"] = False
         return out
 
 
+def get_wallet_balance(force: bool = False) -> float:
+    """Return wallet-only SATORI balance, cached independently of the full snapshot.
+
+    Skips vault entirely so it's cheaper to call on pages that only need the
+    wallet balance (e.g. marketplace subscribe check).
+    """
+    if not force and _WALLET_KEY in _cache:
+        return _cache[_WALLET_KEY]
+    with _wallet_fetch_lock:
+        if not force and _WALLET_KEY in _cache:
+            return _cache[_WALLET_KEY]
+        manager = _get_manager()
+        manager.connect()
+        wallet_sat = 0.0
+        if manager.wallet and hasattr(manager.wallet, 'getBalances'):
+            try:
+                manager.wallet.getBalances()
+                wallet_sat = float(manager.wallet.balance.amount) if getattr(manager.wallet, 'balance', None) else 0.0
+            except Exception as e:
+                log.error("wallet-only getBalances failed: %s", e)
+        _cache[_WALLET_KEY] = wallet_sat
+        return wallet_sat
+
+
 def invalidate() -> None:
-    """Drop the cached snapshot — call after a send so the next read is fresh."""
+    """Drop the cached snapshots — call after a send so the next read is fresh."""
     _cache.pop(_BALANCE_KEY, None)
+    _cache.pop(_WALLET_KEY, None)
