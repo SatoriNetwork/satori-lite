@@ -1050,6 +1050,58 @@
     }
 
     /* ─────────────────────────────────────────────────────────────
+       Send form — sealed under glass while a review is open so
+       edits can't drift out of sync with the snapshot being signed.
+       ───────────────────────────────────────────────────────────── */
+    .send-form-fields {
+        position: relative;
+        transition: opacity 0.28s cubic-bezier(.2,.8,.2,1),
+                    filter   0.28s cubic-bezier(.2,.8,.2,1);
+    }
+    .send-form-fields.is-frozen {
+        opacity: 0.48;
+        filter: saturate(0.75);
+        user-select: none;
+    }
+    .send-form-fields.is-frozen::before {
+        content: '';
+        position: absolute;
+        inset: -0.35rem -0.5rem;
+        border: 1px dashed var(--border-color);
+        border-radius: 10px;
+        pointer-events: none;
+        background-image: repeating-linear-gradient(
+            135deg,
+            transparent 0 8px,
+            rgba(125, 125, 125, 0.055) 8px 9px
+        );
+        animation: send-seal-in 0.32s cubic-bezier(.2,.8,.2,1) both;
+    }
+    .send-form-fields.is-frozen::after {
+        content: 'LOCKED FOR REVIEW';
+        position: absolute;
+        top: -0.55rem;
+        right: 0.4rem;
+        font-size: 0.58rem;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        padding: 0.18rem 0.55rem 0.16rem 0.5rem;
+        border-radius: 999px;
+        background: var(--bg-primary, #fff);
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+        pointer-events: none;
+        animation: send-seal-in 0.32s 0.04s cubic-bezier(.2,.8,.2,1) both;
+    }
+    [data-theme="dark"] .send-form-fields.is-frozen::after {
+        background: var(--bg-secondary, #18181b);
+    }
+    @keyframes send-seal-in {
+        from { opacity: 0; transform: translateY(-3px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─────────────────────────────────────────────────────────────
        Send console — replaces native confirm() + generic bootstrap
        alert with an inline, editorial review / result sequence.
        ───────────────────────────────────────────────────────────── */
@@ -1057,11 +1109,29 @@
         margin-top: 1rem;
         border-top: 1px solid var(--border-color);
         padding-top: 1rem;
-        animation: send-slide-in 0.32s cubic-bezier(.2,.8,.2,1) both;
+        transform-origin: top center;
+        animation: send-slide-in 0.36s cubic-bezier(.2,.85,.2,1) both;
     }
     @keyframes send-slide-in {
-        from { opacity: 0; transform: translateY(-6px); }
-        to   { opacity: 1; transform: translateY(0); }
+        0%   { opacity: 0; transform: translateY(-8px) scaleY(0.97); clip-path: inset(0 0 100% 0); }
+        55%  { opacity: 1; }
+        100% { opacity: 1; transform: translateY(0)    scaleY(1);    clip-path: inset(0 0 0 0); }
+    }
+    .send-console.is-closing {
+        animation: send-slide-out 0.26s cubic-bezier(.4,0,.85,1) forwards;
+        pointer-events: none;
+    }
+    @keyframes send-slide-out {
+        0%   { opacity: 1; transform: translateY(0)    scaleY(1);    clip-path: inset(0 0 0 0); }
+        100% { opacity: 0; transform: translateY(-6px) scaleY(0.985); clip-path: inset(0 0 100% 0); }
+    }
+    /* Button reappears with a soft fade-down after review collapses. */
+    #sendBtn.is-returning {
+        animation: send-btn-return 0.28s cubic-bezier(.2,.8,.2,1) both;
+    }
+    @keyframes send-btn-return {
+        0%   { opacity: 0; transform: translateY(-4px); }
+        100% { opacity: 1; transform: translateY(0); }
     }
     .send-console-eyebrow {
         display: flex;
@@ -1180,7 +1250,7 @@
         overflow: hidden;
     }
     .send-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
-    .send-btn-primary:disabled { cursor: progress; opacity: 1; }
+    .send-btn-primary:disabled { opacity: 1; }
     .send-btn-primary .material-icons { font-size: 15px; }
     .send-btn-primary.is-loading::after {
         content: '';
@@ -1198,6 +1268,12 @@
         from { background-position: 220% 0; }
         to   { background-position: -120% 0; }
     }
+    .send-btn-primary.is-loading .material-icons {
+        display: inline-block;
+        transform-origin: 50% 50%;
+        animation: send-spin 0.9s linear infinite;
+    }
+    @keyframes send-spin { to { transform: rotate(360deg); } }
 
     /* ── Result panel ───────────────────────────────── */
     .send-result-hero {
@@ -1526,37 +1602,39 @@
                     </span>
                 </div>
                 <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Send From</label>
-                        <div class="d-flex gap-3">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
-                                <label class="form-check-label" for="sendFromVault">
-                                    Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
-                                <label class="form-check-label" for="sendFromWallet">
-                                    Wallet (Identity) <small class="text-muted" id="walletBalanceLabel">(--)</small>
-                                </label>
+                    <div id="sendFormFields" class="send-form-fields">
+                        <div class="mb-3">
+                            <label class="form-label">Send From</label>
+                            <div class="d-flex gap-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
+                                    <label class="form-check-label" for="sendFromVault">
+                                        Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
+                                    <label class="form-check-label" for="sendFromWallet">
+                                        Wallet (Identity) <small class="text-muted" id="walletBalanceLabel">(--)</small>
+                                    </label>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Destination Address</label>
-                        <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-8">
-                            <label class="form-label">Amount</label>
-                            <input type="number" class="form-control" id="sendAmount" placeholder="0.00" step="0.00000001" min="0">
+                        <div class="mb-3">
+                            <label class="form-label">Destination Address</label>
+                            <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
                         </div>
-                        <div class="col-4">
-                            <label class="form-label">Sweep All</label>
-                            <div class="form-check mt-2">
-                                <input class="form-check-input" type="checkbox" id="sendSweep" onchange="toggleSweepAmount()">
-                                <label class="form-check-label" for="sendSweep">Send All</label>
+                        <div class="row mb-3">
+                            <div class="col-8">
+                                <label class="form-label">Amount</label>
+                                <input type="number" class="form-control" id="sendAmount" placeholder="0.00" step="0.00000001" min="0">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label">Sweep All</label>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="sendSweep" onchange="toggleSweepAmount()">
+                                    <label class="form-check-label" for="sendSweep">Send All</label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -4167,10 +4245,26 @@
         });
     }
 
+    function freezeSendForm() {
+        const fields = document.getElementById('sendFormFields');
+        if (!fields) return;
+        fields.classList.add('is-frozen');
+        fields.inert = true;  // removes subtree from pointer/keyboard/AT
+        fields.setAttribute('aria-hidden', 'true');
+    }
+    function thawSendForm() {
+        const fields = document.getElementById('sendFormFields');
+        if (!fields) return;
+        fields.classList.remove('is-frozen');
+        fields.inert = false;
+        fields.removeAttribute('aria-hidden');
+    }
+
     function openSendReview(tx) {
         const sendBtn = document.getElementById('sendBtn');
         const console_ = document.getElementById('sendConsole');
         sendBtn.style.display = 'none';
+        freezeSendForm();
 
         const amountBlock = tx.sweep
             ? `<div class="send-review-amount">
@@ -4218,15 +4312,24 @@
             </div>`;
         console_.style.display = 'block';
         console_._pendingTx = tx;
+
+        // Scroll the review into view if any part of it — especially the
+        // Confirm button — sits below the fold. Defer one frame so layout
+        // reflects the newly mounted panel before the browser measures.
+        requestAnimationFrame(() => {
+            const panel = console_.querySelector('.send-console');
+            if (!panel) return;
+            const rect = panel.getBoundingClientRect();
+            const vh = window.innerHeight || document.documentElement.clientHeight;
+            // If the panel fits in the viewport, center it for breathing room.
+            // Otherwise fall back to `nearest` so we only nudge as needed.
+            const block = rect.height < vh * 0.85 ? 'center' : 'nearest';
+            panel.scrollIntoView({ behavior: 'smooth', block });
+        });
     }
 
     function cancelSendReview() {
-        const console_ = document.getElementById('sendConsole');
-        const sendBtn = document.getElementById('sendBtn');
-        console_.style.display = 'none';
-        console_.innerHTML = '';
-        console_._pendingTx = null;
-        sendBtn.style.display = '';
+        closeSendConsole();
     }
 
     async function confirmSend() {
@@ -4339,12 +4442,52 @@
     }
 
     function resetSendConsole() {
+        closeSendConsole();
+    }
+
+    // Shared close routine — plays the slide-out animation, thaws the form
+    // in sync (so the reveal and release feel connected), then restores the
+    // Send button with its own fade-down.
+    function closeSendConsole() {
         const console_ = document.getElementById('sendConsole');
         const sendBtn = document.getElementById('sendBtn');
-        console_.style.display = 'none';
-        console_.innerHTML = '';
-        console_._pendingTx = null;
-        sendBtn.style.display = '';
+        const panel = console_ ? console_.querySelector('.send-console') : null;
+
+        const finalize = () => {
+            if (console_) {
+                console_.style.display = 'none';
+                console_.innerHTML = '';
+                console_._pendingTx = null;
+            }
+            if (sendBtn) {
+                sendBtn.style.display = '';
+                sendBtn.classList.remove('is-returning');
+                // restart the CSS animation by forcing reflow
+                void sendBtn.offsetWidth;
+                sendBtn.classList.add('is-returning');
+                sendBtn.addEventListener('animationend', () => {
+                    sendBtn.classList.remove('is-returning');
+                }, { once: true });
+            }
+        };
+
+        // Begin thawing the form immediately — it desaturates/fades back in
+        // parallel with the review collapsing upward.
+        thawSendForm();
+
+        if (!panel) { finalize(); return; }
+        panel.classList.add('is-closing');
+        let settled = false;
+        const onEnd = (e) => {
+            if (e && e.animationName !== 'send-slide-out') return;
+            if (settled) return;
+            settled = true;
+            panel.removeEventListener('animationend', onEnd);
+            finalize();
+        };
+        panel.addEventListener('animationend', onEnd);
+        // Safety net in case animationend doesn't fire (e.g. tab hidden).
+        setTimeout(() => onEnd(null), 360);
     }
 
     function copySendTxid(txid, btn) {
