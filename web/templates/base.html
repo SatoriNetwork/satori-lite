@@ -857,11 +857,11 @@
             background:
                 linear-gradient(
                     160deg,
-                    rgba(255, 255, 255, 0.10) 0%,
-                    rgba(255, 255, 255, 0.03) 50%,
-                    rgba(255, 255, 255, 0.07) 100%
+                    rgba(255, 255, 255, 0.08) 0%,
+                    rgba(255, 255, 255, 0.02) 50%,
+                    rgba(255, 255, 255, 0.05) 100%
                 ),
-                rgba(20, 20, 28, 0.7);
+                rgba(20, 20, 28, 0.94);
             -webkit-backdrop-filter: blur(32px) saturate(200%);
             backdrop-filter: blur(32px) saturate(200%);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1228,9 +1228,37 @@
                 margin-left: auto;
             }
         }
+        /* Mobile overflow menu — hidden by default, shown only on mobile */
+        .util-mobile-menu { display: none; }
+
         @media (max-width: 640px) {
             .util-label { display: none; }
             .util-btn .util-chevron { display: none; }
+            /* Show just the dot on mobile — no pill chrome, positioned after nav pill */
+            .satori-status-chip {
+                display: flex;
+                background: transparent;
+                border-color: transparent;
+                padding: 0;
+                gap: 0;
+                order: 2;
+            }
+            /* Pull nav pill back into the single row, between brand and utils */
+            .satori-navbar { flex-wrap: nowrap; }
+            .satori-nav-pill {
+                order: 0;
+                width: auto;
+                max-width: none;
+                flex: 1;
+                min-width: 0;
+            }
+            .satori-util-group { margin-left: 0; order: 3; }
+            /* Icon-only nav items on mobile to fit in one row */
+            .snp-item span { display: none; }
+            .snp-item { padding: 0.3rem 0.5rem; flex: none; }
+            /* Swap desktop util buttons for single overflow menu */
+            .util-desktop-only { display: none !important; }
+            .util-mobile-menu { display: flex; }
         }
         /* Navbar responsive — glass */
         @media (max-width: 991.98px) {
@@ -1245,6 +1273,7 @@
             html.glass-nav .satori-navbar {
                 margin: 8px 8px 0;
                 padding: 0.55rem 0.7rem;
+                flex-wrap: nowrap;
             }
         }
 

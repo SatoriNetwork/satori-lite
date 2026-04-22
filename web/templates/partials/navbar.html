@@ -61,8 +61,8 @@
     <!-- ── Utility actions (right cluster) ───────────────── -->
     <div class="satori-util-group">
 
-        <!-- Wallet dropdown -->
-        <div class="dropdown">
+        <!-- Wallet dropdown (desktop) -->
+        <div class="dropdown util-desktop-only">
             <button class="util-btn" type="button" id="walletDropdown"
                     data-bs-toggle="dropdown" aria-expanded="false">
                 <i class="material-icons">account_balance_wallet</i>
@@ -94,8 +94,8 @@
             </ul>
         </div>
 
-        <!-- Training dropdown -->
-        <div class="dropdown">
+        <!-- Training dropdown (desktop) -->
+        <div class="dropdown util-desktop-only">
             <button class="util-btn" type="button" id="trainingFrequencyDropdown"
                     data-bs-toggle="dropdown" data-bs-auto-close="outside"
                     aria-expanded="false">
@@ -147,16 +147,81 @@
             </div>
         </div>
 
-        <!-- Divider -->
-        <span class="nav-vdivider"></span>
+        <!-- Divider (desktop) -->
+        <span class="nav-vdivider util-desktop-only"></span>
 
-        <!-- Logout -->
-        <a href="{{ url_for('logout') }}" class="util-btn util-ghost">
+        <!-- Logout (desktop) -->
+        <a href="{{ url_for('logout') }}" class="util-btn util-ghost util-desktop-only">
             <i class="material-icons">logout</i>
             <span class="util-label">Logout</span>
         </a>
 
-        <!-- Theme toggle -->
+        <!-- Mobile overflow menu -->
+        <div class="dropdown util-mobile-menu">
+            <button class="util-btn util-icon-only" type="button"
+                    data-bs-toggle="dropdown" aria-expanded="false"
+                    title="More options">
+                <i class="material-icons">more_vert</i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end satori-dropdown" style="min-width: 230px;">
+                <li>
+                    {% if request.endpoint == 'dashboard' %}
+                    <a class="dropdown-item satori-dd-item" href="#"
+                       onclick="openImportWalletModal(); return false;">
+                        <i class="material-icons">upload_file</i>Import Wallet
+                    </a>
+                    {% else %}
+                    <a class="dropdown-item satori-dd-item"
+                       href="{{ url_for('dashboard') }}">
+                        <i class="material-icons">upload_file</i>Import Wallet
+                    </a>
+                    {% endif %}
+                </li>
+                <li>
+                    <a class="dropdown-item satori-dd-item" href="/api/wallet/download">
+                        <i class="material-icons">download</i>Download Wallet
+                    </a>
+                </li>
+                <li><hr class="satori-dd-divider"></li>
+                <li>
+                    <div class="tf-panel" style="padding: 0.75rem 1rem 0.6rem;">
+                        <div class="tf-head">
+                            <span class="tf-eyebrow">
+                                <i class="material-icons">tune</i>
+                                Training frequency
+                            </span>
+                        </div>
+                        <div class="tf-readout">
+                            <span class="tf-readout-value" id="mobileTrainingDelayLabel">10 minutes</span>
+                            <span class="tf-readout-cap">between runs</span>
+                        </div>
+                        <div class="tf-track-wrap">
+                            <input type="range" class="tf-range"
+                                   id="mobileTrainingDelaySlider"
+                                   min="0" max="100" step="1" value="50"
+                                   style="--tf-fill: 50%;"
+                                   oninput="this.style.setProperty('--tf-fill', this.value + '%'); updateTrainingDelayLabel(this.value)"
+                                   onchange="setTrainingDelay(this.value)">
+                            <div class="tf-ticks" aria-hidden="true">
+                                <span></span><span></span><span></span><span></span><span></span>
+                            </div>
+                        </div>
+                        <div class="tf-legend">
+                            <span class="tf-legend-item"><i class="material-icons">eco</i>Slow</span>
+                            <span class="tf-legend-item tf-legend-right">Fast<i class="material-icons">bolt</i></span>
+                        </div>
+                    </div>
+                </li>
+                <li><hr class="satori-dd-divider"></li>
+                <li>
+                    <a class="dropdown-item satori-dd-item" href="{{ url_for('logout') }}">
+                        <i class="material-icons">logout</i>Logout
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Theme toggle (always visible) -->
         <button class="util-btn util-icon-only" onclick="toggleTheme()"
                 title="Toggle dark/light mode">
             <i class="material-icons" id="themeIcon">light_mode</i>
@@ -189,10 +254,14 @@
 
     function updateTrainingDelayLabel(sliderValue) {
         const seconds = sliderToSeconds(sliderValue);
-        const label = document.getElementById('trainingDelayLabel');
-        if (label) label.textContent = formatDelay(seconds);
-        const slider = document.getElementById('trainingDelaySlider');
-        if (slider) slider.style.setProperty('--tf-fill', (slider.value || 0) + '%');
+        ['trainingDelayLabel', 'mobileTrainingDelayLabel'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = formatDelay(seconds);
+        });
+        ['trainingDelaySlider', 'mobileTrainingDelaySlider'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.value = sliderValue; el.style.setProperty('--tf-fill', sliderValue + '%'); }
+        });
     }
 
     function _navToast(message, isError = false) {
@@ -239,7 +308,13 @@
         }
     }
 
-    document.addEventListener('DOMContentLoaded', loadTrainingDelay);
+    document.addEventListener('DOMContentLoaded', function() {
+        loadTrainingDelay();
+        const activeItem = document.querySelector('.satori-nav-pill .snp-active');
+        if (activeItem) {
+            activeItem.scrollIntoView({ block: 'nearest', inline: 'center' });
+        }
+    });
 
     /* ─── Liquid-glass cursor tracking ────────────────────────
        Only runs when html.glass-nav is set. The capability-detect

@@ -155,6 +155,29 @@
     @media (max-width: 640px) {
         .dash-hero-h1 { font-size: 1.55rem; }
         #dashboardLayoutRow .card-header { flex-wrap: wrap; gap: 0.5rem; }
+        /* Stack 3-col card header: title+actions on row 1, tabs full-width on row 2 */
+        .card-header-3col {
+            grid-template-columns: 1fr auto;
+            grid-template-rows: auto auto;
+        }
+        .card-header-3col h5           { grid-column: 1; grid-row: 1; }
+        .card-header-3col .card-header-actions { grid-column: 2; grid-row: 1; }
+        .card-header-3col .bal-tabs    { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
+        .card-header-3col .bal-tabs .bal-tab { flex: 1; text-align: center; }
+        /* Row-by-row balance layout on mobile */
+        .dash-stat-row { flex-direction: column; }
+        .dash-stat {
+            flex-direction: row;
+            justify-content: space-between;
+            padding: 0.75rem 1.25rem;
+            text-align: left;
+        }
+        .dash-stat + .dash-stat::before {
+            top: 0; left: 1.25rem; right: 1.25rem;
+            height: 1px; width: auto;
+        }
+        .dash-stat-label { margin-top: 0; }
+        .dash-stat-value { font-size: 1.1rem; letter-spacing: -0.02em; }
     }
 </style>
 {% elif page_mode == 'p2p' %}
