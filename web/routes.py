@@ -2531,19 +2531,19 @@ def register_routes(app):
         if url and not parser_config:
             return jsonify({'error': 'Parser config required when URL is set'}), 400
         classification = (data.get('classification') or '').strip().lower()
-        if classification and classification not in CLASSIFICATION_VALUES:
-            return jsonify({
-                'error': f'Unknown classification: {classification}',
-                'allowed': sorted(CLASSIFICATION_VALUES),
-            }), 400
         raw_tags = data.get('tags') or []
         if isinstance(raw_tags, str):
             raw_tags = raw_tags.split(',')
-        extra_tags = [
+        tag_list = [
             t.strip().lower() for t in raw_tags
             if isinstance(t, str) and t.strip()
-            and t.strip().lower() != classification
         ]
+        if classification and classification not in CLASSIFICATION_VALUES:
+            # Unknown classification — demote to a tag instead of rejecting
+            if classification not in tag_list:
+                tag_list.insert(0, classification)
+            classification = ''
+        extra_tags = [t for t in tag_list if t != classification]
         all_tags = ([classification] if classification else []) + extra_tags
         # Create the data source
         raw_offset = data.get('offset_seconds')

@@ -349,7 +349,11 @@
             );
             opacity: 0.85;
         }
-        html.glass-nav body > * { position: relative; z-index: 1; }
+        /* Sit body children above the ambient glass orbs (z-index:0),
+           but exclude Bootstrap modals/backdrops — they need their
+           native position:fixed to overlay the viewport instead of
+           rendering inline below the page content. */
+        html.glass-nav body > *:not(.modal):not(.modal-backdrop) { position: relative; z-index: 1; }
 
         /* Navbar glass shell */
         html.glass-nav .satori-navbar {

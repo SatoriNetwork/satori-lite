@@ -76,9 +76,24 @@
     }
 
     /* ── Card-header rhythm (matches predictions page) ─────── */
+    #stakeLayoutRow .card-header {
+        padding: 0.9rem 1.15rem !important;
+    }
     .stk-card-head {
         display: flex; align-items: center; justify-content: space-between;
         gap: 0.6rem;
+        min-height: 64px;
+        box-sizing: border-box;
+    }
+    /* Shrink action buttons when they live in the card header so they don't inflate header height */
+    .stk-card-head .stk-btn {
+        padding: 0.3rem 0.55rem;
+        font-size: 0.74rem;
+        border-radius: 8px;
+    }
+    .stk-card-head .stk-btn .material-icons { font-size: 15px; }
+    @media (max-width: 640px) {
+        .stk-card-head { min-height: auto; }
     }
     .stk-card-head h5 {
         margin: 0;
