@@ -24,7 +24,7 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
-from web.balance_cache import get_balance_snapshot
+from web.balance_cache import get_balance_snapshot, get_wallet_balance
 
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
@@ -1385,6 +1385,16 @@ def register_routes(app):
             logger.error(traceback.format_exc())
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/wallet/balance/wallet-only')
+    @login_required
+    def api_wallet_balance_wallet_only():
+        """Wallet-only SATORI balance (skips vault). Cheap to call; used by marketplace."""
+        try:
+            balance = get_wallet_balance()
+            return jsonify({'wallet_balance': balance})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     # AI Engine Training Delay Control
     @app.route('/api/engine/training-delay', methods=['GET'])
     @login_required
@@ -2263,6 +2273,26 @@ def register_routes(app):
         data = request.get_json()
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        stream_name = data['stream_name']
+        nostr_pubkey = data['nostr_pubkey']
+        # Look up price server-side from discovered streams — don't trust the client value
+        server_stream = next(
+            (s for s in startup.networkStreams
+             if s.get('stream_name') == stream_name and s.get('nostr_pubkey') == nostr_pubkey),
+            None)
+        price_per_obs = int((server_stream or {}).get('price_per_obs') or 0)
+        if price_per_obs > 0:
+            obs_per_refill = 500
+            fund_sats = max(100_000, min(price_per_obs * obs_per_refill, 1_000_000))
+            required_satori = fund_sats / 1e8
+            try:
+                available = get_wallet_balance(force=True)
+            except Exception:
+                available = 0
+            if available < required_satori:
+                return jsonify({
+                    'error': f'Insufficient wallet balance. This stream costs {price_per_obs} sats/obs and requires a minimum channel deposit of {required_satori:.4f} SATORI. You have {available:.4f} SATORI in your wallet.'
+                }), 400
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
 
@@ -2613,19 +2643,19 @@ def register_routes(app):
         if url and not parser_config:
             return jsonify({'error': 'Parser config required when URL is set'}), 400
         classification = (data.get('classification') or '').strip().lower()
-        if classification and classification not in CLASSIFICATION_VALUES:
-            return jsonify({
-                'error': f'Unknown classification: {classification}',
-                'allowed': sorted(CLASSIFICATION_VALUES),
-            }), 400
         raw_tags = data.get('tags') or []
         if isinstance(raw_tags, str):
             raw_tags = raw_tags.split(',')
-        extra_tags = [
+        tag_list = [
             t.strip().lower() for t in raw_tags
             if isinstance(t, str) and t.strip()
-            and t.strip().lower() != classification
         ]
+        if classification and classification not in CLASSIFICATION_VALUES:
+            # Unknown classification — demote to a tag instead of rejecting
+            if classification not in tag_list:
+                tag_list.insert(0, classification)
+            classification = ''
+        extra_tags = [t for t in tag_list if t != classification]
         all_tags = ([classification] if classification else []) + extra_tags
         # Create the data source
         raw_offset = data.get('offset_seconds')

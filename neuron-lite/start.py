@@ -2839,8 +2839,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 logging.warning(
                     f'Network: announce failed {pub["stream_name"]}: {e}')
 
-    async def _networkPublishObservation(self, stream_name: str, value):
-        """Publish an observation to all connected relays."""
+    async def _networkPublishObservation(self, stream_name: str, value) -> int:
+        """Publish an observation to all connected relays.
+
+        Returns the number of relays that accepted the publish. Zero means
+        the seq_num advanced locally but nothing reached the network — the
+        caller should surface that as a warning rather than a success.
+        """
         from satorilib.satori_nostr.models import (
             DatastreamObservation, DatastreamMetadata)
         pub = await asyncio.to_thread(
@@ -2850,7 +2855,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not pub:
             logging.warning(
                 f'Network: cannot publish {stream_name}: not registered')
-            return
+            return 0
         seq_num = await asyncio.to_thread(
             self.networkDB.mark_published, stream_name)
         ts = int(time.time())
@@ -2878,9 +2883,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             cadence_seconds=pub.get('cadence_seconds'),
             tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
             metadata=source or None)
+        delivered = 0
         for relay_url, client in list(self._networkClients.items()):
             try:
                 await client.publish_observation(observation, metadata)
+                delivered += 1
                 logging.info(
                     f'Network: published {stream_name} seq={seq_num} '
                     f'value={value} to {relay_url}', color='green')
@@ -2896,6 +2903,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             seq_num=seq_num,
             raw_value=value,
         )
+        if delivered == 0:
+            logging.warning(
+                f'Network: {stream_name} seq={seq_num} not delivered '
+                f'(no connected relays) — seq advanced locally only')
+        return delivered
 
     def publishObservation(self, stream_name: str, value):
         """Publish an observation from a sync context (e.g. Flask route, engine).
@@ -3216,11 +3228,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         # -- Publish --
         try:
-            await self._networkPublishObservation(stream_name, value)
-            logging.info(
-                f'Network: data source {stream_name} published',
-                color='green')
-            return True
+            delivered = await self._networkPublishObservation(
+                stream_name, value)
+            if delivered > 0:
+                logging.info(
+                    f'Network: data source {stream_name} published '
+                    f'to {delivered} relay(s)',
+                    color='green')
+            else:
+                logging.warning(
+                    f'Network: data source {stream_name} parsed but not '
+                    f'delivered — no connected relays')
+            return delivered > 0
         except Exception as e:
             logging.warning(
                 f'Network: publish failed for {stream_name}: {e}')

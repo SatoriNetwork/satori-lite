@@ -85,6 +85,8 @@
     /* ── Card-header rhythm (matches stake/local-predictions/marketplace) ── */
     #dashboardLayoutRow .card-header {
         padding: 0.9rem 1.15rem !important;
+        min-height: 64px;
+        box-sizing: border-box;
     }
     #dashboardLayoutRow .card-header h5 {
         font-size: 0.72rem !important;
@@ -154,7 +156,30 @@
 
     @media (max-width: 640px) {
         .dash-hero-h1 { font-size: 1.55rem; }
-        #dashboardLayoutRow .card-header { flex-wrap: wrap; gap: 0.5rem; }
+        #dashboardLayoutRow .card-header { flex-wrap: wrap; gap: 0.5rem; min-height: auto; }
+        /* Stack 3-col card header: title+actions on row 1, tabs full-width on row 2 */
+        .card-header-3col {
+            grid-template-columns: 1fr auto;
+            grid-template-rows: auto auto;
+        }
+        .card-header-3col h5           { grid-column: 1; grid-row: 1; }
+        .card-header-3col .card-header-actions { grid-column: 2; grid-row: 1; }
+        .card-header-3col .bal-tabs    { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
+        .card-header-3col .bal-tabs .bal-tab { flex: 1; text-align: center; }
+        /* Row-by-row balance layout on mobile */
+        .dash-stat-row { flex-direction: column; }
+        .dash-stat {
+            flex-direction: row;
+            justify-content: space-between;
+            padding: 0.75rem 1.25rem;
+            text-align: left;
+        }
+        .dash-stat + .dash-stat::before {
+            top: 0; left: 1.25rem; right: 1.25rem;
+            height: 1px; width: auto;
+        }
+        .dash-stat-label { margin-top: 0; }
+        .dash-stat-value { font-size: 1.1rem; letter-spacing: -0.02em; }
     }
 </style>
 {% elif page_mode == 'p2p' %}
@@ -1025,6 +1050,458 @@
         background: rgba(251, 191, 36, 0.06);
         border-color: rgba(251, 191, 36, 0.18);
     }
+
+    /* ─────────────────────────────────────────────────────────────
+       Send form — sealed under glass while a review is open so
+       edits can't drift out of sync with the snapshot being signed.
+       ───────────────────────────────────────────────────────────── */
+    .send-form-fields {
+        position: relative;
+        transition: opacity 0.28s cubic-bezier(.2,.8,.2,1),
+                    filter   0.28s cubic-bezier(.2,.8,.2,1);
+    }
+    .send-form-fields.is-frozen {
+        opacity: 0.48;
+        filter: saturate(0.75);
+        user-select: none;
+    }
+    .send-form-fields.is-frozen::before {
+        content: '';
+        position: absolute;
+        inset: -0.35rem -0.5rem;
+        border: 1px dashed var(--border-color);
+        border-radius: 10px;
+        pointer-events: none;
+        background-image: repeating-linear-gradient(
+            135deg,
+            transparent 0 8px,
+            rgba(125, 125, 125, 0.055) 8px 9px
+        );
+        animation: send-seal-in 0.32s cubic-bezier(.2,.8,.2,1) both;
+    }
+    .send-form-fields.is-frozen::after {
+        content: 'LOCKED FOR REVIEW';
+        position: absolute;
+        top: -0.55rem;
+        right: 0.4rem;
+        font-size: 0.58rem;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        padding: 0.18rem 0.55rem 0.16rem 0.5rem;
+        border-radius: 999px;
+        background: var(--bg-primary, #fff);
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+        pointer-events: none;
+        animation: send-seal-in 0.32s 0.04s cubic-bezier(.2,.8,.2,1) both;
+    }
+    [data-theme="dark"] .send-form-fields.is-frozen::after {
+        background: var(--bg-secondary, #18181b);
+    }
+    @keyframes send-seal-in {
+        from { opacity: 0; transform: translateY(-3px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Send console — replaces native confirm() + generic bootstrap
+       alert with an inline, editorial review / result sequence.
+       ───────────────────────────────────────────────────────────── */
+    .send-console {
+        margin-top: 1rem;
+        border-top: 1px solid var(--border-color);
+        padding-top: 1rem;
+        transform-origin: top center;
+        animation: send-slide-in 0.36s cubic-bezier(.2,.85,.2,1) both;
+    }
+    @keyframes send-slide-in {
+        0%   { opacity: 0; transform: translateY(-8px) scaleY(0.97); clip-path: inset(0 0 100% 0); }
+        55%  { opacity: 1; }
+        100% { opacity: 1; transform: translateY(0)    scaleY(1);    clip-path: inset(0 0 0 0); }
+    }
+    .send-console.is-closing {
+        animation: send-slide-out 0.26s cubic-bezier(.4,0,.85,1) forwards;
+        pointer-events: none;
+    }
+    @keyframes send-slide-out {
+        0%   { opacity: 1; transform: translateY(0)    scaleY(1);    clip-path: inset(0 0 0 0); }
+        100% { opacity: 0; transform: translateY(-6px) scaleY(0.985); clip-path: inset(0 0 100% 0); }
+    }
+    /* Button reappears with a soft fade-down after review collapses. */
+    #sendBtn.is-returning {
+        animation: send-btn-return 0.28s cubic-bezier(.2,.8,.2,1) both;
+    }
+    @keyframes send-btn-return {
+        0%   { opacity: 0; transform: translateY(-4px); }
+        100% { opacity: 1; transform: translateY(0); }
+    }
+    .send-console-eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.64rem;
+        font-weight: 700;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 0.75rem;
+    }
+    .send-console-eyebrow .tick {
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(90deg, var(--border-color), transparent);
+    }
+    .send-console-eyebrow.is-success { color: #16a34a; }
+    .send-console-eyebrow.is-success .tick {
+        background: linear-gradient(90deg, rgba(22,163,74,0.45), transparent);
+    }
+    .send-console-eyebrow.is-error { color: #dc2626; }
+    .send-console-eyebrow.is-error .tick {
+        background: linear-gradient(90deg, rgba(220,38,38,0.45), transparent);
+    }
+
+    /* ── Review panel ───────────────────────────────── */
+    .send-review-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.65rem 1.25rem;
+        padding: 0.75rem 0 1rem;
+    }
+    .send-review-row { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+    .send-review-row.full { grid-column: 1 / -1; }
+    .send-review-label {
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+    }
+    .send-review-value {
+        font-size: 0.92rem;
+        color: var(--text-primary);
+        font-weight: 500;
+        word-break: break-all;
+        font-variant-numeric: tabular-nums;
+    }
+    .send-review-value.mono {
+        font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+    }
+    .send-review-amount {
+        display: flex;
+        align-items: baseline;
+        gap: 0.45rem;
+        font-variant-numeric: tabular-nums;
+    }
+    .send-review-amount .num {
+        font-size: 1.55rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--text-primary);
+        line-height: 1;
+    }
+    .send-review-amount .unit {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+    .send-review-amount .sweep-pill {
+        font-size: 0.58rem;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        padding: 0.18rem 0.5rem;
+        border-radius: 999px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        margin-left: 0.25rem;
+    }
+    .send-review-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.25rem;
+    }
+    .send-btn-ghost,
+    .send-btn-primary {
+        flex: 1;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        padding: 0.55rem 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: background .15s ease, filter .15s ease, transform .15s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+    }
+    .send-btn-ghost:hover { background: var(--bg-input); }
+    .send-btn-primary {
+        background: var(--accent-gradient);
+        border-color: transparent;
+        color: #fff;
+        flex: 1.4;
+        position: relative;
+        overflow: hidden;
+    }
+    .send-btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .send-btn-primary:disabled { opacity: 1; }
+    .send-btn-primary .material-icons { font-size: 15px; }
+    .send-btn-primary.is-loading::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(110deg,
+            transparent 15%, rgba(255,255,255,0.28) 45%,
+            rgba(255,255,255,0.28) 55%, transparent 85%);
+        background-size: 220% 100%;
+        background-repeat: no-repeat;
+        animation: send-shimmer 1.15s linear infinite;
+        pointer-events: none;
+    }
+    @keyframes send-shimmer {
+        from { background-position: 220% 0; }
+        to   { background-position: -120% 0; }
+    }
+    .send-btn-primary.is-loading .material-icons {
+        display: inline-block;
+        transform-origin: 50% 50%;
+        animation: send-spin 0.9s linear infinite;
+    }
+    @keyframes send-spin { to { transform: rotate(360deg); } }
+
+    /* ── Result panel ───────────────────────────────── */
+    .send-result-hero {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.9rem;
+        padding: 0.25rem 0 0.85rem;
+    }
+    .send-result-mark {
+        flex-shrink: 0;
+        width: 40px; height: 40px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        border: 1.5px solid currentColor;
+        position: relative;
+    }
+    .send-result-mark.success { color: #16a34a; }
+    .send-result-mark.error   { color: #dc2626; }
+    .send-result-mark svg { width: 22px; height: 22px; }
+    .send-result-mark svg path {
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-dasharray: 48;
+        stroke-dashoffset: 48;
+        animation: send-draw 0.55s 0.12s cubic-bezier(.2,.8,.2,1) forwards;
+    }
+    @keyframes send-draw { to { stroke-dashoffset: 0; } }
+    .send-result-mark.success::after {
+        content: '';
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        border: 1.5px solid currentColor;
+        opacity: 0.4;
+        animation: send-ripple 1.4s 0.25s cubic-bezier(.2,.8,.2,1) forwards;
+    }
+    @keyframes send-ripple {
+        from { transform: scale(0.8); opacity: 0.45; }
+        to   { transform: scale(1.6); opacity: 0; }
+    }
+    .send-result-head { flex: 1; min-width: 0; }
+    .send-result-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        letter-spacing: -0.005em;
+        color: var(--text-primary);
+        margin: 0 0 0.15rem;
+        line-height: 1.25;
+    }
+    .send-result-sub {
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+        margin: 0;
+    }
+    .send-result-meta {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        column-gap: 0.9rem;
+        row-gap: 0.35rem;
+        padding: 0.35rem 0;
+        border-top: 1px dashed var(--border-color);
+        border-bottom: 1px dashed var(--border-color);
+        margin: 0.25rem 0 0.85rem;
+    }
+    .send-result-meta dt {
+        font-size: 0.62rem;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        align-self: center;
+        padding: 0.3rem 0;
+    }
+    .send-result-meta dd {
+        margin: 0;
+        padding: 0.3rem 0;
+        font-size: 0.82rem;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .send-result-meta dd.mono {
+        font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+        font-size: 0.76rem;
+    }
+    .send-result-txid {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        direction: rtl;
+        text-align: left;
+    }
+    .send-result-copy {
+        flex-shrink: 0;
+        width: 28px; height: 28px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center;
+        transition: background .15s ease, color .15s ease;
+    }
+    .send-result-copy:hover { background: var(--bg-input); color: var(--text-primary); }
+    .send-result-copy .material-icons { font-size: 14px; }
+    .send-result-copy.is-copied { color: #16a34a; border-color: rgba(22,163,74,0.4); }
+    .send-result-error-body {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin: 0.2rem 0 1rem;
+        padding: 0.5rem 0.7rem;
+        border-left: 2px solid #dc2626;
+        background: rgba(220, 38, 38, 0.04);
+        font-style: italic;
+    }
+    [data-theme="dark"] .send-result-error-body {
+        background: rgba(220, 38, 38, 0.08);
+        color: var(--text-primary);
+    }
+
+    /* ─────────────────────────────────────────────────────────────
+       Publication delete — inline confirmation that expands under
+       the target row. Quiet, single-line, one red accent.
+       ───────────────────────────────────────────────────────────── */
+    tr.pub-del-row > td {
+        padding: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+    }
+    .pub-del-panel {
+        position: relative;
+        overflow: hidden;
+        transform-origin: top center;
+        background: rgba(220, 53, 69, 0.045);
+        border-top: 1px solid var(--border-color);
+        border-bottom: 1px solid var(--border-color);
+        animation: pub-del-in 0.24s cubic-bezier(.2,.85,.2,1) both;
+    }
+    .pub-del-panel::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 18%; bottom: 18%;
+        width: 2px;
+        background: #dc3545;
+        border-radius: 1px;
+    }
+    .pub-del-panel.is-closing {
+        animation: pub-del-out 0.18s cubic-bezier(.4,0,.85,1) forwards;
+        pointer-events: none;
+    }
+    @keyframes pub-del-in {
+        from { opacity: 0; clip-path: inset(0 0 100% 0); }
+        to   { opacity: 1; clip-path: inset(0 0 0 0); }
+    }
+    @keyframes pub-del-out {
+        from { opacity: 1; clip-path: inset(0 0 0 0); }
+        to   { opacity: 0; clip-path: inset(0 0 100% 0); }
+    }
+    .pub-del-body {
+        padding: 0.65rem 1rem 0.65rem 1.15rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+    .pub-del-text {
+        flex: 1 1 320px;
+        font-size: 0.86rem;
+        line-height: 1.45;
+        color: var(--text-primary);
+    }
+    .pub-del-text code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: var(--bg-input);
+        color: var(--text-primary);
+        padding: 0.05rem 0.42rem;
+        border-radius: 3px;
+        font-size: 0.82em;
+        border: 1px solid var(--border-color);
+    }
+    .pub-del-text .pub-del-hint {
+        color: var(--text-muted);
+        font-size: 0.82rem;
+    }
+    .pub-del-actions {
+        display: flex;
+        gap: 0.25rem;
+        align-items: center;
+        flex-shrink: 0;
+    }
+    .pub-del-actions .btn {
+        font-size: 0.8rem;
+        padding: 0.28rem 0.85rem;
+        line-height: 1.35;
+    }
+    .pub-del-cancel {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--text-muted);
+    }
+    .pub-del-cancel:hover {
+        color: var(--text-primary);
+        background: var(--bg-input);
+    }
+    .pub-del-confirm {
+        background: #dc3545;
+        border: 1px solid #dc3545;
+        color: #fff;
+    }
+    .pub-del-confirm:hover {
+        background: #c82333;
+        border-color: #bd2130;
+        color: #fff;
+    }
+    .pub-del-confirm:focus-visible {
+        outline: 2px solid rgba(220, 53, 69, 0.55);
+        outline-offset: 2px;
+    }
 </style>
 {% endblock %}
 
@@ -1226,37 +1703,39 @@
                     </span>
                 </div>
                 <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Send From</label>
-                        <div class="d-flex gap-3">
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
-                                <label class="form-check-label" for="sendFromVault">
-                                    Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
-                                <label class="form-check-label" for="sendFromWallet">
-                                    Wallet (Identity) <small class="text-muted" id="walletBalanceLabel">(--)</small>
-                                </label>
+                    <div id="sendFormFields" class="send-form-fields">
+                        <div class="mb-3">
+                            <label class="form-label">Send From</label>
+                            <div class="d-flex gap-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
+                                    <label class="form-check-label" for="sendFromVault">
+                                        Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
+                                    <label class="form-check-label" for="sendFromWallet">
+                                        Wallet (Identity) <small class="text-muted" id="walletBalanceLabel">(--)</small>
+                                    </label>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Destination Address</label>
-                        <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-8">
-                            <label class="form-label">Amount</label>
-                            <input type="number" class="form-control" id="sendAmount" placeholder="0.00" step="0.00000001" min="0">
+                        <div class="mb-3">
+                            <label class="form-label">Destination Address</label>
+                            <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
                         </div>
-                        <div class="col-4">
-                            <label class="form-label">Sweep All</label>
-                            <div class="form-check mt-2">
-                                <input class="form-check-input" type="checkbox" id="sendSweep" onchange="toggleSweepAmount()">
-                                <label class="form-check-label" for="sendSweep">Send All</label>
+                        <div class="row mb-3">
+                            <div class="col-8">
+                                <label class="form-label">Amount</label>
+                                <input type="number" class="form-control" id="sendAmount" placeholder="0.00" step="0.00000001" min="0">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label">Sweep All</label>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="sendSweep" onchange="toggleSweepAmount()">
+                                    <label class="form-check-label" for="sendSweep">Send All</label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1264,7 +1743,7 @@
                         <i class="material-icons align-middle me-1">send</i>
                         Send Transaction
                     </button>
-                    <div id="sendResult" class="mt-3" style="display: none;"></div>
+                    <div id="sendConsole" style="display: none;"></div>
                     <p class="text-muted small mt-3 mb-0">
                         Transaction fees will be paid during the send process. They typically amount to no more than 0.25 EVR.
                     </p>
@@ -1732,6 +2211,10 @@
                     </div><!-- /dataSourceForm -->
                     <div id="pubsEmpty" class="text-center text-muted py-3">
                         No publications yet.
+                    </div>
+                    <div id="pubsNeedClass" class="alert alert-warning py-2 px-3 mb-0 small justify-content-between align-items-center" style="display:none; border-radius:0; border-left:0; border-right:0;">
+                        <span id="pubsNeedClassText"></span>
+                        <button type="button" class="btn btn-sm btn-outline-warning" id="pubsNeedClassBtn" onclick="classifyFirstMissing()">Classify now</button>
                     </div>
                     <div id="pubsTable" style="display: none;">
                         <div class="table-responsive">
@@ -3143,6 +3626,9 @@
                 sel.appendChild(opt);
             });
         } catch(e) { /* dropdown stays with placeholder */ }
+        if (typeof updatePubsNeedClassBanner === 'function') {
+            updatePubsNeedClassBanner();
+        }
     }
     loadClassifications();
 
@@ -3651,6 +4137,7 @@
 
     function renderPubsPage(page) {
         pubsCurrentPage = page;
+        closePubDelConfirm();
         const list = document.getElementById('pubsList');
         list.innerHTML = '';
         const start = (page - 1) * PAGE_SIZE;
@@ -3667,8 +4154,8 @@
                 : '<span class="badge bg-info">Original</span>';
             const actionBtn = inactive
                 ? ''
-                : '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); stopPublication(\'' +
-                  p.stream_name.replace(/'/g, "\\'") + '\', this)">Stop</button>';
+                : '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deletePublication(\'' +
+                  p.stream_name.replace(/'/g, "\\'") + '\', this)">Delete</button>';
             row.style.cursor = 'pointer';
             row.onclick = function() { openPubDrawer(p); };
             const tagList = (typeof p.tags === 'string')
@@ -3676,9 +4163,17 @@
                 : (p.tags || []);
             const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
             const cls = tagList.find(t => classValues.has(t));
-            const classCell = cls
-                ? '<span class="badge bg-secondary">' + classificationLabel(cls) + '</span>'
-                : '<span class="text-muted">—</span>';
+            const isOriginal = !p.source_stream_name;
+            let classCell;
+            if (cls) {
+                classCell = '<span class="badge bg-secondary">' + classificationLabel(cls) + '</span>';
+            } else if (isOriginal && !inactive) {
+                classCell = '<a href="#" class="text-warning text-decoration-none small" ' +
+                    'onclick="event.stopPropagation(); editDataSource(\'' +
+                    p.stream_name.replace(/'/g, "\\'") + '\'); return false;">+ Add</a>';
+            } else {
+                classCell = '<span class="text-muted">—</span>';
+            }
             row.innerHTML =
                 '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
                 '<td>' + classCell + '</td>' +
@@ -3717,18 +4212,127 @@
             table.style.display = 'block';
             pubsAllItems = data.publications;
             renderPubsPage(pubsCurrentPage);
+            updatePubsNeedClassBanner();
         } catch (err) { /* ignore */ }
     }
 
-    async function stopPublication(streamName, btn) {
-        if (btn) btnLoading(btn);
-        await fetch('/api/network/publication/remove', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({stream_name: streamName})
+    function pubsMissingClassification() {
+        const classValues = new Set(CLASSIFICATIONS.map(c => c.value));
+        return pubsAllItems.filter(p => {
+            if (p.active === 0) return false;
+            if (p.source_stream_name) return false; // only originals
+            const tags = (typeof p.tags === 'string')
+                ? p.tags.split(',').filter(Boolean)
+                : (p.tags || []);
+            return !tags.some(t => classValues.has(t));
         });
-        loadPublications();
-        loadNetworkSubscriptions();
+    }
+
+    function updatePubsNeedClassBanner() {
+        const banner = document.getElementById('pubsNeedClass');
+        const text = document.getElementById('pubsNeedClassText');
+        if (!banner || !text) return;
+        const missing = pubsMissingClassification();
+        if (!missing.length || !CLASSIFICATIONS.length) {
+            banner.style.display = 'none';
+            return;
+        }
+        const n = missing.length;
+        text.textContent = n + ' of your publication' + (n === 1 ? '' : 's') +
+            ' ' + (n === 1 ? 'is' : 'are') + ' missing a classification. ' +
+            'Adding one helps other nodes discover your stream.';
+        banner.style.display = 'flex';
+    }
+
+    function classifyFirstMissing() {
+        const missing = pubsMissingClassification();
+        if (!missing.length) return;
+        editDataSource(missing[0].stream_name);
+    }
+
+    function pubDelEscapeHtml(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function closePubDelConfirm() {
+        const removeEsc = () => {
+            if (pubDelEscHandler) {
+                document.removeEventListener('keydown', pubDelEscHandler);
+                pubDelEscHandler = null;
+            }
+        };
+        const existing = document.querySelector('tr.pub-del-row');
+        if (!existing) { removeEsc(); return; }
+        const panel = existing.querySelector('.pub-del-panel');
+        const cleanup = () => { existing.remove(); removeEsc(); };
+        if (panel) {
+            panel.classList.add('is-closing');
+            setTimeout(cleanup, 220);
+        } else {
+            cleanup();
+        }
+    }
+
+    let pubDelEscHandler = null;
+
+    async function deletePublication(streamName, btn) {
+        // If this row's confirm is already open, toggle closed.
+        const anchorRow = btn && btn.closest ? btn.closest('tr') : null;
+        const existing = document.querySelector('tr.pub-del-row');
+        if (existing && anchorRow && existing.previousElementSibling === anchorRow) {
+            closePubDelConfirm();
+            return;
+        }
+        closePubDelConfirm();
+        if (!anchorRow) return;
+
+        const row = document.createElement('tr');
+        row.className = 'pub-del-row';
+        row.innerHTML =
+            '<td colspan="8">' +
+              '<div class="pub-del-panel" role="alertdialog" aria-label="Confirm delete publication">' +
+                '<div class="pub-del-body">' +
+                  '<div class="pub-del-text">' +
+                    'Delete <code>' + pubDelEscapeHtml(streamName) + '</code>? ' +
+                    '<span class="pub-del-hint">Removes it locally, broadcasts a tombstone to the network, and drops the paired prediction.</span>' +
+                  '</div>' +
+                  '<div class="pub-del-actions">' +
+                    '<button type="button" class="btn btn-sm pub-del-cancel" data-action="cancel">Cancel</button>' +
+                    '<button type="button" class="btn btn-sm pub-del-confirm" data-action="confirm">Delete</button>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</td>';
+        anchorRow.after(row);
+
+        const cancelBtn = row.querySelector('[data-action="cancel"]');
+        const confirmBtn = row.querySelector('[data-action="confirm"]');
+        cancelBtn.addEventListener('click', closePubDelConfirm);
+        confirmBtn.addEventListener('click', async () => {
+            confirmBtn.disabled = true;
+            cancelBtn.disabled = true;
+            btnLoading(confirmBtn);
+            try {
+                await fetch('/api/network/publication/remove', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({stream_name: streamName})
+                });
+            } finally {
+                closePubDelConfirm();
+                loadPublications();
+                loadNetworkSubscriptions();
+            }
+        });
+        // Focus Cancel as the safe default
+        setTimeout(() => { try { cancelBtn.focus({preventScroll: true}); } catch(e) {} }, 40);
+        // Esc closes
+        pubDelEscHandler = (e) => {
+            if (e.key === 'Escape') closePubDelConfirm();
+        };
+        document.addEventListener('keydown', pubDelEscHandler);
     }
 
     function formatTimeAgo(ts) {
@@ -3832,82 +4436,304 @@
         }
     }
 
-    async function sendTransaction() {
-        const address = document.getElementById('sendDestAddress').value.trim();
-        const amount = document.getElementById('sendAmount').value;
-        const sweep = document.getElementById('sendSweep').checked;
-        const sendBtn = document.getElementById('sendBtn');
-        const resultDiv = document.getElementById('sendResult');
+    // ── Send console: validate → review → confirm → result ─────
+    function escHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }[c]));
+    }
+    function midTruncate(s, head = 8, tail = 6) {
+        if (!s || s.length <= head + tail + 1) return s || '';
+        return s.slice(0, head) + '…' + s.slice(-tail);
+    }
 
-        // Get selected source (wallet or vault)
+    function sendTransaction() {
+        const address = document.getElementById('sendDestAddress').value.trim();
+        const amountRaw = document.getElementById('sendAmount').value;
+        const sweep = document.getElementById('sendSweep').checked;
         const sendSource = document.querySelector('input[name="sendSource"]:checked').value;
         const sourceName = sendSource === 'wallet' ? 'Identity Wallet' : 'Vault';
 
-        // Validate
-        if (!address) {
-            showToast('Please enter a destination address', true);
-            return;
-        }
+        if (!address) { showToast('Please enter a destination address', true); return; }
         if (!isValidAddress(address)) {
-            showToast('Invalid address: must start with E and be 34 characters', true);
-            return;
+            showToast('Invalid address: must start with E and be 34 characters', true); return;
         }
-        if (!sweep && (!amount || parseFloat(amount) <= 0)) {
-            showToast('Please enter an amount or select "Send All"', true);
-            return;
+        if (!sweep && (!amountRaw || parseFloat(amountRaw) <= 0)) {
+            showToast('Please enter an amount or select "Send All"', true); return;
         }
 
-        // Confirm with source information
-        const confirmMsg = sweep
-            ? 'Send ALL tokens from ' + sourceName + ' to ' + address + '?'
-            : 'Send ' + amount + ' SATORI from ' + sourceName + ' to ' + address + '?';
-        if (!confirm(confirmMsg)) {
-            return;
-        }
+        openSendReview({
+            address,
+            amount: sweep ? null : parseFloat(amountRaw),
+            sweep,
+            sendSource,
+            sourceName,
+        });
+    }
 
-        // Send
-        sendBtn.disabled = true;
-        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Sending...';
-        resultDiv.style.display = 'none';
+    function freezeSendForm() {
+        const fields = document.getElementById('sendFormFields');
+        if (!fields) return;
+        fields.classList.add('is-frozen');
+        fields.inert = true;  // removes subtree from pointer/keyboard/AT
+        fields.setAttribute('aria-hidden', 'true');
+    }
+    function thawSendForm() {
+        const fields = document.getElementById('sendFormFields');
+        if (!fields) return;
+        fields.classList.remove('is-frozen');
+        fields.inert = false;
+        fields.removeAttribute('aria-hidden');
+    }
+
+    function openSendReview(tx) {
+        const sendBtn = document.getElementById('sendBtn');
+        const console_ = document.getElementById('sendConsole');
+        sendBtn.style.display = 'none';
+        freezeSendForm();
+
+        const amountBlock = tx.sweep
+            ? `<div class="send-review-amount">
+                   <span class="num">ALL</span>
+                   <span class="unit">SATORI</span>
+                   <span class="sweep-pill">sweep</span>
+               </div>`
+            : `<div class="send-review-amount">
+                   <span class="num">${escHtml(tx.amount.toString())}</span>
+                   <span class="unit">SATORI</span>
+               </div>`;
+
+        console_.innerHTML = `
+            <div class="send-console">
+                <div class="send-console-eyebrow">
+                    <span>Review &amp; confirm</span>
+                    <span class="tick"></span>
+                </div>
+                <div class="send-review-grid">
+                    <div class="send-review-row full">
+                        <span class="send-review-label">Amount</span>
+                        ${amountBlock}
+                    </div>
+                    <div class="send-review-row">
+                        <span class="send-review-label">From</span>
+                        <span class="send-review-value">${escHtml(tx.sourceName)}</span>
+                    </div>
+                    <div class="send-review-row">
+                        <span class="send-review-label">Network fee</span>
+                        <span class="send-review-value">≤ 0.25 EVR</span>
+                    </div>
+                    <div class="send-review-row full">
+                        <span class="send-review-label">To address</span>
+                        <span class="send-review-value mono">${escHtml(tx.address)}</span>
+                    </div>
+                </div>
+                <div class="send-review-actions">
+                    <button class="send-btn-ghost" onclick="cancelSendReview()">
+                        <i class="material-icons" style="font-size:15px;">arrow_back</i>Back
+                    </button>
+                    <button class="send-btn-primary" id="sendConfirmBtn" onclick="confirmSend()">
+                        <i class="material-icons">bolt</i>Confirm send
+                    </button>
+                </div>
+            </div>`;
+        console_.style.display = 'block';
+        console_._pendingTx = tx;
+
+        // Scroll the review into view if any part of it — especially the
+        // Confirm button — sits below the fold. Defer one frame so layout
+        // reflects the newly mounted panel before the browser measures.
+        requestAnimationFrame(() => {
+            const panel = console_.querySelector('.send-console');
+            if (!panel) return;
+            const rect = panel.getBoundingClientRect();
+            const vh = window.innerHeight || document.documentElement.clientHeight;
+            // If the panel fits in the viewport, center it for breathing room.
+            // Otherwise fall back to `nearest` so we only nudge as needed.
+            const block = rect.height < vh * 0.85 ? 'center' : 'nearest';
+            panel.scrollIntoView({ behavior: 'smooth', block });
+        });
+    }
+
+    function cancelSendReview() {
+        closeSendConsole();
+    }
+
+    async function confirmSend() {
+        const console_ = document.getElementById('sendConsole');
+        const tx = console_._pendingTx;
+        if (!tx) return;
+        const btn = document.getElementById('sendConfirmBtn');
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+        btn.innerHTML = '<i class="material-icons">sync</i>Broadcasting…';
+        document.querySelector('.send-btn-ghost').disabled = true;
 
         try {
-            const data = { address: address, sweep: sweep };
-            if (!sweep) {
-                data.amount = parseFloat(amount);
-            }
-
-            // Use the appropriate endpoint based on source selection
-            const endpoint = sendSource === 'wallet' ? '/wallet/send-from-wallet' : '/wallet/send';
+            const data = { address: tx.address, sweep: tx.sweep };
+            if (!tx.sweep) data.amount = tx.amount;
+            const endpoint = tx.sendSource === 'wallet'
+                ? '/wallet/send-from-wallet' : '/wallet/send';
             const result = await apiCall(endpoint, 'POST', data);
 
             if (result && result.success) {
-                resultDiv.className = 'mt-3 alert alert-success';
-                resultDiv.innerHTML = '<strong>Success!</strong><br>Sent from ' + sourceName + '<br>Transaction ID: <code style="word-break: break-all;">' + result.txid + '</code>';
-                resultDiv.style.display = 'block';
-                showToast('Transaction sent successfully from ' + sourceName + '!');
-                // Clear form
+                showSendSuccess(tx, result.txid);
+                // Clear the form so "Send another" returns a fresh state.
                 document.getElementById('sendDestAddress').value = '';
                 document.getElementById('sendAmount').value = '';
                 document.getElementById('sendSweep').checked = false;
                 toggleSweepAmount();
-                // Refresh balances to show updated amounts — force, since a
-                // send just changed the UTXO set and the cache is now stale.
-                refreshBalance(true);
+                // Delay before refreshing — ElectrumX needs a moment to
+                // reflect the new UTXO state after broadcast.
+                setTimeout(() => refreshBalance(true), 2000);
             } else {
-                const errorMsg = result ? (result.error || 'Transaction failed') : 'Transaction failed';
-                resultDiv.className = 'mt-3 alert alert-danger';
-                resultDiv.innerHTML = '<strong>Error:</strong> ' + errorMsg;
-                resultDiv.style.display = 'block';
-                showToast('Transaction failed: ' + errorMsg, true);
+                const msg = (result && result.error) || 'Transaction failed';
+                showSendError(msg);
             }
         } catch (error) {
-            resultDiv.className = 'mt-3 alert alert-danger';
-            resultDiv.innerHTML = '<strong>Error:</strong> ' + error.message;
-            resultDiv.style.display = 'block';
-            showToast('Transaction error: ' + error.message, true);
-        } finally {
-            sendBtn.disabled = false;
-            sendBtn.innerHTML = '<i class="material-icons align-middle me-1">send</i> Send Transaction';
+            showSendError(error.message || 'Transaction error');
+        }
+    }
+
+    function showSendSuccess(tx, txid) {
+        const console_ = document.getElementById('sendConsole');
+        const amountLine = tx.sweep
+            ? `All ${escHtml(tx.sourceName)} funds dispatched`
+            : `${escHtml(tx.amount.toString())} SATORI dispatched from ${escHtml(tx.sourceName)}`;
+        console_.innerHTML = `
+            <div class="send-console">
+                <div class="send-console-eyebrow is-success">
+                    <span>Broadcast · settled</span>
+                    <span class="tick"></span>
+                </div>
+                <div class="send-result-hero">
+                    <div class="send-result-mark success" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+                    </div>
+                    <div class="send-result-head">
+                        <h6 class="send-result-title">Transaction accepted</h6>
+                        <p class="send-result-sub">${amountLine}. Your balance will update shortly.</p>
+                    </div>
+                </div>
+                <dl class="send-result-meta">
+                    <dt>To</dt>
+                    <dd class="mono" title="${escHtml(tx.address)}">${escHtml(midTruncate(tx.address, 10, 8))}</dd>
+                    <dt>Txid</dt>
+                    <dd class="mono">
+                        <span class="send-result-txid" title="${escHtml(txid)}">${escHtml(txid)}</span>
+                        <button class="send-result-copy" id="sendCopyBtn" onclick="copySendTxid('${escHtml(txid)}', this)" title="Copy txid">
+                            <i class="material-icons">content_copy</i>
+                        </button>
+                    </dd>
+                </dl>
+                <div class="send-review-actions">
+                    <button class="send-btn-primary" onclick="resetSendConsole()">
+                        <i class="material-icons">replay</i>Send another
+                    </button>
+                </div>
+            </div>`;
+        console_._pendingTx = null;
+    }
+
+    function showSendError(msg) {
+        const console_ = document.getElementById('sendConsole');
+        console_.innerHTML = `
+            <div class="send-console">
+                <div class="send-console-eyebrow is-error">
+                    <span>Transaction halted</span>
+                    <span class="tick"></span>
+                </div>
+                <div class="send-result-hero">
+                    <div class="send-result-mark error" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>
+                    </div>
+                    <div class="send-result-head">
+                        <h6 class="send-result-title">Not sent</h6>
+                        <p class="send-result-sub">Nothing has been broadcast. Review the reason below and retry.</p>
+                    </div>
+                </div>
+                <p class="send-result-error-body">${escHtml(msg)}</p>
+                <div class="send-review-actions">
+                    <button class="send-btn-ghost" onclick="resetSendConsole()">Dismiss</button>
+                    <button class="send-btn-primary" onclick="retrySendReview()">
+                        <i class="material-icons">refresh</i>Try again
+                    </button>
+                </div>
+            </div>`;
+    }
+
+    function retrySendReview() {
+        const console_ = document.getElementById('sendConsole');
+        const tx = console_._pendingTx;
+        if (tx) { openSendReview(tx); } else { resetSendConsole(); }
+    }
+
+    function resetSendConsole() {
+        closeSendConsole();
+    }
+
+    // Shared close routine — plays the slide-out animation, thaws the form
+    // in sync (so the reveal and release feel connected), then restores the
+    // Send button with its own fade-down.
+    function closeSendConsole() {
+        const console_ = document.getElementById('sendConsole');
+        const sendBtn = document.getElementById('sendBtn');
+        const panel = console_ ? console_.querySelector('.send-console') : null;
+
+        const finalize = () => {
+            if (console_) {
+                console_.style.display = 'none';
+                console_.innerHTML = '';
+                console_._pendingTx = null;
+            }
+            if (sendBtn) {
+                sendBtn.style.display = '';
+                sendBtn.classList.remove('is-returning');
+                // restart the CSS animation by forcing reflow
+                void sendBtn.offsetWidth;
+                sendBtn.classList.add('is-returning');
+                sendBtn.addEventListener('animationend', () => {
+                    sendBtn.classList.remove('is-returning');
+                }, { once: true });
+            }
+        };
+
+        // Begin thawing the form immediately — it desaturates/fades back in
+        // parallel with the review collapsing upward.
+        thawSendForm();
+
+        if (!panel) { finalize(); return; }
+        panel.classList.add('is-closing');
+        let settled = false;
+        const onEnd = (e) => {
+            if (e && e.animationName !== 'send-slide-out') return;
+            if (settled) return;
+            settled = true;
+            panel.removeEventListener('animationend', onEnd);
+            finalize();
+        };
+        panel.addEventListener('animationend', onEnd);
+        // Safety net in case animationend doesn't fire (e.g. tab hidden).
+        setTimeout(() => onEnd(null), 360);
+    }
+
+    function copySendTxid(txid, btn) {
+        const done = () => {
+            btn.classList.add('is-copied');
+            btn.querySelector('.material-icons').textContent = 'check';
+            setTimeout(() => {
+                btn.classList.remove('is-copied');
+                btn.querySelector('.material-icons').textContent = 'content_copy';
+            }, 1600);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(txid).then(done).catch(() => showToast('Copy failed', true));
+        } else {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = txid; document.body.appendChild(ta);
+                ta.select(); document.execCommand('copy');
+                document.body.removeChild(ta); done();
+            } catch (e) { showToast('Copy failed', true); }
         }
     }
 
