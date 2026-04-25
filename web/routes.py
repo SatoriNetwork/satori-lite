@@ -2598,7 +2598,10 @@ def register_routes(app):
             price_per_obs = int(data.get('price_per_obs', 0) or 0)
         except (ValueError, TypeError):
             price_per_obs = 0
-        encrypted = bool(data.get('encrypted', False))
+        # Paid streams are always encrypted on the wire (publish path encrypts
+        # per-subscriber when price > 0, regardless of this flag), so persist
+        # the truth in the announce metadata to keep readers from being misled.
+        encrypted = bool(data.get('encrypted', False)) or price_per_obs > 0
         startup.networkDB.add_publication(
             stream_name=data['stream_name'],
             name=data.get('name', ''),
@@ -2632,6 +2635,20 @@ def register_routes(app):
                 startup.publishNowSync(data['stream_name'], str(obj))
             except Exception as e:
                 logger.warning(f'publish-on-save failed for {data["stream_name"]}: {e}')
+        else:
+            # Push-only or metadata-only edit: re-announce so relays pick up
+            # the latest publication metadata (price, tags, name) without
+            # waiting for the next observation.
+            try:
+                startup.announceNowSync()
+            except Exception as e:
+                logger.warning(f'announce-on-save failed for {data["stream_name"]}: {e}')
+        # Refresh the local discovery cache so the publisher's own marketplace
+        # view reflects the edit on next render rather than next sweep.
+        try:
+            startup.triggerNetworkDiscover()
+        except Exception:
+            pass
         return jsonify({'success': True})
 
     @app.route('/api/network/publish', methods=['POST'])

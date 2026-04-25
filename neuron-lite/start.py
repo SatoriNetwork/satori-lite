@@ -2732,6 +2732,57 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 new_loop.close()
         threading.Thread(target=run, daemon=True).start()
 
+    def announceNowSync(self):
+        """Connect to all known relays and re-announce active publications.
+
+        Used after a publication is created or edited so the relay-side
+        announce reflects the new metadata (price, tags, name) without
+        waiting for the next observation. Non-blocking — runs in a
+        background thread when no event loop is available.
+        """
+        from satorilib.satori_nostr import SatoriNostrConfig
+        if not hasattr(self, '_networkSecretHex'):
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop and not loop.is_closed():
+            asyncio.run_coroutine_threadsafe(
+                self._announceNow(SatoriNostrConfig), loop)
+            return
+        def run():
+            new_loop = asyncio.new_event_loop()
+            try:
+                new_loop.run_until_complete(
+                    self._announceNow(SatoriNostrConfig))
+            finally:
+                new_loop.close()
+        threading.Thread(target=run, daemon=True).start()
+
+    async def _announceNow(self, ConfigClass):
+        """Connect to all known relays and re-announce active publications."""
+        relay_urls = []
+        try:
+            server_relays = await asyncio.to_thread(self.server.getRelays)
+            relay_urls = [r['relay_url'] for r in server_relays]
+        except Exception:
+            pass
+        db_relays = await asyncio.to_thread(self.networkDB.get_relays)
+        for r in db_relays:
+            if r['relay_url'] not in relay_urls:
+                relay_urls.append(r['relay_url'])
+        for relay_url in relay_urls:
+            try:
+                client = await self._networkConnect(relay_url, ConfigClass)
+                if not client:
+                    continue
+                await self._networkAnnouncePublications(relay_url)
+                await asyncio.sleep(2)
+            except Exception as e:
+                logging.warning(
+                    f'Network: announce-now failed on {relay_url}: {e}')
+            finally:
+                if relay_url not in self._neededRelays():
+                    await self._networkDisconnect(relay_url)
+
     async def _publishNow(self, stream_name: str, value: str, ConfigClass):
         """Connect to all known relays, announce publications, publish observation."""
         relay_urls = []
