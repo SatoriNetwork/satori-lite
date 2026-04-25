@@ -166,6 +166,9 @@
         .card-header-3col .card-header-actions { grid-column: 2; grid-row: 1; }
         .card-header-3col .bal-tabs    { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
         .card-header-3col .bal-tabs .bal-tab { flex: 1; text-align: center; }
+        /* Drop the "(Identity)" qualifier on mobile so all 3 tabs fit one line */
+        .bal-tab .bal-tab-suffix { display: none; }
+        .bal-tab { padding: 0.3rem 0.4rem; font-size: 0.66rem; letter-spacing: 0.04em; }
         /* Row-by-row balance layout on mobile */
         .dash-stat-row { flex-direction: column; }
         .dash-stat {
@@ -495,6 +498,8 @@
         cursor: pointer;
         text-transform: uppercase;
         letter-spacing: 0.06em;
+        white-space: nowrap;
+        line-height: 1.2;
         transition: background 0.12s, color 0.12s, border-color 0.12s;
     }
     .bal-tab:hover {
@@ -1502,6 +1507,448 @@
         outline: 2px solid rgba(220, 53, 69, 0.55);
         outline-offset: 2px;
     }
+
+    /* ── Import Wallet modal ───────────────────────────────── */
+    .iw-modal .modal-dialog {
+        max-width: 480px;
+    }
+    .iw-modal .modal-content {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    }
+    .iw-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 1.1rem 1.25rem 0.85rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .iw-head-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        min-width: 0;
+    }
+    .iw-eyebrow {
+        font-size: 0.62rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        opacity: 0.7;
+        font-weight: 600;
+    }
+    .iw-title {
+        font-size: 1.15rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0;
+        letter-spacing: -0.01em;
+    }
+    .iw-close {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s, border-color 0.12s;
+        padding: 0;
+        flex-shrink: 0;
+    }
+    .iw-close:hover {
+        background: rgba(255,255,255,0.06);
+        color: var(--text-primary);
+        border-color: var(--text-secondary);
+    }
+    [data-theme="light"] .iw-close:hover {
+        background: rgba(0,0,0,0.05);
+    }
+    .iw-close i { font-size: 16px; }
+
+    .iw-body { padding: 1rem 1.25rem 0.5rem; }
+
+    .iw-caution {
+        position: relative;
+        display: flex;
+        gap: 0.6rem;
+        align-items: flex-start;
+        padding: 0.7rem 0.8rem 0.7rem 0.95rem;
+        border: 1px solid rgba(217, 153, 38, 0.28);
+        background: rgba(217, 153, 38, 0.06);
+        border-radius: 8px;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        color: var(--text-primary);
+    }
+    .iw-caution::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 2px;
+        background: #d99926;
+        border-radius: 2px 0 0 2px;
+    }
+    .iw-caution i.material-icons {
+        font-size: 16px;
+        color: #d99926;
+        margin-top: 1px;
+        flex-shrink: 0;
+    }
+    .iw-caution b { color: #d99926; font-weight: 600; }
+
+    .iw-section {
+        margin-top: 0.95rem;
+    }
+    .iw-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 0.62rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        font-weight: 600;
+        margin-bottom: 0.45rem;
+    }
+    .iw-label .iw-label-hint {
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 0.7rem;
+        font-weight: 400;
+        opacity: 0.7;
+    }
+
+    .iw-drop {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        gap: 0.35rem;
+        padding: 1.2rem 1rem;
+        border: 1px dashed var(--border-color);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.015);
+        cursor: pointer;
+        transition: border-color 0.15s, background 0.15s, transform 0.15s;
+    }
+    [data-theme="light"] .iw-drop {
+        background: rgba(0,0,0,0.015);
+    }
+    .iw-drop:hover {
+        border-color: var(--accent-primary);
+        background: rgba(90,90,255,0.04);
+    }
+    .iw-drop input[type="file"] {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+    .iw-drop-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(90,90,255,0.1);
+        color: var(--accent-primary);
+        margin-bottom: 0.15rem;
+    }
+    .iw-drop-icon i { font-size: 20px; }
+    .iw-drop-primary {
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+    .iw-drop-primary u { text-decoration: none; color: var(--accent-primary); }
+    .iw-drop-secondary {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        opacity: 0.85;
+    }
+
+    .iw-files {
+        margin-top: 0.85rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+        max-height: 160px;
+        overflow-y: auto;
+    }
+    .iw-files-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.45rem 0.7rem;
+        background: rgba(255,255,255,0.025);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 0.65rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        font-weight: 600;
+    }
+    [data-theme="light"] .iw-files-head { background: rgba(0,0,0,0.025); }
+    .iw-files-count {
+        letter-spacing: 0;
+        text-transform: none;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.7rem;
+        opacity: 0.85;
+    }
+    .iw-files ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+    .iw-files li {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.7rem;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.74rem;
+        color: var(--text-primary);
+        border-bottom: 1px solid var(--border-color);
+    }
+    .iw-files li:last-child { border-bottom: none; }
+    .iw-files li::before {
+        content: "";
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--accent-primary);
+        flex-shrink: 0;
+        opacity: 0.8;
+    }
+
+    .iw-result {
+        margin-top: 0.85rem;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        padding: 0.7rem 0.85rem 0.7rem 0.95rem;
+        border-radius: 8px;
+        position: relative;
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+    }
+    .iw-result::before {
+        content: "";
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 2px;
+        border-radius: 2px 0 0 2px;
+        background: var(--text-secondary);
+    }
+    .iw-result-title {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.7rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-weight: 600;
+        margin-bottom: 0.3rem;
+    }
+    .iw-result-title i { font-size: 16px; }
+    .iw-result-meta {
+        display: block;
+        margin-top: 0.35rem;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        word-break: break-all;
+    }
+    .iw-result-success {
+        border-color: rgba(46, 160, 110, 0.32);
+        background: rgba(46, 160, 110, 0.06);
+    }
+    .iw-result-success::before { background: #2ea06e; }
+    .iw-result-success .iw-result-title { color: #2ea06e; }
+    .iw-result-error {
+        border-color: rgba(194, 54, 47, 0.34);
+        background: rgba(194, 54, 47, 0.06);
+    }
+    .iw-result-error::before { background: #c2362f; }
+    .iw-result-error .iw-result-title { color: #c2362f; }
+
+    .iw-foot {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: flex-end;
+        align-items: center;
+        padding: 0.85rem 1.25rem 1rem;
+        border-top: 1px solid var(--border-color);
+        background: rgba(255,255,255,0.015);
+    }
+    [data-theme="light"] .iw-foot { background: rgba(0,0,0,0.015); }
+    .iw-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.45rem 0.85rem;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        border: 1px solid var(--border-color);
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+    }
+    .iw-btn:hover {
+        color: var(--text-primary);
+        background: rgba(255,255,255,0.05);
+    }
+    [data-theme="light"] .iw-btn:hover { background: rgba(0,0,0,0.04); }
+    .iw-btn-danger {
+        background: #c2362f;
+        border-color: #c2362f;
+        color: #fff;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 4px 14px rgba(194,54,47,0.28);
+    }
+    .iw-btn-danger:hover {
+        background: #a92b25;
+        border-color: #a92b25;
+        color: #fff;
+    }
+    .iw-btn-danger:disabled {
+        background: rgba(194,54,47,0.25);
+        border-color: transparent;
+        color: rgba(255,255,255,0.55);
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+    .iw-btn i { font-size: 16px; }
+
+    /* Two-step picker */
+    .iw-steps { display: flex; flex-direction: column; gap: 0.6rem; }
+    .iw-step {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.7rem 0.85rem;
+        border: 1px dashed var(--border-color);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.015);
+        transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+        cursor: pointer;
+    }
+    [data-theme="light"] .iw-step { background: rgba(0,0,0,0.015); }
+    .iw-step input[type="file"] {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+    .iw-step:hover:not(.iw-step-locked):not(.iw-step-done) {
+        border-color: var(--accent-primary);
+        background: rgba(90,90,255,0.04);
+    }
+    .iw-step-locked {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+    .iw-step-locked input[type="file"] { pointer-events: none; }
+    .iw-step-done {
+        border-style: solid;
+        border-color: rgba(46, 160, 110, 0.35);
+        background: rgba(46, 160, 110, 0.05);
+        cursor: default;
+    }
+    .iw-step-error {
+        border-color: rgba(194, 54, 47, 0.45);
+        background: rgba(194, 54, 47, 0.05);
+    }
+    .iw-step-num {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.72rem;
+        font-weight: 600;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        background: rgba(255,255,255,0.06);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+        flex-shrink: 0;
+    }
+    [data-theme="light"] .iw-step-num { background: rgba(0,0,0,0.04); }
+    .iw-step-done .iw-step-num {
+        background: #2ea06e;
+        color: #fff;
+        border-color: #2ea06e;
+    }
+    .iw-step-error .iw-step-num {
+        background: #c2362f;
+        color: #fff;
+        border-color: #c2362f;
+    }
+    .iw-step-body { flex: 1; min-width: 0; }
+    .iw-step-title {
+        font-size: 0.82rem;
+        font-weight: 500;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .iw-step-title code {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.78rem;
+        color: var(--accent-primary);
+        background: transparent;
+        padding: 0;
+    }
+    .iw-step-sub {
+        margin-top: 0.15rem;
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .iw-step-done .iw-step-sub { color: #2ea06e; opacity: 0.9; }
+    .iw-step-error .iw-step-sub { color: #c2362f; }
+    .iw-step-action {
+        font-size: 0.7rem;
+        font-weight: 500;
+        color: var(--accent-primary);
+        flex-shrink: 0;
+    }
+    .iw-step-done .iw-step-action,
+    .iw-step-locked .iw-step-action { display: none; }
+    .iw-step-reset {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 6px;
+        display: none;
+        flex-shrink: 0;
+        position: relative;
+        z-index: 2;
+    }
+    .iw-step-reset i { font-size: 16px; }
+    .iw-step-reset:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
+    [data-theme="light"] .iw-step-reset:hover { background: rgba(0,0,0,0.05); }
+    .iw-step-done .iw-step-reset { display: inline-flex; }
 </style>
 {% endblock %}
 
@@ -1509,48 +1956,68 @@
 {% include 'partials/navbar.html' %}
 
 <!-- Import Wallet Modal -->
-<div class="modal fade" id="importWalletModal" tabindex="-1" aria-labelledby="importWalletModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content" style="background: var(--bg-card); border: 1px solid var(--border-color);">
-            <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-                <h5 class="modal-title" id="importWalletModalLabel">
-                    <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">upload_file</i>
-                    Import Wallet
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" style="filter: invert(1);"></button>
+<div class="modal fade iw-modal" id="importWalletModal" tabindex="-1" aria-labelledby="importWalletModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="iw-head">
+                <div class="iw-head-text">
+                    <span class="iw-eyebrow">Vault · Restore</span>
+                    <h5 class="iw-title" id="importWalletModalLabel">Import Wallet</h5>
+                </div>
+                <button type="button" class="iw-close" data-bs-dismiss="modal" aria-label="Close">
+                    <i class="material-icons">close</i>
+                </button>
             </div>
-            <div class="modal-body">
-                <div class="alert alert-warning">
-                    <strong>Warning:</strong> Importing a wallet will replace your current wallet and restart the container.
-                    Make sure you have backed up your current wallet first!
+
+            <div class="iw-body">
+                <div class="iw-caution" role="alert">
+                    <i class="material-icons">warning_amber</i>
+                    <span><b>Heads up.</b> This replaces your current wallet and restarts the container. Back up the existing wallet first.</span>
                 </div>
 
-                <div class="mb-3">
-                    <label class="form-label">Select Wallet Folder</label>
-                    <input type="file"
-                           class="form-control"
-                           id="walletFolderInputModal"
-                           webkitdirectory
-                           directory
-                           multiple
-                           accept=".yaml,.yml">
-                    <small class="form-text text-muted">
-                        Select the "wallet" folder containing wallet.yaml and vault.yaml
-                    </small>
+                <div class="iw-section">
+                    <div class="iw-label">
+                        <span>Select files</span>
+                        <span class="iw-label-hint">2 files · .yaml</span>
+                    </div>
+
+                    <div class="iw-steps">
+                        <label class="iw-step" id="iwStep1" data-step="1">
+                            <span class="iw-step-num" id="iwStep1Num">1</span>
+                            <span class="iw-step-body">
+                                <span class="iw-step-title">Wallet file <code>wallet.yaml</code></span>
+                                <span class="iw-step-sub" id="iwStep1Sub">Click to choose · must be named wallet.yaml</span>
+                            </span>
+                            <span class="iw-step-action">Choose</span>
+                            <button type="button" class="iw-step-reset" onclick="resetWalletStep(1, event)" aria-label="Remove file">
+                                <i class="material-icons">close</i>
+                            </button>
+                            <input type="file" id="iwStep1Input" accept=".yaml,.yml">
+                        </label>
+
+                        <label class="iw-step iw-step-locked" id="iwStep2" data-step="2">
+                            <span class="iw-step-num" id="iwStep2Num">2</span>
+                            <span class="iw-step-body">
+                                <span class="iw-step-title">Vault file <code>vault.yaml</code></span>
+                                <span class="iw-step-sub" id="iwStep2Sub">Locked · complete step 1 first</span>
+                            </span>
+                            <span class="iw-step-action">Choose</span>
+                            <button type="button" class="iw-step-reset" onclick="resetWalletStep(2, event)" aria-label="Remove file">
+                                <i class="material-icons">close</i>
+                            </button>
+                            <input type="file" id="iwStep2Input" accept=".yaml,.yml">
+                        </label>
+                    </div>
                 </div>
 
-                <div id="importFileListModal" class="mb-3" style="display: none;">
-                    <label class="form-label">Files to Import:</label>
-                    <ul id="importFileListItemsModal" class="small"></ul>
-                </div>
-
-                <div id="importResultModal" class="mt-3" style="display: none;"></div>
+                <div id="importResultModal" class="iw-result" style="display: none;"></div>
             </div>
-            <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" onclick="importWalletFromModal()" id="importWalletBtnModal" disabled>
-                    <i class="material-icons align-middle me-1">upload</i>
-                    Import Wallet & Restart
+
+            <div class="iw-foot">
+                <button type="button" class="iw-btn" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="iw-btn iw-btn-danger" onclick="importWalletFromModal()" id="importWalletBtnModal" disabled>
+                    <i class="material-icons">upload</i>
+                    Import & Restart
                 </button>
             </div>
         </div>
@@ -1592,7 +2059,7 @@
                     </h5>
                     <div class="bal-tabs">
                         <button class="bal-tab bal-tab-active" onclick="switchWalletTab('vault', this)">Vault</button>
-                        <button class="bal-tab" onclick="switchWalletTab('identity', this)">Wallet (Identity)</button>
+                        <button class="bal-tab" onclick="switchWalletTab('identity', this)">Wallet<span class="bal-tab-suffix"> (Identity)</span></button>
                         <button class="bal-tab" onclick="switchWalletTab('nostr', this)">Nostr</button>
                     </div>
                     <div class="card-header-actions">
@@ -1761,7 +2228,7 @@
                     </h5>
                     <div class="bal-tabs">
                         <button class="bal-tab bal-tab-active" onclick="switchBalTab('vault', this)">Vault</button>
-                        <button class="bal-tab" onclick="switchBalTab('identity', this)">Wallet (Identity)</button>
+                        <button class="bal-tab" onclick="switchBalTab('identity', this)">Wallet<span class="bal-tab-suffix"> (Identity)</span></button>
                     </div>
                     <div class="card-header-actions">
                         <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance(true)">
@@ -5112,67 +5579,97 @@
     const p2pLayoutStorageKey = 'satori-p2p-layout-v1';
 
     function openImportWalletModal() {
+        resetWalletStep(1);
         const modal = new bootstrap.Modal(document.getElementById('importWalletModal'));
         modal.show();
     }
 
-    function handleWalletFolderSelectModal(event) {
-        const files = Array.from(event.target.files);
+    const IW_STEPS = {
+        1: { expected: 'wallet.yaml', subDefault: 'Click to choose · must be named wallet.yaml' },
+        2: { expected: 'vault.yaml',  subDefault: 'Click to choose · must be named vault.yaml' }
+    };
+
+    function setStepState(stepNum, state, subText) {
+        const step = document.getElementById(`iwStep${stepNum}`);
+        const num = document.getElementById(`iwStep${stepNum}Num`);
+        const sub = document.getElementById(`iwStep${stepNum}Sub`);
+        const input = document.getElementById(`iwStep${stepNum}Input`);
+        step.classList.remove('iw-step-locked', 'iw-step-done', 'iw-step-error');
+        if (state === 'locked') {
+            step.classList.add('iw-step-locked');
+            num.textContent = stepNum;
+            if (input) input.disabled = true;
+        } else if (state === 'done') {
+            step.classList.add('iw-step-done');
+            num.innerHTML = '<i class="material-icons" style="font-size:14px;">check</i>';
+            if (input) input.disabled = false;
+        } else if (state === 'error') {
+            step.classList.add('iw-step-error');
+            num.textContent = stepNum;
+            if (input) input.disabled = false;
+        } else {
+            num.textContent = stepNum;
+            if (input) input.disabled = false;
+        }
+        if (subText !== undefined) sub.textContent = subText;
+    }
+
+    function resetWalletStep(stepNum, evt) {
+        if (evt) { evt.preventDefault(); evt.stopPropagation(); }
         const importBtn = document.getElementById('importWalletBtnModal');
-        const fileListDiv = document.getElementById('importFileListModal');
-        const fileListItems = document.getElementById('importFileListItemsModal');
+        const resultDiv = document.getElementById('importResultModal');
+        if (resultDiv) resultDiv.style.display = 'none';
 
-        walletImportFilesModal = [];
-        fileListItems.innerHTML = '';
-
-        if (files.length === 0) {
+        if (stepNum === 1) {
+            walletImportFilesModal = [];
+            document.getElementById('iwStep1Input').value = '';
+            document.getElementById('iwStep2Input').value = '';
+            setStepState(1, 'open', IW_STEPS[1].subDefault);
+            setStepState(2, 'locked', 'Locked · complete step 1 first');
             importBtn.disabled = true;
-            fileListDiv.style.display = 'none';
-            return;
+        } else if (stepNum === 2) {
+            walletImportFilesModal = walletImportFilesModal.filter(f => f.name !== 'vault.yaml');
+            document.getElementById('iwStep2Input').value = '';
+            setStepState(2, 'open', IW_STEPS[2].subDefault);
+            importBtn.disabled = true;
         }
+    }
 
-        // Validate folder name is "wallet"
-        const firstFile = files[0];
-        const pathParts = firstFile.webkitRelativePath.split('/');
-        const folderName = pathParts[0];
+    function handleStepFile(stepNum, event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        const expected = IW_STEPS[stepNum].expected;
+        const importBtn = document.getElementById('importWalletBtnModal');
 
-        if (folderName !== 'wallet') {
-            showToast('Please select a folder named "wallet"', true);
+        if (file.name !== expected) {
+            setStepState(stepNum, 'error', `${file.name} · expected ${expected}`);
+            showToast(`Wrong file: select ${expected}`, true);
             event.target.value = '';
+            // Lower steps after this remain locked
+            if (stepNum === 1) {
+                walletImportFilesModal = [];
+                setStepState(2, 'locked', 'Locked · complete step 1 first');
+            }
             importBtn.disabled = true;
-            fileListDiv.style.display = 'none';
             return;
         }
 
-        // Filter to only .yaml files
-        const yamlFiles = files.filter(f =>
-            f.name.endsWith('.yaml') || f.name.endsWith('.yml')
-        );
+        const sizeKb = (file.size / 1024).toFixed(2);
+        const subText = `${file.name} · ${sizeKb} KB`;
+        setStepState(stepNum, 'done', subText);
 
-        // Check for required files
-        const fileNames = yamlFiles.map(f => f.name);
-        const hasWallet = fileNames.includes('wallet.yaml');
-        const hasVault = fileNames.includes('vault.yaml');
+        // Track in walletImportFilesModal (replace any existing entry of same name)
+        walletImportFilesModal = walletImportFilesModal.filter(f => f.name !== file.name);
+        walletImportFilesModal.push(file);
 
-        if (!hasWallet || !hasVault) {
-            showToast('Wallet folder must contain wallet.yaml and vault.yaml', true);
-            event.target.value = '';
+        if (stepNum === 1) {
+            setStepState(2, 'open', IW_STEPS[2].subDefault);
             importBtn.disabled = true;
-            fileListDiv.style.display = 'none';
-            return;
+        } else if (stepNum === 2) {
+            const hasWallet = walletImportFilesModal.some(f => f.name === 'wallet.yaml');
+            const hasVault = walletImportFilesModal.some(f => f.name === 'vault.yaml');
+            importBtn.disabled = !(hasWallet && hasVault);
         }
-
-        // Valid files - show list
-        walletImportFilesModal = yamlFiles;
-        fileListItems.innerHTML = '';
-        yamlFiles.forEach(file => {
-            const li = document.createElement('li');
-            li.innerHTML = `<code>${file.name}</code> (${(file.size / 1024).toFixed(2)} KB)`;
-            fileListItems.appendChild(li);
-        });
-
-        fileListDiv.style.display = 'block';
-        importBtn.disabled = false;
     }
 
     async function importWalletFromModal() {
@@ -5184,20 +5681,9 @@
         const importBtn = document.getElementById('importWalletBtnModal');
         const resultDiv = document.getElementById('importResultModal');
 
-        // Confirm action
-        const confirmMsg =
-            'WARNING: This will replace your current wallet and restart the container!\n\n' +
-            `Files to import: ${walletImportFilesModal.map(f => f.name).join(', ')}\n\n` +
-            'Make sure you have backed up your current wallet.\n\n' +
-            'Continue?';
-
-        if (!confirm(confirmMsg)) {
-            return;
-        }
-
         // Disable button and show loading
         importBtn.disabled = true;
-        importBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Importing...';
+        importBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:0.85rem;height:0.85rem;border-width:0.15em;"></span> Importing…';
         resultDiv.style.display = 'none';
 
         try {
@@ -5216,56 +5702,48 @@
             const data = await response.json();
 
             if (response.ok && data.success) {
-                resultDiv.className = 'mt-3 alert alert-success';
+                resultDiv.className = 'iw-result iw-result-success';
                 resultDiv.innerHTML =
-                    '<strong>Success!</strong><br>' +
-                    'Wallet imported successfully.<br>' +
-                    'Container is restarting...<br>' +
-                    '<small>Backup saved to: ' + data.backup_location + '</small><br>' +
-                    '<small class="text-warning">Note: You\'ll need to set a new reward address after restart.</small>';
+                    '<div class="iw-result-title"><i class="material-icons">check_circle</i>Wallet imported · restarting</div>' +
+                    'Redirecting to login in 15s. After restart, log in with your vault password and set a new reward address.' +
+                    '<span class="iw-result-meta">backup → ' + (data.backup_location || '—') + '</span>';
                 resultDiv.style.display = 'block';
 
                 showToast('Wallet imported! Container restarting...');
 
-                // Show restart notice
+                // Auto-redirect after 15 seconds
                 setTimeout(() => {
-                    alert(
-                        'Container Restarting\n\n' +
-                        'The application is restarting with your imported wallet.\n' +
-                        'Please wait 10-15 seconds, then refresh this page.\n\n' +
-                        'You will need to:\n' +
-                        '1. Log in again with your vault password\n' +
-                        '2. Set a new reward address for this wallet'
-                    );
-
-                    // Auto-reload after 15 seconds
-                    setTimeout(() => {
-                        window.location.href = '/login';
-                    }, 15000);
-                }, 2000);
+                    window.location.href = '/login';
+                }, 15000);
 
             } else {
                 const errorMsg = data.error || 'Import failed';
-                const rolledBack = data.rolled_back ? '\n\nYour old wallet has been restored.' : '';
-                resultDiv.className = 'mt-3 alert alert-danger';
-                resultDiv.innerHTML = '<strong>Error:</strong> ' + errorMsg + rolledBack;
+                const rolledBack = data.rolled_back
+                    ? '<span class="iw-result-meta">Your previous wallet has been restored.</span>'
+                    : '';
+                resultDiv.className = 'iw-result iw-result-error';
+                resultDiv.innerHTML =
+                    '<div class="iw-result-title"><i class="material-icons">error_outline</i>Import failed</div>' +
+                    errorMsg + rolledBack;
                 resultDiv.style.display = 'block';
                 showToast('Import failed: ' + errorMsg, true);
 
                 // Re-enable button
                 importBtn.disabled = false;
-                importBtn.innerHTML = '<i class="material-icons align-middle me-1">upload</i> Import Wallet & Restart';
+                importBtn.innerHTML = '<i class="material-icons">upload</i> Import & Restart';
             }
 
         } catch (error) {
-            resultDiv.className = 'mt-3 alert alert-danger';
-            resultDiv.innerHTML = '<strong>Error:</strong> ' + error.message;
+            resultDiv.className = 'iw-result iw-result-error';
+            resultDiv.innerHTML =
+                '<div class="iw-result-title"><i class="material-icons">error_outline</i>Import failed</div>' +
+                error.message;
             resultDiv.style.display = 'block';
             showToast('Import error: ' + error.message, true);
 
             // Re-enable button
             importBtn.disabled = false;
-            importBtn.innerHTML = '<i class="material-icons align-middle me-1">upload</i> Import Wallet & Restart';
+            importBtn.innerHTML = '<i class="material-icons">upload</i> Import & Restart';
         }
     }
 
@@ -5547,11 +6025,11 @@
             initDashboardDragDrop();
         }
 
-        // Set up wallet import file input handler for modal
-        const walletFolderInputModal = document.getElementById('walletFolderInputModal');
-        if (walletFolderInputModal) {
-            walletFolderInputModal.addEventListener('change', handleWalletFolderSelectModal);
-        }
+        // Set up two-step wallet import handlers
+        const iwStep1Input = document.getElementById('iwStep1Input');
+        const iwStep2Input = document.getElementById('iwStep2Input');
+        if (iwStep1Input) iwStep1Input.addEventListener('change', (e) => handleStepFile(1, e));
+        if (iwStep2Input) iwStep2Input.addEventListener('change', (e) => handleStepFile(2, e));
 
         // Update theme icon based on stored theme
         const storedTheme = localStorage.getItem('satori-theme') || 'dark';

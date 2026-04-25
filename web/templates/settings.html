@@ -623,6 +623,88 @@
         .set-hero-h1 { font-size: 1.55rem; }
         .set-inline-add input { width: 180px; }
     }
+
+    /* ── Mobile overflow safety ───────────────────────────── */
+    .set-page { min-width: 0; }
+    .set-page .card { min-width: 0; overflow: hidden; }
+    .set-page .card-body { min-width: 0; }
+
+    /* Long URL / mono content should wrap rather than push width */
+    .settings-stat-value,
+    .font-mono-small {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+    .set-table .mono { overflow-wrap: break-word; word-break: break-word; }
+
+    /* Allow the relay table to scroll horizontally if it still won't fit */
+    .set-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    @media (max-width: 768px) {
+        .set-page { padding: 1.25rem 1rem 3rem; }
+
+        /* Card headers: stack title and actions, let inputs fill width */
+        .set-card-head {
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+        .set-card-head .set-head-actions {
+            width: 100%;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .set-inline-add {
+            width: 100%;
+            flex-wrap: wrap;
+        }
+        .set-inline-add input {
+            flex: 1 1 0;
+            min-width: 0;
+            width: auto;
+            max-width: none;
+        }
+
+        /* Mode cards: single column already at 960px; ensure inputs don't overflow */
+        .mode-card { padding: 0.85rem 0.9rem; }
+        .mode-card .form-control { width: 100%; }
+
+        /* Status / stat grids: full width tiles, no horizontal escape */
+        .settings-grid,
+        .status-list {
+            grid-template-columns: 1fr;
+        }
+
+        /* Tables: tighter padding and let long cells wrap */
+        .set-table thead th,
+        .set-table tbody td {
+            padding: 0.55rem 0.6rem;
+            font-size: 0.78rem;
+        }
+        .set-table thead th { white-space: normal; }
+
+        /* Hide the redundant per-row "Browse marketplace" column on mobile —
+           it repeats every row and starves the URL column of width. */
+        .set-table thead th:last-child,
+        .set-table tbody td:last-child { display: none; }
+        .set-table .mono { font-size: 0.74rem; }
+
+        /* Apply row + button rows wrap cleanly */
+        .set-apply-row { gap: 0.6rem; }
+
+        /* Hero meta pills wrap onto their own line */
+        .set-hero { gap: 1rem; }
+        .set-hero-meta { width: 100%; }
+    }
+
+    @media (max-width: 480px) {
+        .set-inline-add { gap: 0.35rem; }
+        .set-inline-add .set-btn { padding: 0.45rem 0.7rem; }
+        .set-table thead th,
+        .set-table tbody td {
+            padding: 0.5rem 0.5rem;
+            font-size: 0.74rem;
+        }
+    }
 </style>
 {% endblock %}
 
