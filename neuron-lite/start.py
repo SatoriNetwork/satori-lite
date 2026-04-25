@@ -1060,11 +1060,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'remainder={commitment.remainder_sats}, locked={locked})',
                 color='yellow')
             return
+        is_resend = False
         prior_json = channel.get('pending_commitment')
         if prior_json:
             try:
                 from satorilib.satori_nostr.models import ChannelCommitment
                 prior = ChannelCommitment.from_json(prior_json)
+                is_resend = (commitment.remainder_sats
+                             == prior.remainder_sats)
                 if commitment.remainder_sats > prior.remainder_sats:
                     logging.warning(
                         f'Channel: rejecting commitment for '
@@ -1113,12 +1116,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 total_paid_sats=commitment.pay_amount_sats,
                 stream_name=commitment.stream_name,
                 p2sh_address=commitment.p2sh_address)
-            # Gap recovery (seller side): if we already have the observation
-            # the subscriber just paid for, send it immediately rather than
-            # waiting for the next publish cycle.  This enables rapid catch-up
-            # when a buyer comes back online after missing observations:
-            # buyer pays → we send → buyer pays → we send → … until current.
-            if commitment.stream_name:
+            # Gap recovery (seller side): only when the commitment is a
+            # re-send (same remainder as prior — the buyer is reminding us
+            # they're online, not making a fresh payment).  In the normal
+            # case the buyer just received the observation and paid, so
+            # resending would be redundant.
+            if is_resend and commitment.stream_name:
                 try:
                     pub = await asyncio.to_thread(
                         lambda: next(
