@@ -263,6 +263,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._channelExpiryCheck()
                 except Exception as e:
                     logging.error(f'Channel expiry check error: {e}')
+                try:
+                    await self._channelResendStaleCommitments()
+                except Exception as e:
+                    logging.error(f'Channel stale resend error: {e}')
                 await asyncio.sleep(3600)
         finally:
             if fetch_task is not None and not fetch_task.done():
@@ -1109,6 +1113,30 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 total_paid_sats=commitment.pay_amount_sats,
                 stream_name=commitment.stream_name,
                 p2sh_address=commitment.p2sh_address)
+            # Gap recovery (seller side): if we already have the observation
+            # the subscriber just paid for, send it immediately rather than
+            # waiting for the next publish cycle.  This enables rapid catch-up
+            # when a buyer comes back online after missing observations:
+            # buyer pays → we send → buyer pays → we send → … until current.
+            if commitment.stream_name:
+                try:
+                    pub = await asyncio.to_thread(
+                        lambda: next(
+                            (p for p in
+                             self.networkDB.get_active_publications()
+                             if p['stream_name'] == commitment.stream_name),
+                            None))
+                    if pub:
+                        current_seq = pub.get('last_seq_num', 0)
+                        if current_seq > 0:
+                            await self._networkResendObservation(
+                                commitment.stream_name,
+                                current_seq,
+                                sender_nostr_pubkey)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: gap recovery send failed for '
+                        f'{commitment.stream_name}: {e}')
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -1654,6 +1682,56 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'({paid_count} obs)',
                 color='cyan')
 
+    async def _channelResendStaleCommitments(self):
+        """Re-publish the last commitment for stale paid subscriptions.
+
+        Gap recovery (buyer side): if we haven't received an observation
+        for longer than the cadence (or 24 h when cadence is unknown),
+        re-send our last commitment as a reminder to the seller so they
+        know we are online and where we left off.
+        """
+        from satorilib.satori_nostr.models import ChannelCommitment
+        channels = await asyncio.to_thread(
+            self.networkDB.get_channels_as_sender)
+        subs = await asyncio.to_thread(self.networkDB.get_active)
+        sub_map = {(s['stream_name'], s['provider_pubkey']): s for s in subs}
+        for channel in channels:
+            commitment_json = channel.get('pending_commitment')
+            if not commitment_json:
+                continue
+            try:
+                commitment = ChannelCommitment.from_json(commitment_json)
+            except Exception:
+                continue
+            stream_name = commitment.stream_name
+            if not stream_name:
+                continue
+            receiver_nostr = channel.get('receiver_nostr_pubkey') or ''
+            # Find the matching subscription
+            sub = sub_map.get((stream_name, receiver_nostr))
+            if not sub or (sub.get('price_per_obs', 0) or 0) == 0:
+                continue
+            cadence = sub.get('cadence_seconds') or 0
+            stale = await asyncio.to_thread(
+                self.networkDB.is_locally_stale,
+                stream_name, sub['provider_pubkey'],
+                cadence if cadence > 0 else 86400,
+                multiplier=2.0)
+            if not stale:
+                continue
+            # Re-publish the last commitment as a reminder
+            for client in self._networkClients.values():
+                try:
+                    await client.publish_commitment(
+                        commitment, receiver_nostr)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: stale resend failed: {e}')
+            logging.info(
+                f'Channel: re-sent stale commitment for {stream_name} '
+                f'to {receiver_nostr[:16]}…',
+                color='yellow')
+
     async def _channelExpiryCheck(self):
         """Auto-claim receiver channels every 15 days.
 
@@ -2173,6 +2251,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.networkDB.update_channel_remainder,
             p2sh_address,
             remainder)
+        # Store the sent commitment so we can re-send it if the receiver
+        # never responds (gap recovery: buyer re-publishes as a reminder).
+        await asyncio.to_thread(
+            self.networkDB.store_pending_commitment,
+            p2sh_address, commitment.to_json())
         logging.info(
             f'Channel: published commitment {p2sh_address} '
             f'pay={pay_amount_sats} sats remainder={remainder} sats',
@@ -2552,6 +2635,71 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.warning(
                     f'Network: announce failed {pub["stream_name"]}: {e}')
+
+    async def _networkResendObservation(
+        self,
+        stream_name: str,
+        seq_num: int,
+        subscriber_nostr_pubkey: str,
+    ) -> int:
+        """Re-send a previously published observation to a specific subscriber.
+
+        Used for gap recovery (seller side): after receiving a payment
+        commitment, check if the observation the subscriber needs already
+        exists in our local DB and send it immediately — no seq_num
+        increment, no mark_published, no save_observation.
+
+        Returns the number of relays that delivered the observation.
+        """
+        from satorilib.satori_nostr.models import (
+            DatastreamObservation, DatastreamMetadata)
+        pub = await asyncio.to_thread(
+            lambda: next(
+                (p for p in self.networkDB.get_active_publications()
+                 if p['stream_name'] == stream_name), None))
+        if not pub:
+            return 0
+        obs_row = await asyncio.to_thread(
+            self.networkDB.get_observation_by_seq,
+            stream_name, self.nostrPubkey, seq_num)
+        if not obs_row:
+            return 0
+        observation = DatastreamObservation(
+            stream_name=stream_name,
+            timestamp=obs_row.get('timestamp') or int(time.time()),
+            value=obs_row.get('value', ''),
+            seq_num=seq_num)
+        source = {}
+        if pub.get('source_stream_name'):
+            source['source_stream_name'] = pub['source_stream_name']
+            source['source_provider_pubkey'] = pub.get(
+                'source_provider_pubkey', '')
+        metadata = DatastreamMetadata(
+            stream_name=stream_name,
+            nostr_pubkey=self.nostrPubkey,
+            name=pub.get('name', ''),
+            description=pub.get('description', ''),
+            encrypted=bool(pub.get('encrypted', 0)),
+            price_per_obs=pub.get('price_per_obs', 0),
+            created_at=pub['created_at'],
+            cadence_seconds=pub.get('cadence_seconds'),
+            tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
+            metadata=source or None)
+        delivered = 0
+        for relay_url, client in list(self._networkClients.items()):
+            try:
+                event_id = await client.send_observation_to_subscriber(
+                    observation, metadata, subscriber_nostr_pubkey)
+                if event_id:
+                    delivered += 1
+                    logging.info(
+                        f'Network: resent {stream_name} seq={seq_num} '
+                        f'to {subscriber_nostr_pubkey[:16]}… '
+                        f'via {relay_url}', color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: resend failed on {relay_url}: {e}')
+        return delivered
 
     async def _networkPublishObservation(self, stream_name: str, value) -> int:
         """Publish an observation to all connected relays.
