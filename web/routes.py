@@ -2304,6 +2304,41 @@ def register_routes(app):
         startup.networkDB.subscribe(data, relay_url)
         return jsonify({'success': True})
 
+    @app.route('/api/network/historic', methods=['POST'])
+    def api_network_historic():
+        """Pay for and request a historic observed_at range from a publisher.
+
+        Body: {"stream_name", "nostr_pubkey", "t1", "t2"} where t1/t2 are
+        unix-second observed_at bounds (inclusive). Returns the estimated
+        observation count and total sats committed; the actual observations
+        arrive asynchronously via the normal observation listener path.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json() or {}
+        for k in ('stream_name', 'nostr_pubkey', 't1', 't2'):
+            if k not in data:
+                return jsonify({'error': f'Missing {k}'}), 400
+        loop = getattr(startup, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return jsonify({'error': 'Network loop not running'}), 503
+        try:
+            t1 = int(data['t1'])
+            t2 = int(data['t2'])
+        except (TypeError, ValueError):
+            return jsonify({'error': 't1 and t2 must be integers'}), 400
+        fut = asyncio.run_coroutine_threadsafe(
+            startup.requestHistoricRange(
+                data['stream_name'], data['nostr_pubkey'], t1, t2),
+            loop)
+        try:
+            result = fut.result(timeout=30)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+        status = 200 if result.get('ok') else 400
+        return jsonify(result), status
+
     @app.route('/api/network/unsubscribe', methods=['POST'])
     @login_required
     def api_network_unsubscribe():

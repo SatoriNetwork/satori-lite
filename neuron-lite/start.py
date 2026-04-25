@@ -83,6 +83,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
         self._channelPayLocks: dict = {}   # p2sh_address -> asyncio.Lock (Fix H)
+        # Per-p2sh lock that serializes settlement, tombstone, and channel-open
+        # handlers. Without this, a tombstone arriving the same scheduling tick
+        # as the matching settlement can win the race and zero remainder
+        # *after* the settlement updated funding (Layer-2 fix).
+        self._channelStateLocks: dict = {}  # p2sh_address -> asyncio.Lock
+        self._staleRecoveryAt: dict = {}   # (stream, provider) -> last recovery payment ts
+        # Outstanding historic-fetch windows: (stream, provider) ->
+        # list of (t1, t2, deadline_ts). Used to suppress live-payment
+        # triggers when observations arrive in response to a paid range.
+        self._historicRangesPending: dict = {}
         self._mundoCache: dict = {}        # p2sh_address -> {signed_hex, incomplete_hex, ...} (Fix J)
         self._dataSourceTasks: dict = {}  # stream_name -> (asyncio.Task, cadence)
         self._networkFirstRun: bool = True
@@ -460,10 +470,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     obs.stream_name,
                     obs.nostr_pubkey,
                     obs.observation)
-            # Pay for this observation if the stream has a price and we have
-            # an open channel to this provider
-            await self._channelPayForObservation(
-                obs.stream_name, obs.nostr_pubkey, obs.observation.seq_num)
+            # Skip the live-payment trigger for historic-tagged events and
+            # for observations whose observed_at falls inside an outstanding
+            # historic-fetch window — both indicate this delivery was already
+            # paid for under fetch_kind="historic".
+            is_historic = (getattr(obs, 'historic', False)
+                           or self._historicWindowMatches(
+                               obs.stream_name, obs.nostr_pubkey,
+                               obs.observation.timestamp))
+            if not is_historic:
+                # Pay for this observation if the stream has a price and we
+                # have an open channel to this provider
+                await self._channelPayForObservation(
+                    obs.stream_name, obs.nostr_pubkey,
+                    obs.observation.seq_num)
 
     async def _channelPayForObservation(
         self,
@@ -554,6 +574,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         stream_name: str,
         provider_pubkey: str,
         price_sats: int,
+        fetch_kind: str = 'prepay',
+        fetch_t1: int | None = None,
+        fetch_t2: int | None = None,
     ) -> None:
         """Send a channel payment immediately and reset the cooldown timer.
 
@@ -561,6 +584,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Fix H: the read-build-write is serialized per channel with an
         asyncio.Lock so two concurrent observations don't produce duplicate
         commitments referencing the same prior state.
+
+        When `fetch_kind == "historic"`, the resulting commitment carries the
+        requested observed_at range so the receiver routes it to historic
+        delivery instead of advancing prepay credit.
         """
         await self._channelEnsureWallet()
         conn_rows = await asyncio.to_thread(self.networkDB.get_active)
@@ -621,12 +648,227 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if not channel or channel['remainder_sats'] < price_sats:
                     return
             await self.sendChannelPayment(
-                channel['p2sh_address'], price_sats, stream_name)
-            key = (stream_name, provider_pubkey)
-            self._paymentCooldowns[key] = time.time()
+                channel['p2sh_address'], price_sats, stream_name,
+                fetch_kind=fetch_kind,
+                fetch_t1=fetch_t1,
+                fetch_t2=fetch_t2)
+            # Only the live-prepay path participates in the per-stream cooldown
+            # rate-limiter — a historic fetch is an explicit user-driven action
+            # that shouldn't be throttled by the live-payment cadence.
+            if fetch_kind == 'prepay':
+                key = (stream_name, provider_pubkey)
+                self._paymentCooldowns[key] = time.time()
         finally:
             if lock:
                 lock.release()
+
+    async def _channelPayStaleRecovery(self, sub: dict) -> None:
+        """Fire one prepay payment to break a paid-stream deadlock.
+
+        Triggered from `_networkReconcile` when a paid subscription is locally
+        stale (no obs in 1.5 * cadence) and we've just re-found / re-subscribed
+        on a relay. The publisher gates outgoing observations on
+        `last_paid_seq >= current_seq`; if our prepay grant has fallen behind
+        the publisher's current_seq, no observation can arrive to trigger a
+        normal payment, so we'd stay deadlocked. One unconditional payment
+        unblocks the gate and resumes live flow. Does not attempt to backfill
+        missed observations — that's the historic-fetch API (landing 3).
+
+        Rate-limited per (stream, provider) to `2 * cadence` so we don't
+        hammer a provider that's actually offline.
+        """
+        stream_name = sub.get('stream_name')
+        provider_pubkey = sub.get('provider_pubkey')
+        price_sats = int(sub.get('price_per_obs') or 0)
+        if not stream_name or not provider_pubkey or price_sats <= 0:
+            return
+        cadence = int(sub.get('cadence_seconds') or 0)
+        key = (stream_name, provider_pubkey)
+        now = time.time()
+        last = self._staleRecoveryAt.get(key, 0)
+        min_gap = max(cadence * 2, 60) if cadence else 600
+        if now - last < min_gap:
+            return
+        self._staleRecoveryAt[key] = now
+        try:
+            await self._channelPayNow(stream_name, provider_pubkey, price_sats)
+            logging.info(
+                f'Network: stale-recovery payment for {stream_name} '
+                f'(provider={provider_pubkey[:16]}…, sats={price_sats})',
+                color='cyan')
+        except Exception as e:
+            logging.warning(
+                f'Network: stale-recovery payment failed for {stream_name}: {e}')
+
+    async def requestHistoricRange(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        t1: int,
+        t2: int,
+    ) -> dict:
+        """Pay for and request a historic observation range from the provider.
+
+        Sends one ChannelCommitment with `fetch_kind="historic"` covering the
+        observed_at window [t1, t2]. The publisher delivers matching
+        observations tagged `historic=1`; those flow through the normal
+        `_networkProcessObservation` path but skip the live-payment trigger
+        because of the in-memory pending window registered here.
+
+        Cost = ceil((t2 - t1 + 1) / cadence) * price_per_obs (or at least one
+        observation's worth — covers the case where the range might just hold
+        a single observation due to floor division).
+        """
+        if t1 > t2:
+            return {'ok': False, 'error': 't1 must be <= t2'}
+        subs = await asyncio.to_thread(self.networkDB.get_active)
+        sub = next(
+            (s for s in subs
+             if s['stream_name'] == stream_name
+             and s['provider_pubkey'] == provider_pubkey),
+            None)
+        if not sub:
+            return {'ok': False, 'error': f'not subscribed to {stream_name}'}
+        price = int(sub.get('price_per_obs') or 0)
+        if price <= 0:
+            return {'ok': False, 'error': f'{stream_name} is free; nothing to pay for'}
+        cadence = int(sub.get('cadence_seconds') or 0) or 1
+        # Estimate how many obs the publisher might have in the window. Pay
+        # for that many — any unfilled budget stays in the channel as residue
+        # because fetch_kind="historic" does NOT advance last_paid_seq.
+        estimated = max(1, (t2 - t1) // cadence + 1)
+        pay_sats = estimated * price
+        # Register the pending window so the inbound path knows not to fire a
+        # live payment for any observation falling into it.
+        key = (stream_name, provider_pubkey)
+        # Keep windows alive for 6 * cadence — long enough for the publisher
+        # to deliver, short enough that stale entries don't accumulate forever.
+        deadline = time.time() + max(cadence * 6, 60)
+        self._historicRangesPending.setdefault(key, []).append(
+            (int(t1), int(t2), deadline))
+        try:
+            await self._channelPayNow(
+                stream_name, provider_pubkey, pay_sats,
+                fetch_kind='historic', fetch_t1=int(t1), fetch_t2=int(t2))
+            logging.info(
+                f'Network: historic-fetch requested for {stream_name} '
+                f'range=[{t1},{t2}] estimated={estimated} sats={pay_sats}',
+                color='cyan')
+            return {
+                'ok': True,
+                'estimated_obs': estimated,
+                'pay_sats': pay_sats,
+                't1': int(t1),
+                't2': int(t2),
+            }
+        except Exception as e:
+            logging.warning(
+                f'Network: historic-fetch payment failed for {stream_name}: {e}')
+            return {'ok': False, 'error': str(e)}
+
+    def _historicWindowMatches(
+        self, stream_name: str, provider_pubkey: str, observed_at: int | None,
+    ) -> bool:
+        """True iff observed_at falls in any non-expired pending historic
+        window for (stream, provider). Side-effect: prunes expired entries."""
+        if observed_at is None:
+            return False
+        key = (stream_name, provider_pubkey)
+        windows = self._historicRangesPending.get(key)
+        if not windows:
+            return False
+        now = time.time()
+        live = [(a, b, dl) for (a, b, dl) in windows if dl > now]
+        if len(live) != len(windows):
+            self._historicRangesPending[key] = live
+        return any(a <= observed_at <= b for (a, b, _) in live)
+
+    async def _deliverHistoricRange(
+        self,
+        subscriber_pubkey: str,
+        stream_name: str,
+        t1: int,
+        t2: int,
+        paid_sats: int,
+    ) -> None:
+        """Publisher-side: ship observations in [t1, t2] to one subscriber.
+
+        Reads the publisher's own observations (provider_pubkey == self own
+        nostr pubkey), caps delivery at `paid_sats / price_per_obs`, and
+        publishes each event tagged `historic=1` addressed to the requesting
+        subscriber only. Does NOT touch `subscriber_access.last_paid_seq` —
+        that is the entire point of the historic flow.
+        """
+        from satorilib.satori_nostr.models import (
+            DatastreamObservation, DatastreamMetadata)
+        if t1 > t2:
+            return
+        pub = await asyncio.to_thread(
+            lambda: next(
+                (p for p in self.networkDB.get_active_publications()
+                 if p['stream_name'] == stream_name), None))
+        if not pub:
+            logging.warning(
+                f'Channel: historic delivery skipped — no active publication '
+                f'for {stream_name}')
+            return
+        price = int(pub.get('price_per_obs') or 0)
+        if price <= 0:
+            cap = None  # free stream — deliver everything in range
+        else:
+            cap = max(0, paid_sats // price)
+            if cap == 0:
+                logging.warning(
+                    f'Channel: historic payment {paid_sats} sats too small '
+                    f'for {stream_name} (price={price})')
+                return
+        rows = await asyncio.to_thread(
+            self.networkDB.get_observations_in_range,
+            stream_name, self.nostrPubkey, t1, t2,
+            cap)
+        if not rows:
+            logging.info(
+                f'Channel: historic delivery for {stream_name} '
+                f'range=[{t1},{t2}] — no matching observations',
+                color='yellow')
+            return
+        metadata = DatastreamMetadata(
+            stream_name=stream_name,
+            nostr_pubkey=self.nostrPubkey,
+            name=pub.get('name', ''),
+            description=pub.get('description', ''),
+            encrypted=bool(pub.get('encrypted', 0)),
+            price_per_obs=price,
+            created_at=pub['created_at'],
+            cadence_seconds=pub.get('cadence_seconds'),
+            tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
+            metadata=None)
+        delivered = 0
+        for row in rows:
+            try:
+                value = row.get('value')
+                obs = DatastreamObservation(
+                    stream_name=stream_name,
+                    timestamp=int(row.get('observed_at') or 0),
+                    value=value,
+                    seq_num=int(row.get('seq_num') or 0))
+                # Send to every relay we're connected to so the subscriber
+                # receives it from whichever one they happen to be listening on.
+                for client in list(self._networkClients.values()):
+                    try:
+                        await client.publish_historic_observation(
+                            obs, metadata, subscriber_pubkey)
+                    except Exception as e:
+                        logging.warning(
+                            f'Channel: historic publish failed: {e}')
+                delivered += 1
+            except Exception as e:
+                logging.warning(
+                    f'Channel: historic delivery row failed: {e}')
+        logging.info(
+            f'Channel: historic delivered {delivered} obs of {stream_name} '
+            f'to {subscriber_pubkey[:16]}… range=[{t1},{t2}] paid={paid_sats}',
+            color='cyan')
 
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
@@ -791,37 +1033,81 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(
                 f'Channel: settlement listener stopped on {relay_url}: {e}')
 
+    def _channelStateLock(self, p2sh_address: str) -> asyncio.Lock:
+        """Lazily create the per-channel state-mutation lock."""
+        lock = self._channelStateLocks.get(p2sh_address)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._channelStateLocks[p2sh_address] = lock
+        return lock
+
     async def _channelHandleSettlement(self, inbound):
-        """Handle a settlement notification: update DB with new funding UTXO (sender side)."""
+        """Handle a settlement notification: update DB with new funding UTXO (sender side).
+
+        Layer-1 fix: settlement events are Nostr kind-34606 parameterized
+        replaceable — every relay holds the latest one and re-delivers it on
+        subscribe. Without an idempotence guard, that replay clobbers a
+        post-refund row back to the pre-refund state, after which the
+        publisher rejects the sender's commitments as "stale UTXO."
+
+        We skip when:
+          - the row already points at exactly this (claim_txid, vout) —
+            another relay's redelivery of an already-applied settlement; OR
+          - the settlement timestamp predates our current funding's
+            created_at — we've already moved past this state via a refund.
+        """
         s = inbound.settlement
-        channel = await asyncio.to_thread(
-            self.networkDB.get_channel, s.p2sh_address)
-        if not channel or not channel.get('is_sender'):
-            return
-        # Mark as settled so the tombstone fallback doesn't double-reset
-        self._settledChannels.add(s.p2sh_address)
-        if s.new_funding_vout == -1 or s.new_locked_sats == 0:
-            # Channel fully drained — remainder is already 0 from sender's
-            # micropayment tracking; next observation will trigger refund.
-            logging.info(
-                f'Channel: {s.p2sh_address} fully drained, awaiting refund',
-                color='yellow')
-        else:
-            # Update to new UTXO; cumulative tracking resets to 0.
-            # Use the settlement's timestamp so the sender's CSV-timer
-            # anchor matches the receiver's (Nostr delivery can be delayed).
-            await asyncio.to_thread(
-                self.networkDB.update_channel_funding,
-                s.p2sh_address,
-                s.claim_txid,
-                s.new_funding_vout,
-                s.new_locked_sats,
-                int(getattr(s, 'timestamp', 0)) or None)
-            logging.info(
-                f'Channel: {s.p2sh_address} settled, new UTXO '
-                f'{s.claim_txid[:12]}…:{s.new_funding_vout} '
-                f'({s.new_locked_sats} sats)',
-                color='green')
+        async with self._channelStateLock(s.p2sh_address):
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, s.p2sh_address)
+            if not channel or not channel.get('is_sender'):
+                return
+            # Idempotence: same UTXO we're already tracking — nothing to do.
+            if (channel.get('funding_txid') == s.claim_txid
+                    and int(channel.get('funding_vout') or -1)
+                        == int(s.new_funding_vout)):
+                self._settledChannels.add(s.p2sh_address)
+                return
+            # Staleness: a settlement from before our current funding's
+            # created_at is a replay of a state we've already moved past
+            # (typically: receiver claimed → sender refunded → relay #2
+            # delivers the original settlement again on reconnect).
+            incoming_ts = int(getattr(s, 'timestamp', 0) or 0)
+            current_ts = int(channel.get('created_at') or 0)
+            if incoming_ts and current_ts and incoming_ts < current_ts:
+                logging.info(
+                    f'Channel: ignoring stale settlement for '
+                    f'{s.p2sh_address} (settlement_ts={incoming_ts} < '
+                    f'current_ts={current_ts})',
+                    color='yellow')
+                self._settledChannels.add(s.p2sh_address)
+                return
+            # Mark as settled so the tombstone fallback doesn't double-reset.
+            # MUST be set before the DB write so a concurrent tombstone
+            # handler (sharing this same per-p2sh lock) sees the marker.
+            self._settledChannels.add(s.p2sh_address)
+            if s.new_funding_vout == -1 or s.new_locked_sats == 0:
+                # Channel fully drained — remainder is already 0 from sender's
+                # micropayment tracking; next observation will trigger refund.
+                logging.info(
+                    f'Channel: {s.p2sh_address} fully drained, awaiting refund',
+                    color='yellow')
+            else:
+                # Update to new UTXO; cumulative tracking resets to 0.
+                # Use the settlement's timestamp so the sender's CSV-timer
+                # anchor matches the receiver's (Nostr delivery can be delayed).
+                await asyncio.to_thread(
+                    self.networkDB.update_channel_funding,
+                    s.p2sh_address,
+                    s.claim_txid,
+                    s.new_funding_vout,
+                    s.new_locked_sats,
+                    incoming_ts or None)
+                logging.info(
+                    f'Channel: {s.p2sh_address} settled, new UTXO '
+                    f'{s.claim_txid[:12]}…:{s.new_funding_vout} '
+                    f'({s.new_locked_sats} sats)',
+                    color='green')
 
     def _networkEnsureTombstoneListener(self, relay_url: str):
         """Start a tombstone listener for a relay if one isn't running."""
@@ -863,19 +1149,47 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         tombstones arrive (one per relay) for the same claim, and popping the
         marker after the first would cause subsequent tombstones to wrongly
         zero out a channel the settlement already refreshed.
+
+        Layer-2 fix: take the per-p2sh state lock so we observe the marker
+        atomically with `_channelHandleSettlement`. Without the lock, a
+        tombstone arriving the same scheduling tick as the matching
+        settlement could read `_settledChannels` before the settlement
+        handler had populated it and would wrongly zero remainder.
         """
-        if p2sh_address in self._settledChannels:
-            return  # settlement already handled this properly
-        channel = await asyncio.to_thread(
-            self.networkDB.get_channel, p2sh_address)
-        if not channel or not channel.get('is_sender'):
-            return
-        await asyncio.to_thread(
-            self.networkDB.update_channel_remainder, p2sh_address, 0)
-        logging.info(
-            f'Channel: {p2sh_address} tombstone fallback — '
-            f'remainder zeroed, next observation will refund',
-            color='yellow')
+        async with self._channelStateLock(p2sh_address):
+            if p2sh_address in self._settledChannels:
+                return  # settlement already handled this properly
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, p2sh_address)
+            if not channel or not channel.get('is_sender'):
+                return
+            # Layer-2 fix: a tombstone carries no information about which
+            # commitment it tombstones. On sender restart, relays redeliver
+            # tombstones for OLD commitments whose funding UTXO has since
+            # been replaced (refund). If our current funding row was
+            # updated within the recent past — implying we just refunded
+            # or otherwise advanced state — the tombstone is almost
+            # certainly stale and acting on it would zero a healthy
+            # remainder. Skip in that window.
+            #
+            # The threshold is generous (5 minutes) because sender restarts
+            # are fast; if the tombstone is genuinely about our current
+            # state, the very-next observation that fails to be sent (or
+            # the next reconcile) will surface the issue and trigger refund.
+            current_ts = int(channel.get('created_at') or 0)
+            if current_ts and (int(time.time()) - current_ts) < 300:
+                logging.info(
+                    f'Channel: ignoring tombstone for {p2sh_address} — '
+                    f'funding row is recent ({int(time.time()) - current_ts}s '
+                    f'old); likely a redelivered stale tombstone',
+                    color='yellow')
+                return
+            await asyncio.to_thread(
+                self.networkDB.update_channel_remainder, p2sh_address, 0)
+            logging.info(
+                f'Channel: {p2sh_address} tombstone fallback — '
+                f'remainder zeroed, next observation will refund',
+                color='yellow')
 
     async def _channelOpenListen(self, relay_url: str):
         """Listen for inbound channel open announcements on a relay.
@@ -1108,7 +1422,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 sender_nostr_pubkey=sender_nostr_pubkey,
                 total_paid_sats=commitment.pay_amount_sats,
                 stream_name=commitment.stream_name,
-                p2sh_address=commitment.p2sh_address)
+                p2sh_address=commitment.p2sh_address,
+                fetch_kind=getattr(commitment, 'fetch_kind', 'prepay'),
+                fetch_t1=getattr(commitment, 'fetch_t1', None),
+                fetch_t2=getattr(commitment, 'fetch_t2', None))
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -1315,7 +1632,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
             total_paid_sats=commitment.pay_amount_sats,
             stream_name=commitment.stream_name,
-            p2sh_address=p2sh_address)
+            p2sh_address=p2sh_address,
+            fetch_kind=getattr(commitment, 'fetch_kind', 'prepay'),
+            fetch_t1=getattr(commitment, 'fetch_t1', None),
+            fetch_t2=getattr(commitment, 'fetch_t2', None))
         logging.info(
             f'Channel: claimed {commitment.pay_amount_sats} sats '
             f'from {p2sh_address} — txid={txid}',
@@ -1584,6 +1904,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         total_paid_sats: int,
         stream_name: str = '',
         p2sh_address: str = '',
+        fetch_kind: str = 'prepay',
+        fetch_t1: int | None = None,
+        fetch_t2: int | None = None,
     ) -> None:
         """Update subscriber access rights after a successful channel claim.
 
@@ -1605,6 +1928,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Nostr key rotations (Fix C).
         """
         if not sender_nostr_pubkey or total_paid_sats <= 0:
+            return
+        # Historic-fetch payments must not advance last_paid_seq — overpayment
+        # would otherwise be silently consumed as prepay for future observations,
+        # and the requested historical range would never actually be delivered.
+        # Dispatch to the historic delivery path instead.
+        if fetch_kind == 'historic':
+            if not stream_name or fetch_t1 is None or fetch_t2 is None:
+                logging.warning(
+                    f'Channel: rejecting historic payment — missing stream '
+                    f'or range (stream={stream_name!r}, t1={fetch_t1}, '
+                    f't2={fetch_t2})')
+                return
+            await self._deliverHistoricRange(
+                subscriber_pubkey=sender_nostr_pubkey,
+                stream_name=stream_name,
+                t1=int(fetch_t1),
+                t2=int(fetch_t2),
+                paid_sats=int(total_paid_sats))
             return
         pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
         for pub in pubs:
@@ -2068,6 +2409,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         p2sh_address: str,
         pay_amount_sats: int,
         stream_name: str = '',
+        fetch_kind: str = 'prepay',
+        fetch_t1: int | None = None,
+        fetch_t2: int | None = None,
     ) -> None:
         """Issue a payment commitment to the receiver over Nostr (sender side).
 
@@ -2156,6 +2500,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             fee=0,  # no fee embedded; receiver handles via 3-path
             timestamp=int(time.time()),
             stream_name=stream_name,
+            fetch_kind=fetch_kind,
+            fetch_t1=fetch_t1,
+            fetch_t2=fetch_t2,
         )
         # The Nostr `p` tag must be a 32-byte x-only Nostr pubkey — that is a
         # different value from the 33-byte EVR wallet pubkey stored in
@@ -3266,6 +3613,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 except Exception as e:
                     logging.warning(
                         f'Network: subscribe failed {stream_name}: {e}')
+                # If this is a paid subscription that went stale, the provider
+                # is likely gating us out (last_paid_seq behind current_seq).
+                # Fire one prepay to unstick the gate. Rate-limited inside.
+                if is_paid:
+                    await self._channelPayStaleRecovery(sub)
 
             if found_any:
                 # Start listening for observations on this relay

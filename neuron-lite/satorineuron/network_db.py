@@ -108,6 +108,13 @@ class NetworkDB:
             CREATE INDEX IF NOT EXISTS idx_obs_stream
             ON observations(stream_name, provider_pubkey, received_at DESC)
         """)
+        # Range queries for the historic-fetch API need a chronological index
+        # on observed_at. Without this, get_observations_in_range falls back to
+        # a full table scan once observations grow.
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_obs_stream_observed_at
+            ON observations(stream_name, provider_pubkey, observed_at)
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS relays (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -510,6 +517,35 @@ class NetworkDB:
             WHERE stream_name = ? AND provider_pubkey = ?
         """, (stream_name, provider_pubkey)).fetchone()
         return row['max_seq'] if row and row['max_seq'] is not None else 0
+
+    def get_observations_in_range(
+        self, stream_name: str, provider_pubkey: str,
+        t1: int, t2: int, limit: int | None = None,
+    ) -> list[dict]:
+        """Return observations whose observed_at is in [t1, t2], chronological.
+
+        Used by the publisher's historic-fetch delivery path to serve a
+        range that a subscriber explicitly paid for. Caller is responsible
+        for capping the result count to what the payment funded; this helper
+        intentionally returns everything in range up to `limit` so the
+        caller can detect "you asked for 10 obs but only 6 exist".
+        """
+        conn = self._get_conn()
+        if t1 > t2:
+            return []
+        sql = (
+            "SELECT seq_num, observed_at, received_at, value, event_id "
+            "FROM observations "
+            "WHERE stream_name = ? AND provider_pubkey = ? "
+            "AND observed_at IS NOT NULL "
+            "AND observed_at BETWEEN ? AND ? "
+            "ORDER BY observed_at ASC")
+        params: tuple = (stream_name, provider_pubkey, t1, t2)
+        if limit is not None and limit > 0:
+            sql += " LIMIT ?"
+            params = params + (int(limit),)
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     def is_locally_stale(self, stream_name: str, provider_pubkey: str,
                          cadence_seconds: int,
