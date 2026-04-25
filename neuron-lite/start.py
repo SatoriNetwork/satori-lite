@@ -226,6 +226,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._dataSourceTasks.clear()
         self._networkFirstRun = True
 
+        # One-shot fetch of server-driven relay config (e.g. max_streams) at
+        # neuron startup. The cap rarely changes; refetching every reconcile
+        # cycle would be wasteful. Best-effort — failures leave the local
+        # fallback in place.
+        try:
+            from satorineuron import network_db as _ndb
+            cfg = await asyncio.to_thread(self.server.getRelayConfig)
+            if isinstance(cfg, dict) and 'max_streams' in cfg:
+                _ndb.setMaxTotalStreams(cfg['max_streams'])
+        except Exception:
+            pass
+
         fetch_task = None
         try:
             while True:

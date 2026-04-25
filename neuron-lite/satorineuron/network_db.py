@@ -13,7 +13,26 @@ SQLITE_READ_RETRY_DELAY_SECONDS = 0.2
 # Per-neuron cap to prevent a single node from overloading itself or the network.
 # Active user publications + active subscriptions cannot exceed this combined cap.
 # User-created publications exclude auto-generated `_pred` prediction streams.
-MAX_TOTAL_STREAMS = 60
+# The authoritative value comes from central (/api/v1/peer/config). When central
+# hasn't been reached yet (or is unreachable), we fall back to MAX_TOTAL_STREAMS.
+MAX_TOTAL_STREAMS = 100
+_max_total_streams_override: "int | None" = None
+
+
+def getMaxTotalStreams() -> int:
+    """Current cap — server-provided value if known, else local fallback."""
+    return _max_total_streams_override if _max_total_streams_override else MAX_TOTAL_STREAMS
+
+
+def setMaxTotalStreams(value) -> None:
+    """Cache a server-provided cap. Silently ignores invalid values."""
+    global _max_total_streams_override
+    try:
+        v = int(value)
+        if v > 0:
+            _max_total_streams_override = v
+    except (TypeError, ValueError):
+        pass
 
 
 class NetworkDB:

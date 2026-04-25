@@ -2261,7 +2261,7 @@ def register_routes(app):
     @login_required
     def api_network_subscribe():
         """Subscribe to a datastream."""
-        from satorineuron.network_db import MAX_TOTAL_STREAMS
+        from satorineuron.network_db import getMaxTotalStreams
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
@@ -2275,10 +2275,11 @@ def register_routes(app):
         if not startup.networkDB.is_subscribed(stream_name, nostr_pubkey):
             total = (startup.networkDB.count_active_user_publications()
                      + startup.networkDB.count_active_subscriptions())
-            if total >= MAX_TOTAL_STREAMS:
+            cap = getMaxTotalStreams()
+            if total >= cap:
                 return jsonify({
                     'error': f'Combined publication+subscription limit reached '
-                             f'({MAX_TOTAL_STREAMS}). Remove an existing publication '
+                             f'({cap}). Remove an existing publication '
                              f'or subscription before adding a new one.'
                 }), 400
         # Look up price server-side from discovered streams — don't trust the client value
@@ -2529,7 +2530,7 @@ def register_routes(app):
         """Create a new data source and its corresponding publication."""
         from satorineuron.classifications import (
             CLASSIFICATIONS, CLASSIFICATION_VALUES)
-        from satorineuron.network_db import MAX_TOTAL_STREAMS
+        from satorineuron.network_db import getMaxTotalStreams
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
@@ -2551,10 +2552,11 @@ def register_routes(app):
             if is_new_or_reactivated:
                 total = (startup.networkDB.count_active_user_publications()
                          + startup.networkDB.count_active_subscriptions())
-                if total >= MAX_TOTAL_STREAMS:
+                cap = getMaxTotalStreams()
+                if total >= cap:
                     return jsonify({
                         'error': f'Combined publication+subscription limit reached '
-                                 f'({MAX_TOTAL_STREAMS}). Remove an existing publication '
+                                 f'({cap}). Remove an existing publication '
                                  f'or subscription before adding a new one.'
                     }), 400
         url = data.get('url', '').strip()
