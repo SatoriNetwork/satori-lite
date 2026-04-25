@@ -10,6 +10,11 @@ SQLITE_BUSY_TIMEOUT_MS = 30000
 SQLITE_READ_RETRIES = 3
 SQLITE_READ_RETRY_DELAY_SECONDS = 0.2
 
+# Per-neuron cap to prevent a single node from overloading itself or the network.
+# Active user publications + active subscriptions cannot exceed this combined cap.
+# User-created publications exclude auto-generated `_pred` prediction streams.
+MAX_TOTAL_STREAMS = 60
+
 
 class NetworkDB:
     """Thread-safe SQLite database for tracking subscribed datastreams."""
@@ -343,6 +348,13 @@ class NetworkDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def count_active_subscriptions(self) -> int:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM subscriptions WHERE active = 1"
+        ).fetchone()
+        return row['c']
+
     def get_all(self) -> list[dict]:
         """Return all subscriptions including soft-deleted."""
         conn = self._get_conn()
@@ -591,6 +603,15 @@ class NetworkDB:
             "SELECT * FROM publications WHERE active = 1 ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def count_active_user_publications(self) -> int:
+        """Active publications excluding auto-generated `_pred` streams."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM publications "
+            "WHERE active = 1 AND stream_name NOT LIKE '%\\_pred' ESCAPE '\\'"
+        ).fetchone()
+        return row['c']
 
     def get_all_publications(self) -> list[dict]:
         """Return all publications including soft-deleted."""

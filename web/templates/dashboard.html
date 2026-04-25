@@ -3098,7 +3098,29 @@
         if (btn) { btn.disabled = false; btn.textContent = btn._origText || ''; }
     }
 
+    function activeUserPubCount() {
+        return pubsAllItems.filter(
+            p => p.active && !p.stream_name.endsWith('_pred')).length;
+    }
+    function activeSubCount() {
+        return subsAllItems.filter(s => s.active).length;
+    }
+    function combinedStreamCount() {
+        return activeUserPubCount() + activeSubCount();
+    }
+    function isAtSubscriptionCap(streamName, pubkey) {
+        const alreadyActive = subsAllItems.some(
+            s => s.active && s.stream_name === streamName && s.provider_pubkey === pubkey);
+        if (alreadyActive) return false;
+        return combinedStreamCount() >= MAX_TOTAL_STREAMS;
+    }
+
     async function networkSubscribe(stream, btn) {
+        if (isAtSubscriptionCap(stream.stream_name, stream.nostr_pubkey)) {
+            alert(`Combined publication+subscription limit reached (${MAX_TOTAL_STREAMS}). `
+                + `Remove an existing publication or subscription before adding a new one.`);
+            return;
+        }
         if (btn) btnLoading(btn);
         await fetch('/api/network/subscribe', {
             method: 'POST',
@@ -3109,6 +3131,11 @@
     }
 
     async function networkResubscribe(streamName, pubkey, relayUrl, btn) {
+        if (isAtSubscriptionCap(streamName, pubkey)) {
+            alert(`Combined publication+subscription limit reached (${MAX_TOTAL_STREAMS}). `
+                + `Remove an existing publication or subscription before adding a new one.`);
+            return;
+        }
         if (btn) btnLoading(btn);
         await fetch('/api/network/subscribe', {
             method: 'POST',
@@ -3157,6 +3184,9 @@
     let obsChart = null;
 
     const PAGE_SIZE = 10;
+    // Combined per-neuron cap on active publications + subscriptions.
+    // Backend is the source of truth; this mirrors it for UX.
+    const MAX_TOTAL_STREAMS = 60;
     let subsCurrentPage = 1, subsAllItems = [];
     let pubsCurrentPage = 1, pubsAllItems = [];
     let obsObsCurrentPage = 1, obsPredCurrentPage = 1;
@@ -3511,8 +3541,12 @@
         const headerRow = lines[0].split(',').map(h => h.trim().toLowerCase());
         if (!headerRow.includes('stream_name')) { alert('Missing required column: stream_name'); return; }
         const dataRows = lines.slice(1).filter(l => l.trim()).length;
-        if (dataRows > 30) {
-            alert(`CSV contains ${dataRows} streams. Maximum allowed is 30. Please split into smaller files.`);
+        const used = combinedStreamCount();
+        const remaining = Math.max(0, MAX_TOTAL_STREAMS - used);
+        if (dataRows > remaining) {
+            alert(`Adding ${dataRows} streams would exceed the combined `
+                + `publication+subscription cap of ${MAX_TOTAL_STREAMS} `
+                + `(you currently have ${used}). You can add at most ${remaining} more.`);
             return;
         }
         let created = 0, errors = [];
@@ -3918,6 +3952,12 @@
         const isEditing = document.getElementById('dsStreamName').readOnly;
         if (!isEditing && pubsAllItems.some(p => p.stream_name === streamName)) {
             err.textContent = 'A publication with this stream name already exists.'; return;
+        }
+        if (!isEditing && combinedStreamCount() >= MAX_TOTAL_STREAMS) {
+            err.textContent = `Combined publication+subscription limit reached `
+                + `(${MAX_TOTAL_STREAMS}). Remove an existing publication or `
+                + `subscription before adding a new one.`;
+            return;
         }
         // URL-dependent validation
         let cadence = 0;
