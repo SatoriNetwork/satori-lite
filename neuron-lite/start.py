@@ -3033,9 +3033,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return future.result(timeout=30)
 
     def _neededRelays(self) -> set:
-        """Return set of relay URLs that have active subscriptions."""
+        """Relays we want persistent connections to.
+
+        Active subscriptions pin their specific relay. Active publications
+        pin every known relay — the publisher broadcasts to all of them and
+        needs the connection alive between publishes to keep settlement /
+        tombstone listeners running and to stay discoverable.
+        """
         subs = self.networkDB.get_active()
-        return {s['relay_url'] for s in subs}
+        needed = {s['relay_url'] for s in subs}
+        if self.networkDB.get_active_publications():
+            for r in self.networkDB.get_relays():
+                needed.add(r['relay_url'])
+        return needed
 
     def scheduleChannelPay(
         self, stream_name: str, provider_pubkey: str, price_sats: int
