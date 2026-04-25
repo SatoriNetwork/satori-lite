@@ -85,6 +85,8 @@ _MOCK_MAP = {
     'satorineuron.init.wallet': _mock_satorineuron.init.wallet,
     'satorineuron.structs': _mock_satorineuron.structs,
     'satorineuron.structs.start': _mock_satorineuron.structs.start,
+    'satorineuron.relay_manager': mock.MagicMock(),
+    'satorineuron.lite_engine': mock.MagicMock(),
     'satoriengine': _mock_satoriengine,
     'satoriengine.veda': _mock_satoriengine.veda,
     'satoriengine.veda.engine': _mock_satoriengine.veda.engine,

@@ -501,6 +501,17 @@ class NetworkDB:
         """, (stream_name, provider_pubkey)).fetchone()
         return row['received_at'] if row else None
 
+    def get_observation_by_seq(self, stream_name: str,
+                              provider_pubkey: str,
+                              seq_num: int) -> dict | None:
+        """Return a specific observation by stream and seq_num."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT * FROM observations
+            WHERE stream_name = ? AND provider_pubkey = ? AND seq_num = ?
+        """, (stream_name, provider_pubkey, seq_num)).fetchone()
+        return dict(row) if row else None
+
     def max_observation_seq(self, stream_name: str,
                            provider_pubkey: str) -> int:
         """Return the highest seq_num we've received for this stream."""
