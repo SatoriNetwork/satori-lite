@@ -364,6 +364,7 @@
             height: 58px;
             position: relative;
             z-index: 1050;
+            isolation: isolate;
             margin: 12px 12px 0;
             border-radius: 20px;
             overflow: visible;
@@ -473,7 +474,11 @@
         @media (prefers-reduced-motion: reduce) {
             html.glass-nav .satori-navbar::after { animation: none; opacity: 0; }
         }
-        html.glass-nav .satori-navbar > * { position: relative; z-index: 2; }
+        html.glass-nav .satori-navbar > * {
+            position: relative;
+            z-index: 2;
+            transform: translateZ(0);
+        }
 
         /* Logo glow (glass only) */
         html.glass-nav .satori-brand { padding: 0 0.15rem; }
