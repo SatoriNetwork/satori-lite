@@ -2631,10 +2631,24 @@ def register_routes(app):
                     resp = http_requests.get(url, headers=headers, timeout=15)
                 resp.raise_for_status()
                 raw = resp.text
-                obj = json_mod.loads(raw)
-                for key in parser_config.split('.'):
-                    obj = obj[int(key)] if key.isdigit() else obj[key]
-                startup.publishNowSync(data['stream_name'], str(obj))
+                if parser_type == 'python':
+                    local_vars = {'text': raw}
+                    exec_code = parser_config.strip()
+                    if 'return ' in exec_code and not exec_code.startswith('def '):
+                        exec_code = ('def _parse(text):\n' +
+                                     '\n'.join('    ' + l for l in exec_code.split('\n')) +
+                                     '\n_result = _parse(text)')
+                        exec(exec_code, {}, local_vars)
+                        value = str(local_vars.get('_result', ''))
+                    else:
+                        exec(exec_code, {}, local_vars)
+                        value = str(local_vars.get('result', local_vars.get('_result', '')))
+                else:
+                    obj = json_mod.loads(raw)
+                    for key in parser_config.split('.'):
+                        obj = obj[int(key)] if key.isdigit() else obj[key]
+                    value = str(obj)
+                startup.publishNowSync(data['stream_name'], value)
             except Exception as e:
                 logger.warning(f'publish-on-save failed for {data["stream_name"]}: {e}')
         else:
