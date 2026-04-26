@@ -2958,21 +2958,33 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         for r in db_relays:
             if r['relay_url'] not in relay_urls:
                 relay_urls.append(r['relay_url'])
+        # Connect + announce per relay first. Publish exactly once after
+        # all connections are up: _networkPublishObservation advances the
+        # seq via mark_published and itself broadcasts to every connected
+        # relay, so calling it inside the per-relay loop produced N
+        # distinct seq numbers for a single edit.
+        connected = []
         for relay_url in relay_urls:
             try:
                 client = await self._networkConnect(relay_url, ConfigClass)
                 if not client:
                     continue
                 await self._networkAnnouncePublications(relay_url)
-                await self._networkPublishObservation(stream_name, value)
-                await asyncio.sleep(2)  # allow relay to acknowledge before loop closes
-                logging.info(
-                    f'Network: publish-now {stream_name} to {relay_url}',
-                    color='green')
+                connected.append(relay_url)
             except Exception as e:
                 logging.warning(
-                    f'Network: publish-now failed on {relay_url}: {e}')
-            finally:
+                    f'Network: publish-now connect/announce failed on '
+                    f'{relay_url}: {e}')
+        try:
+            await self._networkPublishObservation(stream_name, value)
+            await asyncio.sleep(2)  # allow relays to acknowledge before disconnect
+            logging.info(
+                f'Network: publish-now {stream_name} to '
+                f'{len(connected)} relay(s)', color='green')
+        except Exception as e:
+            logging.warning(f'Network: publish-now failed: {e}')
+        finally:
+            for relay_url in connected:
                 if relay_url not in self._neededRelays():
                     await self._networkDisconnect(relay_url)
 
