@@ -10,7 +10,7 @@
 #   ./build.sh push             # Push :latest to Docker Hub
 #   ./build.sh push dev         # Push :dev to Docker Hub
 #   ./build.sh push latest dev  # Push multiple tags
-#   ./build.sh push all         # Push :latest + satorineuron:p2p & :latest
+#   ./build.sh push all         # Push :latest + :slim + satorineuron:p2p & :latest
 #
 
 set -e
@@ -96,8 +96,22 @@ echo -e "${GREEN}  Build Complete!${NC}"
 echo -e "${GREEN}======================================${NC}"
 echo ""
 
-# Handle "push all" - create satorineuron tags
+# Handle "push all" - build slim variant + create satorineuron tags
 if [ "$PUSH_ALL" = true ]; then
+    echo -e "${BLUE}======================================${NC}"
+    echo -e "${BLUE}  Building and pushing slim variant${NC}"
+    echo -e "${BLUE}======================================${NC}"
+    echo ""
+
+    docker buildx build \
+        --platform "$PLATFORMS" \
+        --build-context satorilib=../satorilib/src \
+        -f Dockerfile.slim \
+        -t "${IMAGE_NAME}:slim" \
+        --push \
+        .
+
+    echo ""
     echo -e "${BLUE}======================================${NC}"
     echo -e "${BLUE}  Creating satorineuron tags${NC}"
     echo -e "${BLUE}======================================${NC}"
@@ -119,6 +133,7 @@ if [ "$PUSH_ALL" = true ]; then
     echo ""
     echo "Pushed to Docker Hub:"
     echo "  - ${IMAGE_NAME}:latest"
+    echo "  - ${IMAGE_NAME}:slim"
     echo "  - ${NEURON_IMAGE}:p2p"
     echo "  - ${NEURON_IMAGE}:latest"
     echo ""
