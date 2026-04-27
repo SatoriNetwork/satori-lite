@@ -1,0 +1,81 @@
+# Satori Lite - slim multi-stage build
+# Builder stage compiles strfry and installs Python deps with the full toolchain.
+# Runtime stage carries only the shared libraries needed at run time.
+
+FROM python:3.10-slim AS builder
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        build-essential \
+        cmake \
+        git \
+        libflatbuffers-dev \
+        libleveldb-dev \
+        liblmdb-dev \
+        libsecp256k1-dev \
+        libssl-dev \
+        libzstd-dev \
+        zlib1g-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Build strfry. -j2 keeps peak RAM under the 8GB Docker Desktop default.
+RUN git clone --depth 1 https://github.com/hoytech/strfry.git /tmp/strfry && \
+    cd /tmp/strfry && \
+    git submodule update --init && \
+    make setup-golpe && \
+    make -j2 && \
+    cp /tmp/strfry/strfry /usr/local/bin/strfry && \
+    strip /usr/local/bin/strfry && \
+    rm -rf /tmp/strfry
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Strip debug symbols from compiled extensions to reclaim ~150-300 MB.
+RUN find /usr/local/lib/python3.10/site-packages -name '*.so' \
+        -exec strip --strip-unneeded {} + 2>/dev/null || true && \
+    find /usr/local/lib/python3.10/site-packages \
+        \( -name '__pycache__' -o -name '*.pyc' \) \
+        -exec rm -rf {} + 2>/dev/null || true
+
+
+# ---- Runtime stage ----
+FROM python:3.10-slim AS runtime
+
+# Only the runtime shared libs strfry and the pip stack actually load.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libflatbuffers-dev \
+        libgomp1 \
+        libleveldb1d \
+        liblmdb0 \
+        libsecp256k1-2 \
+        libssl3 \
+        libzstd1 \
+        zlib1g && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Bring strfry binary + installed Python packages over from the builder.
+COPY --from=builder /usr/local /usr/local
+
+RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web
+
+COPY --from=satorilib satorilib /Satori/Lib/satorilib
+COPY neuron-lite /Satori/Neuron
+COPY engine-lite /Satori/Engine
+COPY web /Satori/web
+
+ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
+
+RUN rm -rf /Satori/Neuron/data /Satori/Neuron/models && \
+    ln -s /Satori/Engine/db /Satori/Neuron/data && \
+    ln -s /Satori/models /Satori/Neuron/models && \
+    chmod +x /Satori/Neuron/satorineuron/web/start.sh
+
+WORKDIR /Satori
+EXPOSE 24601
+CMD ["python", "/Satori/Neuron/start.py"]

@@ -47,8 +47,8 @@ RUN pip install --upgrade pip && \
 
 COPY tests /Satori/tests
 
-# Set Python path - satorilib lives under /Satori/Lib/satorilib/src in the image.
-ENV PYTHONPATH="/Satori/Lib/satorilib/src:/Satori/Neuron:/Satori/Engine:/Satori"
+# Set Python path - satorilib package lives at /Satori/Lib/satorilib in the image.
+ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
 
 # Create symbolic links for docker-compose.yaml compatibility
 # Remove existing directories first, then create symlinks
