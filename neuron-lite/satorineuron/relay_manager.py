@@ -304,13 +304,15 @@ class LocalRelayManager:
         return status
 
     def _stop_all_locked(self) -> dict[str, Any]:
-        self._stop_mode_process('public')
-        self._stop_mode_process('private')
-        self._stop_legacy_mode('public')
-        self._stop_legacy_mode('private')
+        stopped_any = False
+        stopped_any |= bool(self._stop_mode_process('public'))
+        stopped_any |= bool(self._stop_mode_process('private'))
+        stopped_any |= bool(self._stop_legacy_mode('public'))
+        stopped_any |= bool(self._stop_legacy_mode('private'))
         self._last_status = 'off'
         self._last_error = None
-        logging.info('Relay: stopped embedded relay runtime', color='yellow')
+        if stopped_any:
+            logging.info('Relay: stopped embedded relay runtime', color='yellow')
         return self.status()
 
     def _port_conflicts(self) -> dict[str, str | None]:
@@ -392,16 +394,16 @@ class LocalRelayManager:
         except OSError:
             return False
 
-    def _stop_mode_process(self, mode: str) -> None:
+    def _stop_mode_process(self, mode: str) -> bool:
         pid = self._read_pid(mode)
         if not self._is_process_alive(pid):
             self._clear_pid(mode)
-            return
+            return False
         try:
             os.killpg(pid, signal.SIGTERM)
         except ProcessLookupError:
             self._clear_pid(mode)
-            return
+            return False
         deadline = time.time() + STOP_WAIT_SECONDS
         while time.time() < deadline:
             if not self._is_process_alive(pid):
@@ -414,6 +416,7 @@ class LocalRelayManager:
                 pass
         self._clear_pid(mode)
         logging.info(f'Relay: stopped embedded {mode} strfry process', color='yellow')
+        return True
 
     def _start_mode_process(self, mode: str) -> None:
         strfry_bin = shutil.which('strfry') or (
@@ -546,16 +549,18 @@ class LocalRelayManager:
             legacy_db_volume=f'{self._base_name}-{mode}-db',
         )
 
-    def _stop_legacy_mode(self, mode: str) -> None:
+    def _stop_legacy_mode(self, mode: str) -> bool:
         client = self._docker_client_optional()
         if client is None:
-            return
+            return False
+        removed_any = False
         names = self._names(mode)
         try:
             for container_name in (names.legacy_nginx, names.legacy_strfry):
                 try:
                     container = client.containers.get(container_name)
                     container.remove(force=True)
+                    removed_any = True
                     logging.info(
                         f'Relay: removed legacy {mode} sidecar {container_name}',
                         color='yellow')
@@ -564,12 +569,14 @@ class LocalRelayManager:
             try:
                 network = client.networks.get(names.legacy_network)
                 network.remove()
+                removed_any = True
             except NotFound:
                 pass
             except DockerException as exc:
                 logging.warning(f'Relay: could not remove legacy network {names.legacy_network}: {exc}')
         finally:
             client.close()
+        return removed_any
 
     def _migrate_legacy_db_if_needed(self, mode: str) -> bool:
         db_dir = self._db_dir(mode)

@@ -771,6 +771,223 @@
         to   { transform: translateX(100%); }
     }
 
+    /* ── Discover (initial relay scan) ────────────────────── */
+    .mkt-discover {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 3rem 1rem 2.25rem;
+    }
+    .mkt-discover-scan {
+        position: relative;
+        width: 200px;
+        height: 200px;
+    }
+    /* radar grid backdrop */
+    .mkt-discover-scan::before {
+        content: '';
+        position: absolute;
+        inset: 12px;
+        border-radius: 50%;
+        background:
+            radial-gradient(circle, color-mix(in oklab, var(--accent-primary) 8%, transparent) 0%, transparent 60%),
+            repeating-conic-gradient(from 0deg,
+                color-mix(in oklab, var(--accent-primary) 12%, transparent) 0deg 1deg,
+                transparent 1deg 30deg);
+        opacity: 0.6;
+        mask: radial-gradient(circle, #000 30%, transparent 78%);
+        -webkit-mask: radial-gradient(circle, #000 30%, transparent 78%);
+    }
+    /* sweeping radar arm */
+    .mkt-discover-scan::after {
+        content: '';
+        position: absolute;
+        inset: 12px;
+        border-radius: 50%;
+        background: conic-gradient(from 0deg,
+            color-mix(in oklab, var(--accent-primary) 45%, transparent) 0deg,
+            transparent 60deg 360deg);
+        mask: radial-gradient(circle, transparent 18%, #000 18.5%, #000 78%, transparent 78.5%);
+        -webkit-mask: radial-gradient(circle, transparent 18%, #000 18.5%, #000 78%, transparent 78.5%);
+        animation: mkt-sweep 4s linear infinite;
+    }
+    @keyframes mkt-sweep {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+    }
+    .mkt-discover-ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 1px solid color-mix(in oklab, var(--accent-primary) 55%, transparent);
+        animation: mkt-pulse 2.8s cubic-bezier(.22,.61,.36,1) infinite;
+        opacity: 0;
+        pointer-events: none;
+    }
+    .mkt-discover-ring:nth-of-type(1) { animation-delay: 0s; }
+    .mkt-discover-ring:nth-of-type(2) { animation-delay: 0.7s; }
+    .mkt-discover-ring:nth-of-type(3) { animation-delay: 1.4s; }
+    .mkt-discover-ring:nth-of-type(4) { animation-delay: 2.1s; }
+    @keyframes mkt-pulse {
+        0%   { transform: scale(0.35); opacity: 0; border-width: 2px; }
+        12%  { opacity: 0.9; }
+        100% { transform: scale(1.04); opacity: 0; border-width: 1px; }
+    }
+    .mkt-discover-core {
+        position: absolute;
+        top: 50%; left: 50%;
+        width: 60px; height: 60px;
+        margin: -30px 0 0 -30px;
+        border-radius: 16px;
+        background: var(--accent-gradient);
+        box-shadow:
+            0 0 0 1px color-mix(in oklab, var(--accent-primary) 65%, transparent),
+            0 10px 36px color-mix(in oklab, var(--accent-primary) 40%, transparent);
+        display: grid; place-items: center;
+        animation: mkt-core-breathe 2.8s ease-in-out infinite;
+    }
+    .mkt-discover-core .material-icons {
+        font-size: 30px; color: #fff; margin: 0;
+    }
+    @keyframes mkt-core-breathe {
+        0%, 100% { transform: scale(1); }
+        50%      { transform: scale(1.07); }
+    }
+    .mkt-discover-orbit {
+        position: absolute; inset: 0;
+        animation: mkt-orbit 6.5s linear infinite;
+        pointer-events: none;
+    }
+    .mkt-discover-orbit + .mkt-discover-orbit {
+        animation-duration: 10s;
+        animation-direction: reverse;
+    }
+    .mkt-discover-node {
+        position: absolute;
+        top: 6px; left: 50%;
+        width: 10px; height: 10px;
+        margin-left: -5px;
+        border-radius: 50%;
+        background: var(--accent-primary);
+        box-shadow: 0 0 14px color-mix(in oklab, var(--accent-primary) 75%, transparent);
+    }
+    .mkt-discover-orbit + .mkt-discover-orbit .mkt-discover-node {
+        top: auto; bottom: 6px;
+        width: 6px; height: 6px;
+        margin-left: -3px;
+        background: color-mix(in oklab, var(--accent-primary) 50%, #fff);
+        opacity: 0.85;
+    }
+    @keyframes mkt-orbit {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+    }
+
+    .mkt-discover-status {
+        text-align: center;
+        max-width: 460px;
+    }
+    .mkt-discover-title {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        letter-spacing: 0.01em;
+        margin-bottom: 0.35rem;
+    }
+    .mkt-discover-sub {
+        font-size: 0.86rem;
+        color: var(--text-muted);
+    }
+
+    .mkt-discover-tasks {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        text-align: left;
+        font-size: 0.83rem;
+        color: var(--text-muted);
+        background: color-mix(in oklab, var(--accent-primary) 5%, var(--bg-card));
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 0.9rem 1rem;
+        width: min(440px, 92%);
+    }
+    .mkt-discover-task {
+        display: flex; align-items: center; gap: 0.65rem;
+        transition: color .35s ease;
+        font-variant-numeric: tabular-nums;
+    }
+    .mkt-discover-task .mkt-discover-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--border-color);
+        flex-shrink: 0;
+        transition: background .35s ease, box-shadow .35s ease, transform .35s ease;
+    }
+    .mkt-discover-task.is-active {
+        color: var(--text-primary);
+    }
+    .mkt-discover-task.is-active .mkt-discover-dot {
+        background: var(--accent-primary);
+        box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent-primary) 22%, transparent);
+        animation: mkt-dot-blink 1.2s ease-in-out infinite;
+    }
+    .mkt-discover-task.is-done { color: var(--text-secondary); }
+    .mkt-discover-task.is-done .mkt-discover-dot {
+        background: color-mix(in oklab, var(--accent-primary) 75%, #fff);
+        box-shadow: none;
+        transform: scale(0.85);
+    }
+    @keyframes mkt-dot-blink {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.45; }
+    }
+
+    .mkt-discover-bar {
+        width: min(440px, 92%);
+        height: 3px;
+        border-radius: 999px;
+        background: var(--border-color);
+        overflow: hidden;
+        position: relative;
+    }
+    .mkt-discover-bar::before {
+        content: '';
+        position: absolute; top: 0; bottom: 0; left: 0;
+        width: 35%;
+        background: var(--accent-gradient);
+        border-radius: 999px;
+        animation: mkt-bar-slide 1.9s cubic-bezier(.65,.05,.36,1) infinite;
+    }
+    @keyframes mkt-bar-slide {
+        0%   { transform: translateX(-110%); }
+        100% { transform: translateX(310%); }
+    }
+
+    .mkt-discover-meta {
+        display: flex; gap: 0.4rem; align-items: baseline;
+        font-size: 0.78rem; color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.02em;
+    }
+    .mkt-discover-meta strong {
+        color: var(--accent-primary);
+        font-weight: 600;
+        font-size: 0.92rem;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .mkt-discover-scan::after,
+        .mkt-discover-ring,
+        .mkt-discover-orbit,
+        .mkt-discover-core,
+        .mkt-discover-bar::before,
+        .mkt-discover-task.is-active .mkt-discover-dot {
+            animation: none;
+        }
+    }
+
     /* Responsive tweaks */
     @media (max-width: 720px) {
         .mkt-hero { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
@@ -841,6 +1058,16 @@
                 <span>Subscribed</span>
                 <span class="mkt-sub-count" id="mktSubCount">0</span>
             </button>
+            <button class="mkt-sub-toggle" id="mktPredToggle"
+                    type="button" role="switch" aria-checked="false"
+                    onclick="togglePredictions(this)"
+                    title="Show only prediction streams (forecasts of another stream)">
+                <span class="mkt-sub-check" aria-hidden="true">
+                    <i class="material-icons">check</i>
+                </span>
+                <span>Predictions</span>
+                <span class="mkt-sub-count" id="mktPredCount">0</span>
+            </button>
             <div class="mkt-price" role="group" aria-label="Price filter">
                 <button class="is-active" data-price="all"  onclick="setPriceFilter('all', this)">All</button>
                 <button data-price="free" onclick="setPriceFilter('free', this)">Free</button>
@@ -859,13 +1086,51 @@
         <div class="mkt-class-row" id="mktClassRow"></div>
 
         <!-- Result count -->
-        <div class="mkt-count">
+        <div class="mkt-count" id="mktCount" style="display:none;">
             <div>Showing <strong id="mktVisible">0</strong> of <span id="mktTotal">0</span> streams</div>
             <div id="mktSubLine"></div>
         </div>
 
         <!-- Grid / states -->
         <div id="mktGrid" class="mkt-grid"></div>
+        <div id="mktDiscover" class="mkt-discover" style="display:none;" role="status" aria-live="polite">
+            <div class="mkt-discover-scan" aria-hidden="true">
+                <div class="mkt-discover-ring"></div>
+                <div class="mkt-discover-ring"></div>
+                <div class="mkt-discover-ring"></div>
+                <div class="mkt-discover-ring"></div>
+                <div class="mkt-discover-orbit"><div class="mkt-discover-node"></div></div>
+                <div class="mkt-discover-orbit"><div class="mkt-discover-node"></div></div>
+                <div class="mkt-discover-core"><i class="material-icons">graphic_eq</i></div>
+            </div>
+            <div class="mkt-discover-status">
+                <div class="mkt-discover-title" id="mktDiscoverTitle">Sweeping the relay network</div>
+                <div class="mkt-discover-sub" id="mktDiscoverSub">Pinging connected relays for live datastream announcements.</div>
+            </div>
+            <div class="mkt-discover-tasks" id="mktDiscoverTasks">
+                <div class="mkt-discover-task" data-step="0">
+                    <span class="mkt-discover-dot"></span>
+                    <span>Connecting to known relays</span>
+                </div>
+                <div class="mkt-discover-task" data-step="1">
+                    <span class="mkt-discover-dot"></span>
+                    <span>Fetching datastream announcements</span>
+                </div>
+                <div class="mkt-discover-task" data-step="2">
+                    <span class="mkt-discover-dot"></span>
+                    <span>Verifying observation freshness</span>
+                </div>
+                <div class="mkt-discover-task" data-step="3">
+                    <span class="mkt-discover-dot"></span>
+                    <span>Compiling marketplace</span>
+                </div>
+            </div>
+            <div class="mkt-discover-bar" aria-hidden="true"></div>
+            <div class="mkt-discover-meta">
+                <strong id="mktDiscoverFound">0</strong>
+                <span id="mktDiscoverFoundLabel">streams discovered so far</span>
+            </div>
+        </div>
         <div id="mktEmpty" class="mkt-empty" style="display:none;">
             <i class="material-icons">manage_search</i>
             <div class="mkt-empty-title" id="mktEmptyTitle">No streams match your filters</div>
@@ -905,6 +1170,7 @@
     let activeClass = null;          // null = All
     let priceFilter = 'all';         // 'all' | 'free' | 'paid'
     let subOnly = false;             // show only streams the user is subscribed to
+    let predOnly = localStorage.getItem('mkt-pred-only') === '1'; // off by default → predictions hidden
     let priceUnit = localStorage.getItem('mkt-price-unit') || 'sats'; // 'sats' | 'satori'
     let activeSegment = 'streams';   // 'streams' | 'predictions' (disabled)
     let currentPage = 1;
@@ -916,13 +1182,29 @@
         document.querySelectorAll('.mkt-unit button').forEach(b => {
             b.classList.toggle('is-active', b.dataset.unit === priceUnit);
         });
+        const predBtn = document.getElementById('mktPredToggle');
+        if (predBtn) {
+            predBtn.classList.toggle('is-active', predOnly);
+            predBtn.setAttribute('aria-checked', predOnly ? 'true' : 'false');
+        }
     });
 
     // ── Boot ────────────────────────────────────────────
+    // Try the backend's in-memory cache first — it survives across page
+    // reloads even when our JS state doesn't. If it has streams, render
+    // them immediately and refresh discovery quietly in the background;
+    // only fall back to the cold-start scan when the backend has nothing.
     (async function init() {
         await loadClassifications();
         renderClassChips();
-        await refreshStreams({ discover: true });
+        try { await fetchStreamsOnce(); } catch(e) { allStreams = []; }
+        if (allStreams.length > 0) {
+            renderStreams();
+            // Quiet refresh: no relay-scan panel, just the button spinner.
+            refreshStreams({ discover: true, quiet: true });
+        } else {
+            await refreshStreams({ discover: true });
+        }
     })();
 
     function selectSegment(seg) {
@@ -979,6 +1261,15 @@
         renderStreams();
     }
 
+    function togglePredictions(btn) {
+        predOnly = !predOnly;
+        currentPage = 1;
+        try { localStorage.setItem('mkt-pred-only', predOnly ? '1' : '0'); } catch(e) {}
+        btn.classList.toggle('is-active', predOnly);
+        btn.setAttribute('aria-checked', predOnly ? 'true' : 'false');
+        renderStreams();
+    }
+
     function setPriceUnit(val, btn) {
         priceUnit = val;
         try { localStorage.setItem('mkt-price-unit', val); } catch(e) {}
@@ -1021,10 +1312,17 @@
     }
 
     async function refreshStreams(opts = {}) {
-        const { discover = false } = opts;
+        const { discover = false, quiet = false } = opts;
         const btn = document.getElementById('mktRefreshBtn');
         btn.classList.add('is-loading');
-        showSkeleton();
+        // Cold start (no streams yet): lead with the relay-scan panel for
+        // discovery, or the skeleton otherwise. Quiet mode (used on revisit
+        // when the backend cache already populated us) skips both — only
+        // the refresh button's spinner shows activity.
+        if (!quiet && allStreams.length === 0) {
+            if (discover) startDiscoverAnimation();
+            else showSkeleton();
+        }
 
         try { await fetchStreamsOnce(); } catch(e) { allStreams = []; updateConnState(false); }
         renderStreams();
@@ -1048,6 +1346,7 @@
         }
 
         btn.classList.remove('is-loading');
+        stopDiscoverAnimation();
         renderStreams();
     }
 
@@ -1059,9 +1358,65 @@
     function showSkeleton() {
         const grid = document.getElementById('mktGrid');
         document.getElementById('mktEmpty').style.display = 'none';
+        const disc = document.getElementById('mktDiscover');
+        if (disc) disc.style.display = 'none';
         let html = '';
         for (let i = 0; i < 6; i++) html += '<div class="mkt-skeleton"></div>';
         grid.innerHTML = html;
+        lastRenderSig = null;
+    }
+
+    // ── Discover (relay-scan) animation ─────────────────
+    // Drives the staged task list shown during initial discovery. The
+    // backend polling cycle runs ~25s, so the four tasks advance roughly
+    // in sync with the real phases (connect → fetch → freshness → compile).
+    let discoverStepTimer = null;
+    let discoverStarted = false;
+    function startDiscoverAnimation() {
+        const panel = document.getElementById('mktDiscover');
+        if (!panel) return;
+        panel.style.display = 'flex';
+        document.getElementById('mktEmpty').style.display = 'none';
+        const tasks = panel.querySelectorAll('.mkt-discover-task');
+        tasks.forEach(t => t.classList.remove('is-active', 'is-done'));
+        if (tasks[0]) tasks[0].classList.add('is-active');
+        if (discoverStepTimer) clearInterval(discoverStepTimer);
+        let i = 0;
+        // Roughly: connect ~3s, fetch ~6s, freshness ~9s, compile until done.
+        const dwell = [3200, 6000, 8000];
+        const advance = () => {
+            if (i >= tasks.length - 1) return;
+            tasks[i].classList.remove('is-active');
+            tasks[i].classList.add('is-done');
+            i += 1;
+            tasks[i].classList.add('is-active');
+            if (i < dwell.length) {
+                discoverStepTimer = setTimeout(advance, dwell[i]);
+            }
+        };
+        discoverStepTimer = setTimeout(advance, dwell[0]);
+        discoverStarted = true;
+    }
+    function stopDiscoverAnimation(complete = true) {
+        if (discoverStepTimer) { clearTimeout(discoverStepTimer); discoverStepTimer = null; }
+        const panel = document.getElementById('mktDiscover');
+        if (!panel) return;
+        if (complete) {
+            // Mark remaining tasks done so the panel doesn't freeze mid-step
+            // before being hidden — looks intentional if the user glimpses it.
+            panel.querySelectorAll('.mkt-discover-task').forEach(t => {
+                t.classList.remove('is-active');
+                t.classList.add('is-done');
+            });
+        }
+        panel.style.display = 'none';
+        discoverStarted = false;
+    }
+    function updateDiscoverCount(n) {
+        const el = document.getElementById('mktDiscoverFound');
+        if (el) el.textContent = n;
+        const lbl = document.getElementById('mktDiscoverFoundLabel');
+        if (lbl) lbl.textContent = (n === 1 ? 'stream' : 'streams') + ' discovered so far';
     }
 
     // ── Filtering ───────────────────────────────────────
@@ -1098,6 +1453,20 @@
         return g.pubs.some(p => p.subscribed);
     }
 
+    // A group is a prediction card if any publisher in it declares a source
+    // stream — i.e. it forecasts another stream. The flag is set by the
+    // predict flow (web/routes.py:api_network_predict) and surfaces through
+    // the kind-34600 announcement metadata.
+    function isPredictionGroup(g) {
+        return g.pubs.some(p => p.metadata && p.metadata.source_stream_name);
+    }
+
+    function streamMatchesPredictionToggle(g) {
+        // Off (default): exclude prediction cards.
+        // On: show only prediction cards.
+        return predOnly ? isPredictionGroup(g) : !isPredictionGroup(g);
+    }
+
     function streamMatchesSearch(g, q) {
         if (!q) return true;
         q = q.toLowerCase();
@@ -1128,11 +1497,43 @@
     }
 
     // ── Rendering ───────────────────────────────────────
+    // Stable signature of everything that affects the rendered grid.
+    // Excludes wall-clock-derived strings (formatTimeAgo) so identical
+    // data doesn't force a rebuild when seconds tick over.
+    function streamsSignature(q) {
+        const parts = [
+            q, activeClass || '', priceFilter, priceUnit,
+            subOnly ? '1' : '0', predOnly ? '1' : '0',
+            currentPage, pageSize,
+        ];
+        // Per-stream identity + the fields that actually change card content.
+        for (const s of allStreams) {
+            parts.push(
+                s.stream_name, s.nostr_pubkey,
+                s.last_observation_at || 0,
+                s.subscribed ? 1 : 0,
+                s.is_mine ? 1 : 0,
+                s.active ? 1 : 0,
+                s.price_per_obs || 0,
+                s.relay_url || '');
+        }
+        return parts.join('|');
+    }
+
+    let lastRenderSig = null;
+
     function renderStreams() {
         const grid = document.getElementById('mktGrid');
         const empty = document.getElementById('mktEmpty');
         const pager = document.getElementById('mktPager');
         const q = document.getElementById('mktSearch').value.trim();
+
+        // Skip the entire render when nothing observable has changed —
+        // refreshes hit this path repeatedly and rebuilding the grid causes
+        // a visible flash even when the data is identical.
+        const sig = streamsSignature(q);
+        if (sig === lastRenderSig) return;
+        lastRenderSig = sig;
 
         // Dedupe by (stream_name, nostr_pubkey): the same publisher announces
         // the same stream on every relay it's connected to, so the API hands
@@ -1144,8 +1545,12 @@
             // Always show your own publications even if the relay can't
             // confirm freshness (e.g. paid streams with zero paying
             // subscribers — there are no observation events for the
-            // freshness check to find).
-            if (!s.active && !s.is_mine) continue;
+            // freshness check to find). Paid streams from other publishers
+            // get the same allowance, since a paid stream with no current
+            // subscribers will fail the freshness fallback and otherwise be
+            // invisible — leaving the publisher with no way to attract a
+            // first subscriber.
+            if (!s.active && !s.is_mine && (s.price_per_obs || 0) === 0) continue;
             const key = s.stream_name + '\x00' + s.nostr_pubkey;
             const prev = byStreamAndPub.get(key);
             if (!prev) {
@@ -1181,16 +1586,25 @@
         }
 
         document.getElementById('mktTotal').textContent = groups.length;
+        // Hide the "Showing X of Y" line until we actually have something to
+        // count — keeps the cold-start view clean while the relay-scan runs.
+        const countEl = document.getElementById('mktCount');
+        if (countEl) countEl.style.display = groups.length > 0 ? '' : 'none';
 
         // Subscribed count across all groups (independent of other filters)
         const subscribedGroups = groups.filter(g => g.pubs.some(p => p.subscribed)).length;
         const subCountEl = document.getElementById('mktSubCount');
         if (subCountEl) subCountEl.textContent = subscribedGroups;
 
+        const predictionGroups = groups.filter(isPredictionGroup).length;
+        const predCountEl = document.getElementById('mktPredCount');
+        if (predCountEl) predCountEl.textContent = predictionGroups;
+
         const filtered = groups.filter(g =>
             streamMatchesClass(g, activeClass) &&
             streamMatchesPrice(g, priceFilter) &&
             streamMatchesSubscribed(g) &&
+            streamMatchesPredictionToggle(g) &&
             streamMatchesSearch(g, q));
 
         const subbed = filtered.filter(g => g.rep.subscribed).length;
@@ -1206,9 +1620,16 @@
             const btn = document.getElementById('mktRefreshBtn');
             const isDiscovering = btn && btn.classList.contains('is-loading');
             if (groups.length === 0 && isDiscovering) {
-                title.textContent = 'Discovering streams across relays…';
-                sub.textContent = 'This usually takes a few seconds.';
-            } else if (groups.length === 0) {
+                // Show the relay-scan panel; live-update the found count
+                // from the underlying allStreams as polling brings rows in.
+                if (!discoverStarted) startDiscoverAnimation();
+                updateDiscoverCount(allStreams.length);
+                empty.style.display = 'none';
+                return;
+            }
+            // Not discovering — make sure the scan panel is hidden
+            stopDiscoverAnimation(false);
+            if (groups.length === 0) {
                 title.textContent = 'No streams found yet';
                 sub.textContent = 'Hit Refresh to scan your connected relays.';
             } else {
@@ -1219,6 +1640,7 @@
             return;
         }
         empty.style.display = 'none';
+        stopDiscoverAnimation(false);
 
         // Stable sort: subscribed first, then mine, then has-recent-obs, then name
         filtered.sort((a, b) => {

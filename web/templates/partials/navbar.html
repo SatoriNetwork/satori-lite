@@ -170,19 +170,6 @@
             </button>
             <ul class="dropdown-menu dropdown-menu-end satori-dropdown" style="min-width: 230px;">
                 <li>
-                    {% if request.endpoint == 'dashboard' %}
-                    <a class="dropdown-item satori-dd-item" href="#"
-                       onclick="openImportWalletModal(); return false;">
-                        <i class="material-icons">upload_file</i>Import Wallet
-                    </a>
-                    {% else %}
-                    <a class="dropdown-item satori-dd-item"
-                       href="{{ url_for('dashboard') }}">
-                        <i class="material-icons">upload_file</i>Import Wallet
-                    </a>
-                    {% endif %}
-                </li>
-                <li>
                     <a class="dropdown-item satori-dd-item" href="/api/wallet/download">
                         <i class="material-icons">download</i>Download Wallet
                     </a>

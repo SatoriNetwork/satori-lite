@@ -184,6 +184,9 @@
             margin: 0 auto;
             overflow-x: auto;
             scrollbar-width: none;
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-x: contain;
         }
         .satori-nav-pill::-webkit-scrollbar { display: none; }
         [data-theme="light"] .satori-nav-pill {
@@ -360,10 +363,10 @@
             padding: 0 14px;
             height: 58px;
             position: relative;
-            z-index: 5;
+            z-index: 1050;
+            isolation: isolate;
             margin: 12px 12px 0;
             border-radius: 20px;
-            isolation: isolate;
             overflow: visible;
             background:
                 linear-gradient(
@@ -471,7 +474,11 @@
         @media (prefers-reduced-motion: reduce) {
             html.glass-nav .satori-navbar::after { animation: none; opacity: 0; }
         }
-        html.glass-nav .satori-navbar > * { position: relative; z-index: 2; }
+        html.glass-nav .satori-navbar > * {
+            position: relative;
+            z-index: 2;
+            transform: translateZ(0);
+        }
 
         /* Logo glow (glass only) */
         html.glass-nav .satori-brand { padding: 0 0.15rem; }
@@ -824,6 +831,12 @@
             box-shadow: var(--shadow);
             min-width: 160px;
             animation: sgn-dd-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 2000 !important;
+        }
+        /* When a navbar dropdown is open, lift the whole navbar above
+           any page-level stacking contexts so the menu paints on top. */
+        .satori-navbar:has(.dropdown-menu.show) {
+            z-index: 2000 !important;
         }
         @keyframes sgn-dd-in {
             from { opacity: 0; translate: 0 -6px; }
@@ -1255,14 +1268,54 @@
                 max-width: none;
                 flex: 1;
                 min-width: 0;
+                scroll-snap-type: x proximity;
             }
             .satori-util-group { margin-left: 0; order: 3; }
-            /* Icon-only nav items on mobile to fit in one row */
+            /* Icon-only nav items on mobile — exactly 3 fit; rest scroll smoothly */
             .snp-item span { display: none; }
-            .snp-item { padding: 0.3rem 0.5rem; flex: none; }
+            .snp-item {
+                padding: 0.3rem 0.5rem;
+                flex: 0 0 calc((100% - 6px) / 3);
+                scroll-snap-align: start;
+            }
             /* Swap desktop util buttons for single overflow menu */
             .util-desktop-only { display: none !important; }
             .util-mobile-menu { display: flex; }
+
+            /* Mobile dropdown: solid background + compact training panel */
+            html .util-mobile-menu .dropdown-menu,
+            html.glass-nav .util-mobile-menu .dropdown-menu,
+            html.glass-nav .util-mobile-menu .dropdown-menu.satori-dropdown,
+            html.glass-nav .util-mobile-menu .satori-dropdown.training-menu {
+                max-height: 80vh;
+                overflow-y: auto;
+                background: #0f0f14 !important;
+                background-image: none !important;
+                -webkit-backdrop-filter: none !important;
+                backdrop-filter: none !important;
+                border: 1px solid rgba(255, 255, 255, 0.12) !important;
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65) !important;
+            }
+            html[data-theme="light"] .util-mobile-menu .dropdown-menu,
+            html.glass-nav[data-theme="light"] .util-mobile-menu .dropdown-menu {
+                background: #ffffff !important;
+                background-image: none !important;
+                border: 1px solid rgba(0, 0, 0, 0.12) !important;
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18) !important;
+            }
+            .util-mobile-menu .tf-panel {
+                padding: 0.6rem 0.75rem 0.5rem !important;
+            }
+            .util-mobile-menu .tf-readout {
+                padding: 0.1rem 0 0.4rem !important;
+                gap: 0.3rem !important;
+            }
+            .util-mobile-menu .tf-readout-value {
+                font-size: 1rem !important;
+            }
+            .util-mobile-menu .tf-readout-cap {
+                font-size: 0.6rem !important;
+            }
         }
         /* Navbar responsive — glass */
         @media (max-width: 991.98px) {
