@@ -4,9 +4,50 @@
 {% block content %}
 {% include "partials/navbar.html" %}
 
+<style>
+.cmp-tabs {
+  display: inline-flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.cmp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.cmp-tab i.material-icons { font-size: 14px; opacity: 0.8; }
+.cmp-tab:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+[data-theme="light"] .cmp-tab:hover { background: rgba(0,0,0,0.05); }
+.cmp-tab.is-active {
+  background: var(--accent-primary);
+  color: #fff;
+  box-shadow: 0 1px 6px rgba(90,90,255,0.3);
+}
+.cmp-tab.is-active i { opacity: 1; }
+@media (max-width: 600px) {
+  .cmp-tab span.tab-label { display: none; }
+  .cmp-tab { padding: 0.35rem 0.55rem; }
+}
+</style>
+
 <div class="container-fluid py-4" style="max-width: 960px;">
 
-  <div class="d-flex align-items-center justify-content-between mb-4">
+  <div class="d-flex align-items-end justify-content-between mb-3 gap-3 flex-wrap">
     <div>
       <h4 class="mb-1">Prediction Competitions</h4>
       <p class="text-muted small mb-0">
@@ -17,34 +58,26 @@
 
   <div id="alertArea"></div>
 
-  <!-- Tabs -->
-  <ul class="nav nav-tabs mb-4" id="competitionTabs">
-    <li class="nav-item">
-      <button class="nav-link active" id="browseTab" onclick="showTab('browse')">
-        <i class="material-icons align-middle" style="font-size:16px;">search</i>
-        Browse
-      </button>
-    </li>
-    <li class="nav-item">
-      <button class="nav-link" id="mineTab" onclick="showTab('mine')">
-        <i class="material-icons align-middle" style="font-size:16px;">emoji_events</i>
-        My Competitions
-      </button>
-    </li>
-    <li class="nav-item">
-      <button class="nav-link" id="leaderboardTab" onclick="showTab('leaderboard')">
-        <i class="material-icons align-middle" style="font-size:16px;">leaderboard</i>
-        Leaderboard
-      </button>
-    </li>
-    <li class="nav-item">
-      <button class="nav-link" id="accessTab" onclick="showTab('access')">
-        <i class="material-icons align-middle" style="font-size:16px;">lock_open</i>
-        Access Requests
-        <span class="badge bg-warning text-dark ms-1" id="pendingBadge" style="display:none;">0</span>
-      </button>
-    </li>
-  </ul>
+  <!-- Segmented tabs -->
+  <div class="cmp-tabs" role="tablist">
+    <button class="cmp-tab is-active" id="browseTab" onclick="showTab('browse')" role="tab">
+      <i class="material-icons">search</i>
+      <span class="tab-label">Browse</span>
+    </button>
+    <button class="cmp-tab" id="mineTab" onclick="showTab('mine')" role="tab">
+      <i class="material-icons">emoji_events</i>
+      <span class="tab-label">My Competitions</span>
+    </button>
+    <button class="cmp-tab" id="leaderboardTab" onclick="showTab('leaderboard')" role="tab">
+      <i class="material-icons">leaderboard</i>
+      <span class="tab-label">Leaderboard</span>
+    </button>
+    <button class="cmp-tab" id="accessTab" onclick="showTab('access')" role="tab">
+      <i class="material-icons">lock_open</i>
+      <span class="tab-label">Access Requests</span>
+      <span class="badge bg-warning text-dark ms-1" id="pendingBadge" style="display:none;">0</span>
+    </button>
+  </div>
 
   <!-- ── Browse Tab ───────────────────────────────────────────── -->
   <div id="browsePanel">
@@ -310,14 +343,10 @@
 <script>
 // ── Tab switching ─────────────────────────────────────────────
 function showTab(tab) {
-  document.getElementById('browsePanel').style.display      = tab === 'browse'      ? '' : 'none';
-  document.getElementById('minePanel').style.display        = tab === 'mine'        ? '' : 'none';
-  document.getElementById('leaderboardPanel').style.display = tab === 'leaderboard' ? '' : 'none';
-  document.getElementById('accessPanel').style.display      = tab === 'access'      ? '' : 'none';
-  document.getElementById('browseTab').classList.toggle('active', tab === 'browse');
-  document.getElementById('mineTab').classList.toggle('active', tab === 'mine');
-  document.getElementById('leaderboardTab').classList.toggle('active', tab === 'leaderboard');
-  document.getElementById('accessTab').classList.toggle('active', tab === 'access');
+  ['browse', 'mine', 'leaderboard', 'access'].forEach(t => {
+    document.getElementById(t + 'Panel').style.display = tab === t ? '' : 'none';
+    document.getElementById(t + 'Tab').classList.toggle('is-active', tab === t);
+  });
   if (tab === 'browse') loadBrowse();
   if (tab === 'mine')   loadMine();
   if (tab === 'access') { loadPendingRequests(); loadApprovedStreamList(); }
