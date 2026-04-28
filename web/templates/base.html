@@ -171,6 +171,16 @@
         }
 
         /* Primary nav — segmented pill */
+        /* Wrapper provides positioning context for scroll zones; pill lives inside */
+        .snp-scroll-wrap {
+            flex: 1;
+            min-width: 0;
+            position: relative;
+            display: flex;
+            align-items: stretch;
+            max-width: 720px;
+            margin: 0 auto;
+        }
         .satori-nav-pill {
             display: flex;
             align-items: center;
@@ -180,8 +190,6 @@
             padding: 3px;
             gap: 1px;
             flex: 1;
-            max-width: 720px;
-            margin: 0 auto;
             overflow-x: auto;
             scrollbar-width: none;
             scroll-behavior: smooth;
@@ -215,7 +223,7 @@
             .snp-item span { display: none; }
             .snp-item { padding: 0.36rem 0.55rem; }
             .snp-item i.material-icons { font-size: 16px; }
-            .satori-nav-pill { max-width: 380px; }
+            .snp-scroll-wrap { max-width: 380px; }
         }
         .snp-item:hover {
             background: rgba(255,255,255,0.07);
@@ -230,6 +238,60 @@
             box-shadow: 0 1px 8px rgba(90,90,255,0.3);
         }
         .snp-item.snp-active i { opacity: 1; }
+
+        /* ── Scroll zones: fixed overlays on wrapper edges, outside the scrollable pill ── */
+        .snp-scroll-zone {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 52px;
+            display: flex;
+            align-items: center;
+            z-index: 5;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+        .snp-scroll-zone.snp-visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .snp-scroll-zone i.material-icons {
+            font-size: 18px;
+            color: var(--text-secondary);
+            transition: color 0.15s ease, transform 0.15s ease;
+        }
+        .snp-scroll-zone:hover i.material-icons { color: var(--text-primary); }
+        .snp-scroll-left {
+            left: 0;
+            justify-content: flex-start;
+            padding-left: 4px;
+            background: linear-gradient(90deg, var(--bg-secondary) 25%, transparent 100%);
+            border-radius: 10px 0 0 10px;
+            cursor: w-resize;
+        }
+        .snp-scroll-right {
+            right: 0;
+            justify-content: flex-end;
+            padding-right: 4px;
+            background: linear-gradient(270deg, var(--bg-secondary) 25%, transparent 100%);
+            border-radius: 0 10px 10px 0;
+            cursor: e-resize;
+        }
+        .snp-scroll-left.snp-scroll-active i.material-icons {
+            animation: snp-nudge-left 0.55s ease-in-out infinite;
+        }
+        .snp-scroll-right.snp-scroll-active i.material-icons {
+            animation: snp-nudge-right 0.55s ease-in-out infinite;
+        }
+        @keyframes snp-nudge-left {
+            0%, 100% { transform: translateX(0); }
+            50% { transform: translateX(-3px); }
+        }
+        @keyframes snp-nudge-right {
+            0%, 100% { transform: translateX(0); }
+            50% { transform: translateX(3px); }
+        }
 
         /* Utility group */
         .satori-util-group {
@@ -513,12 +575,11 @@
         }
 
         /* Inset glass capsule for the primary nav */
+        html.glass-nav .snp-scroll-wrap { max-width: 760px; }
         html.glass-nav .satori-nav-pill {
             padding: 4px;
             gap: 2px;
-            max-width: 760px;
             border-radius: 999px;
-            position: relative;
             background:
                 linear-gradient(180deg, rgba(0,0,0,0.22), rgba(0,0,0,0.08)),
                 rgba(255,255,255,0.015);
@@ -620,6 +681,28 @@
             0%   { transform: scale(0.82); opacity: 0; }
             60%  { transform: scale(1.04); opacity: 1; }
             100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Scroll zones — glass-nav overrides: pill-radius + frosted color */
+        html.glass-nav .snp-scroll-left {
+            background: linear-gradient(90deg, rgba(22,22,28,0.97) 25%, transparent 100%);
+            border-radius: 999px 0 0 999px;
+        }
+        html.glass-nav .snp-scroll-right {
+            background: linear-gradient(270deg, rgba(22,22,28,0.97) 25%, transparent 100%);
+            border-radius: 0 999px 999px 0;
+        }
+        html.glass-nav[data-theme="light"] .snp-scroll-left {
+            background: linear-gradient(90deg, rgba(248,248,255,0.97) 25%, transparent 100%);
+        }
+        html.glass-nav[data-theme="light"] .snp-scroll-right {
+            background: linear-gradient(270deg, rgba(248,248,255,0.97) 25%, transparent 100%);
+        }
+        html.glass-nav .snp-scroll-zone i.material-icons {
+            filter: drop-shadow(0 0 4px rgba(0,0,0,0.5));
+        }
+        html.glass-nav[data-theme="light"] .snp-scroll-zone i.material-icons {
+            filter: drop-shadow(0 0 4px rgba(0,0,0,0.15));
         }
 
         /* Utility buttons become glass chips */
@@ -1235,7 +1318,7 @@
                 padding: 0.5rem 1rem;
                 gap: 0.4rem;
             }
-            .satori-nav-pill {
+            .snp-scroll-wrap {
                 order: 10;
                 width: 100%;
                 max-width: 100%;
@@ -1262,14 +1345,15 @@
             }
             /* Pull nav pill back into the single row, between brand and utils */
             .satori-navbar { flex-wrap: nowrap; }
-            .satori-nav-pill {
+            .snp-scroll-wrap {
                 order: 0;
                 width: auto;
                 max-width: none;
                 flex: 1;
                 min-width: 0;
-                scroll-snap-type: x proximity;
             }
+            .satori-nav-pill { scroll-snap-type: x proximity; }
+            .snp-scroll-zone { display: none; }
             .satori-util-group { margin-left: 0; order: 3; }
             /* Icon-only nav items on mobile — exactly 3 fit; rest scroll smoothly */
             .snp-item span { display: none; }

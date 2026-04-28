@@ -20,47 +20,55 @@
     </div>
 
     <!-- ── Primary navigation (segmented pill) ────────────── -->
-    <div class="satori-nav-pill">
-        <a href="{{ url_for('dashboard') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'dashboard' else '' }}">
-            <i class="material-icons">dashboard</i>
-            <span>Dashboard</span>
-        </a>
-        <a href="{{ url_for('local_predictions') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'local_predictions' else '' }}">
-            <i class="material-icons">timeline</i>
-            <span>Predictions</span>
-        </a>
-        <a href="{{ url_for('stake_management') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'stake_management' else '' }}">
-            <i class="material-icons">handshake</i>
-            <span>Stake</span>
-        </a>
-        <a href="{{ url_for('p2p_page') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'p2p_page' else '' }}">
-            <i class="material-icons">hub</i>
-            <span>Pub/Sub</span>
-        </a>
-        <a href="{{ url_for('marketplace_page') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'marketplace_page' else '' }}">
-            <i class="material-icons">storefront</i>
-            <span>Marketplace</span>
-        </a>
-        <a href="{{ url_for('channels_page') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'channels_page' else '' }}">
-            <i class="material-icons">toll</i>
-            <span>Channels</span>
-        </a>
-        <a href="{{ url_for('competitions_page') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'competitions_page' else '' }}">
-            <i class="material-icons">emoji_events</i>
-            <span>Competitions</span>
-        </a>
-        <a href="{{ url_for('relay_settings') }}"
-           class="snp-item {{ 'snp-active' if request.endpoint == 'relay_settings' else '' }}">
-            <i class="material-icons">settings</i>
-            <span>Settings</span>
-        </a>
+    <div class="snp-scroll-wrap">
+        <div class="snp-scroll-zone snp-scroll-left" aria-hidden="true">
+            <i class="material-icons">chevron_left</i>
+        </div>
+        <div class="satori-nav-pill">
+            <a href="{{ url_for('dashboard') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'dashboard' else '' }}">
+                <i class="material-icons">dashboard</i>
+                <span>Dashboard</span>
+            </a>
+            <a href="{{ url_for('local_predictions') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'local_predictions' else '' }}">
+                <i class="material-icons">timeline</i>
+                <span>Predictions</span>
+            </a>
+            <a href="{{ url_for('stake_management') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'stake_management' else '' }}">
+                <i class="material-icons">handshake</i>
+                <span>Stake</span>
+            </a>
+            <a href="{{ url_for('p2p_page') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'p2p_page' else '' }}">
+                <i class="material-icons">hub</i>
+                <span>Pub/Sub</span>
+            </a>
+            <a href="{{ url_for('marketplace_page') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'marketplace_page' else '' }}">
+                <i class="material-icons">storefront</i>
+                <span>Marketplace</span>
+            </a>
+            <a href="{{ url_for('competitions_page') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'competitions_page' else '' }}">
+                <i class="material-icons">emoji_events</i>
+                <span>Competitions</span>
+            </a>
+            <a href="{{ url_for('channels_page') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'channels_page' else '' }}">
+                <i class="material-icons">toll</i>
+                <span>Channels</span>
+            </a>
+            <a href="{{ url_for('relay_settings') }}"
+               class="snp-item {{ 'snp-active' if request.endpoint == 'relay_settings' else '' }}">
+                <i class="material-icons">settings</i>
+                <span>Settings</span>
+            </a>
+        </div>
+        <div class="snp-scroll-zone snp-scroll-right" aria-hidden="true">
+            <i class="material-icons">chevron_right</i>
+        </div>
     </div>
 
     <!-- ── Utility actions (right cluster) ───────────────── -->
@@ -307,6 +315,62 @@
             activeItem.scrollIntoView({ block: 'nearest', inline: 'center' });
         }
     });
+
+    /* ─── Nav pill edge-hover scroll zones ─────────────────────
+       Shows left/right chevron zones when the pill can scroll in
+       that direction; hovering scrolls the pill continuously.    */
+    (function () {
+        const pill = document.querySelector('.satori-nav-pill');
+        const leftZone = document.querySelector('.snp-scroll-left');
+        const rightZone = document.querySelector('.snp-scroll-right');
+        if (!pill || !leftZone || !rightZone) return;
+
+        let scrollDir = 0;
+        let rafId = null;
+        const SPEED = 30;
+
+        function updateZones() {
+            const atStart = pill.scrollLeft <= 2;
+            const atEnd = pill.scrollLeft >= pill.scrollWidth - pill.clientWidth - 2;
+            leftZone.classList.toggle('snp-visible', !atStart);
+            rightZone.classList.toggle('snp-visible', !atEnd);
+        }
+
+        function step() {
+            if (scrollDir === 0) { rafId = null; return; }
+            pill.scrollLeft += scrollDir * SPEED;
+            updateZones();
+            rafId = requestAnimationFrame(step);
+        }
+
+        function startScroll(dir) {
+            scrollDir = dir;
+            if (!rafId) rafId = requestAnimationFrame(step);
+        }
+
+        function stopScroll() { scrollDir = 0; }
+
+        leftZone.addEventListener('mouseenter', () => {
+            startScroll(-1);
+            leftZone.classList.add('snp-scroll-active');
+        });
+        leftZone.addEventListener('mouseleave', () => {
+            stopScroll();
+            leftZone.classList.remove('snp-scroll-active');
+        });
+        rightZone.addEventListener('mouseenter', () => {
+            startScroll(1);
+            rightZone.classList.add('snp-scroll-active');
+        });
+        rightZone.addEventListener('mouseleave', () => {
+            stopScroll();
+            rightZone.classList.remove('snp-scroll-active');
+        });
+
+        pill.addEventListener('scroll', updateZones, { passive: true });
+        window.addEventListener('resize', updateZones);
+        updateZones();
+    })();
 
     /* ─── Liquid-glass cursor tracking ────────────────────────
        Only runs when html.glass-nav is set. The capability-detect
