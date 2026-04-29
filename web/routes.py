@@ -2413,12 +2413,19 @@ def register_routes(app):
         missing = [f for f in required if f not in data]
         if missing:
             return jsonify({'error': f'Missing: {", ".join(missing)}'}), 400
+        import math
+        try:
+            predicted_value = float(data['predicted_value'])
+        except (ValueError, TypeError):
+            return jsonify({'error': 'predicted_value must be numeric'}), 400
+        if not math.isfinite(predicted_value):
+            return jsonify({'error': 'predicted_value must be finite'}), 400
         startup.submitPredictionSync(
             stream_name=data['stream_name'],
             stream_provider_pubkey=data['stream_provider_pubkey'],
             host_pubkey=data['host_pubkey'],
             seq_num=int(data['seq_num']),
-            predicted_value=float(data['predicted_value']),
+            predicted_value=predicted_value,
         )
         return jsonify({'success': True, 'seq_num': data['seq_num']})
 
