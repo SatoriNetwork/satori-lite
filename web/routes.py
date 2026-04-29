@@ -3104,6 +3104,8 @@ def register_routes(app):
             competing = int(data['competing_predictors'])
         except (ValueError, TypeError):
             return jsonify({'error': 'invalid number fields'}), 400
+        if pay <= 0:
+            return jsonify({'error': 'pay_per_obs_sats must be positive'}), 400
         import json as _json
         startup.networkDB.add_competition(
             stream_name=data['stream_name'],
