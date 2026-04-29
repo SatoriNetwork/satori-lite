@@ -55,6 +55,10 @@ def score(payload: dict) -> dict:
         predictions,
         key=lambda p: abs(float(p['predicted_value']) - observed),
     )
+    # Cap paid slots to budget so we never pay more people than we have
+    # sats for — avoids integer truncation zeroing out top predictors
+    # and handing the remainder to the worst-ranked recipient.
+    n_paid = min(n_paid, budget)
     top = ranked[:n_paid]
 
     if not top:
@@ -70,13 +74,16 @@ def score(payload: dict) -> dict:
     payouts = {}
     allocated = 0
     for i, (p, w) in enumerate(zip(top, weights)):
-        if i == len(top) - 1:
-            # Last recipient gets remainder to avoid rounding loss
-            sats = budget - allocated
-        else:
-            sats = int(budget * w / total_weight)
+        if i == 0:
+            # Best predictor gets remainder to avoid rounding loss
+            continue
+        sats = int(budget * w / total_weight)
         if sats > 0:
             payouts[p['predictor_pubkey']] = sats
         allocated += sats
+    # Assign remainder to the best predictor (index 0)
+    remainder = budget - allocated
+    if remainder > 0:
+        payouts[top[0]['predictor_pubkey']] = remainder
 
     return payouts
