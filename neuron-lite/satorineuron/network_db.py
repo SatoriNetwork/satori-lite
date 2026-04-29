@@ -353,12 +353,21 @@ class NetworkDB:
                 predictor_pubkey        TEXT NOT NULL,
                 seq_num                 INTEGER NOT NULL,
                 sats_paid               INTEGER NOT NULL,
-                paid_at                 INTEGER NOT NULL
+                paid_at                 INTEGER NOT NULL,
+                UNIQUE(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
             )
         """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_comp_pay_stream
             ON competition_payments(stream_name, stream_provider_pubkey)
+        """)
+        # Migration: add UNIQUE constraint for existing databases.
+        # SQLite can't ALTER a constraint, so we create a unique index
+        # that enforces the same rule on tables already created without it.
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_comp_pay_dedup
+            ON competition_payments(stream_name, stream_provider_pubkey,
+                                    predictor_pubkey, seq_num)
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS joined_competitions (
@@ -1293,7 +1302,7 @@ class NetworkDB:
         """Record a successful payment to a predictor after scoring."""
         conn = self._get_conn()
         conn.execute("""
-            INSERT INTO competition_payments
+            INSERT OR IGNORE INTO competition_payments
                 (stream_name, stream_provider_pubkey, predictor_pubkey,
                  seq_num, sats_paid, paid_at)
             VALUES (?, ?, ?, ?, ?, ?)
