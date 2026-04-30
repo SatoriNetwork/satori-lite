@@ -43,6 +43,140 @@
   .cmp-tab span.tab-label { display: none; }
   .cmp-tab { padding: 0.35rem 0.55rem; }
 }
+
+/* ── Shared modal skin (mirrors channels.html ch-modal) ──────── */
+.cmp-modal .modal-dialog {
+  max-width: 480px;
+  margin: 1.75rem auto;
+  padding: 0 0.75rem;
+}
+.cmp-modal .modal-content {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 60px -12px rgba(0, 0, 0, 0.55),
+    0 4px 12px -4px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  position: relative;
+  animation: cmp-modal-in 0.32s cubic-bezier(.2,.85,.2,1) both;
+}
+.cmp-modal .modal-content::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--accent-primary, #5a5aff);
+  box-shadow: 0 0 12px rgba(90, 90, 255, 0.4);
+}
+@keyframes cmp-modal-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+.cmp-modal .modal-header {
+  padding: 0.85rem 1.2rem 0.75rem 1.3rem;
+  border-bottom: 1px dashed var(--border-color);
+  background: transparent;
+}
+.cmp-modal .modal-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.cmp-modal .modal-title::before {
+  content: '';
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent-primary, #5a5aff);
+  box-shadow: 0 0 6px rgba(90, 90, 255, 0.7);
+  animation: cmp-modal-pulse 1.5s ease-in-out infinite;
+}
+@keyframes cmp-modal-pulse {
+  0%, 100% { transform: scale(1);    opacity: 1; }
+  50%       { transform: scale(1.35); opacity: 0.55; }
+}
+.cmp-modal .btn-close {
+  background: none;
+  border: 0;
+  padding: 2px 8px;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  opacity: 1;
+  filter: none;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background .15s ease, color .15s ease;
+}
+.cmp-modal .btn-close:hover { background: var(--bg-input); color: var(--text-primary); }
+.cmp-modal .btn-close:focus { box-shadow: none; outline: 1px solid var(--accent-primary, #5a5aff); outline-offset: 1px; }
+.cmp-modal .modal-body {
+  padding: 1.1rem 1.25rem 1rem 1.35rem;
+}
+.cmp-modal .modal-footer {
+  display: flex;
+  gap: 0.55rem;
+  padding: 0.85rem 1.25rem 1rem 1.35rem;
+  border-top: 1px dashed var(--border-color);
+  background: transparent;
+}
+.cmp-field { margin-bottom: 0.95rem; }
+.cmp-field:last-child { margin-bottom: 0; }
+.cmp-modal .form-label {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+.cmp-modal .form-control,
+.cmp-modal .form-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 9px;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.cmp-modal .form-control::placeholder { color: var(--text-muted); opacity: 0.55; font-weight: 400; }
+.cmp-modal .form-control:focus,
+.cmp-modal .form-select:focus {
+  background: var(--bg-input);
+  border-color: var(--accent-primary, #5a5aff);
+  box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.18);
+  color: var(--text-primary);
+  outline: none;
+}
+.cmp-modal .form-select option { background: var(--bg-card); color: var(--text-primary); }
+.cmp-modal .form-text {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 0.4rem;
+  line-height: 1.45;
+}
+.cmp-modal-error {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  padding: 0.55rem 0.75rem;
+  margin: 0.6rem 0 0;
+  background: rgba(220, 53, 69, 0.1);
+  border-left: 2px solid #dc3545;
+  border-radius: 0 6px 6px 0;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.cmp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 </style>
 
 <div class="container-fluid py-4" style="max-width: 960px;">
@@ -287,15 +421,15 @@
 </div>
 
 <!-- ── New Competition Modal ──────────────────────────────────── -->
-<div class="modal fade" id="newCompetitionModal" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content" style="background:var(--bg-card);border:1px solid var(--border-color);">
-      <div class="modal-header" style="border-color:var(--border-color);">
+<div class="modal fade cmp-modal" id="newCompetitionModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
         <h5 class="modal-title">New Competition</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="mb-3">
+        <div class="cmp-field">
           <label class="form-label">Stream</label>
           <select class="form-select" id="nc_stream_select">
             <option value="">— loading subscribed streams… —</option>
@@ -303,38 +437,40 @@
           <input type="hidden" id="nc_stream_name">
           <input type="hidden" id="nc_provider_pubkey">
         </div>
-        <div class="mb-3">
+        <div class="cmp-field">
           <label class="form-label">Total Pay per Observation (sats)</label>
           <input type="number" class="form-control" id="nc_pay" min="1" placeholder="100">
           <div class="form-text">Total sats paid out each time the stream ticks, distributed however you choose.</div>
         </div>
-        <div class="row g-3 mb-3">
-          <div class="col">
+        <div class="cmp-row cmp-field">
+          <div>
             <label class="form-label">Predictors to Pay</label>
             <input type="number" class="form-control" id="nc_paid" min="1" placeholder="3">
-            <div class="form-text">Intent — how many you plan to pay per observation.</div>
+            <div class="form-text">How many you plan to pay per observation.</div>
           </div>
-          <div class="col">
+          <div>
             <label class="form-label">Channels to Open</label>
             <input type="number" class="form-control" id="nc_competing" min="1" placeholder="5">
-            <div class="form-text">Intent — how many channels you plan to maintain.</div>
+            <div class="form-text">How many channels you plan to maintain.</div>
           </div>
         </div>
-        <div class="mb-3">
+        <div class="cmp-field">
           <label class="form-label">Scoring Module</label>
           <input type="text" class="form-control" id="nc_scoring" placeholder="mae" value="mae">
           <div class="form-text">Filename (without .py) from the scoring/ folder.</div>
         </div>
-        <div class="mb-3">
+        <div class="cmp-field">
           <label class="form-label">Prediction Horizon</label>
           <input type="number" class="form-control" id="nc_horizon" min="1" value="1">
           <div class="form-text">How many steps ahead predictors are predicting (usually 1).</div>
         </div>
         <div id="newCompModal_alert"></div>
       </div>
-      <div class="modal-footer" style="border-color:var(--border-color);">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="createCompetition()">Announce</button>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="createCompetition()">
+          <i class="material-icons align-middle" style="font-size:16px;">campaign</i>Announce
+        </button>
       </div>
     </div>
   </div>
@@ -362,8 +498,9 @@ function showAlert(msg, type='danger') {
 }
 
 function modalAlert(msg, type='danger') {
-  document.getElementById('newCompModal_alert').innerHTML =
-    `<div class="alert alert-${type} py-2 small">${msg}</div>`;
+  const el = document.getElementById('newCompModal_alert');
+  el.className = type === 'danger' ? 'cmp-modal-error' : 'alert alert-' + type + ' py-2 small';
+  el.textContent = msg;
 }
 
 // ── Helpers ───────────────────────────────────────────────────
