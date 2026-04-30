@@ -140,7 +140,7 @@
 }
 .cmp-modal .form-control,
 .cmp-modal .form-select {
-  background: var(--bg-input);
+  background-color: var(--bg-input);
   border: 1px solid var(--border-color);
   color: var(--text-primary);
   font-size: 0.9rem;
@@ -151,7 +151,7 @@
 .cmp-modal .form-control::placeholder { color: var(--text-muted); opacity: 0.55; font-weight: 400; }
 .cmp-modal .form-control:focus,
 .cmp-modal .form-select:focus {
-  background: var(--bg-input);
+  background-color: var(--bg-input);
   border-color: var(--accent-primary, #5a5aff);
   box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.18);
   color: var(--text-primary);
@@ -456,8 +456,10 @@
         </div>
         <div class="cmp-field">
           <label class="form-label">Scoring Module</label>
-          <input type="text" class="form-control" id="nc_scoring" placeholder="mae" value="mae">
-          <div class="form-text">Filename (without .py) from the scoring/ folder.</div>
+          <select class="form-select" id="nc_scoring">
+            <option value="">— loading… —</option>
+          </select>
+          <div class="form-text">Scoring algorithm used to rank and pay predictors.</div>
         </div>
         <div class="cmp-field">
           <label class="form-label">Prediction Horizon</label>
@@ -674,7 +676,32 @@ async function loadPublishedStreams() {
   }
 }
 
-document.getElementById('newCompetitionModal').addEventListener('show.bs.modal', loadPublishedStreams);
+async function loadScoringModules() {
+  const sel = document.getElementById('nc_scoring');
+  sel.innerHTML = '<option value="">— loading… —</option>';
+  try {
+    const resp = await fetch('/api/competition/scoring-modules');
+    const data = await resp.json();
+    const modules = data.modules || [];
+    sel.innerHTML = '';
+    modules.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.textContent = m;
+      sel.appendChild(opt);
+    });
+    if (modules.length === 0) {
+      sel.innerHTML = '<option value="">— no modules found —</option>';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="">— failed to load —</option>';
+  }
+}
+
+document.getElementById('newCompetitionModal').addEventListener('show.bs.modal', () => {
+  loadPublishedStreams();
+  loadScoringModules();
+});
 
 // ── Create competition ────────────────────────────────────────
 async function createCompetition() {

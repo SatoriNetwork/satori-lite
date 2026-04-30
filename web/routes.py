@@ -3084,6 +3084,20 @@ def register_routes(app):
 
     # ── Competition routes ────────────────────────────────────────────────────
 
+    @app.route('/api/competition/scoring-modules', methods=['GET'])
+    @login_required
+    def api_competition_scoring_modules():
+        """Return list of available scoring module names from the scoring/ dir."""
+        import os as _os
+        from satorineuron.competition_scoring import SCORING_DIR
+        try:
+            modules = sorted(
+                f[:-3] for f in _os.listdir(SCORING_DIR)
+                if f.endswith('.py') and not f.startswith('_'))
+        except FileNotFoundError:
+            modules = []
+        return jsonify({'modules': modules})
+
     @app.route('/api/competition', methods=['POST'])
     @login_required
     def api_competition_create():
