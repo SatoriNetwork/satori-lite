@@ -545,7 +545,10 @@ function renderBrowse(comps) {
         ${c.is_mine
           ? '<span class="badge bg-secondary">Your competition</span>'
           : c.joined
-            ? '<span class="badge bg-success">Joined</span>'
+            ? `<button class="btn btn-outline-danger btn-sm"
+                onclick="leaveCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
+                Leave
+               </button>`
             : `<button class="btn btn-outline-primary btn-sm"
                 onclick="joinCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
                 Join
@@ -574,6 +577,26 @@ async function joinCompetition(streamName, providerPubkey, hostPubkey) {
     loadBrowse();
   } catch(e) {
     showAlert('Failed to join: ' + e);
+  }
+}
+
+async function leaveCompetition(streamName, providerPubkey, hostPubkey) {
+  try {
+    const resp = await fetch('/api/competition/leave', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        stream_name: streamName,
+        stream_provider_pubkey: providerPubkey,
+        host_pubkey: hostPubkey,
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) { showAlert(data.error); return; }
+    showAlert('Left competition — your neuron will no longer submit predictions to this host.', 'success');
+    loadBrowse();
+  } catch(e) {
+    showAlert('Failed to leave: ' + e);
   }
 }
 

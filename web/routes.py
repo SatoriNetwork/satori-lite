@@ -3154,6 +3154,22 @@ def register_routes(app):
         startup.closeCompetitionSync(stream_name, provider_pubkey)
         return jsonify({'success': True})
 
+    @app.route('/api/competition/leave', methods=['POST'])
+    @login_required
+    def api_competition_leave():
+        """Leave a competition the neuron has joined as a predictor."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        provider_pubkey = data.get('stream_provider_pubkey', '').strip()
+        host_pubkey = data.get('host_pubkey', '').strip()
+        if not stream_name or not provider_pubkey or not host_pubkey:
+            return jsonify({'error': 'missing fields'}), 400
+        startup.networkDB.leave_competition(stream_name, provider_pubkey, host_pubkey)
+        return jsonify({'success': True})
+
     @app.route('/api/competitions/mine', methods=['GET'])
     @login_required
     def api_competitions_mine():
