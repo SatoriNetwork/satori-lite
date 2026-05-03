@@ -590,24 +590,20 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not derive eth_wallet_address: {e}")
 
-        # Get nostr pubkey and relay URL from startup instance
+        # Get nostr pubkey from startup instance
         nostr_pubkey = None
-        relay_url = None
         try:
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 nostr_pubkey = startup.nostrPubkey
-            if startup and hasattr(startup, 'server') and startup.server:
-                relay_url = getattr(startup.server, 'relayUrl', None)
         except Exception as e:
-            logger.warning(f"Could not get nostr/relay info: {e}")
+            logger.warning(f"Could not get nostr info: {e}")
 
         return render_template(
             'dashboard.html',
             version=VERSION,
             eth_wallet_address=eth_wallet_address,
             nostr_pubkey=nostr_pubkey,
-            relay_url=relay_url,
             page_mode='dashboard')
 
     @app.route('/p2p')
@@ -617,22 +613,18 @@ def register_routes(app):
         from satorineuron import VERSION
 
         nostr_pubkey = None
-        relay_url = None
         try:
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 nostr_pubkey = startup.nostrPubkey
-            if startup and hasattr(startup, 'server') and startup.server:
-                relay_url = getattr(startup.server, 'relayUrl', None)
         except Exception as e:
-            logger.warning(f"Could not get nostr/relay info: {e}")
+            logger.warning(f"Could not get nostr info: {e}")
 
         return render_template(
             'dashboard.html',
             version=VERSION,
             eth_wallet_address=None,
             nostr_pubkey=nostr_pubkey,
-            relay_url=relay_url,
             page_mode='p2p')
 
     @app.route('/marketplace')
@@ -2131,34 +2123,6 @@ def register_routes(app):
             logger.error(traceback.format_exc())
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/relay', methods=['POST'])
-    @login_required
-    def api_relay_register():
-        """Register relay URL with central server for NIP-11 verification."""
-        startup = get_startup()
-        if not startup or not hasattr(startup, 'server') or not startup.server:
-            return jsonify({'error': 'Server connection not initialized'}), 503
-
-        data = request.get_json()
-        if not data or 'relay_url' not in data:
-            return jsonify({'error': 'Missing relay_url'}), 400
-
-        relay_url = data['relay_url'].strip()
-        if not relay_url.startswith(('wss://', 'ws://')):
-            return jsonify({'error': 'Relay URL must start with wss:// or ws://'}), 400
-
-        try:
-            result = startup.server.registerRelay(relay_url)
-            if isinstance(result, requests.Response):
-                if result.status_code == 200:
-                    return jsonify(result.json())
-                else:
-                    return jsonify({'error': result.text}), result.status_code
-            return jsonify({'success': True, 'relay_url': relay_url})
-        except Exception as e:
-            logger.error(f"Relay registration error: {e}")
-            return jsonify({'error': str(e)}), 500
-
     @app.route('/api/settings/relay/status', methods=['GET'])
     @login_required
     def api_settings_relay_status():
@@ -3355,3 +3319,93 @@ def register_routes(app):
             return jsonify({'error': 'stream_name required'}), 400
         rows = startup.networkDB.get_approved_subscribers(stream_name)
         return jsonify({'subscribers': rows})
+
+    # ── Custom Relay Management ──────────────────────────────────
+
+    @app.route('/api/relays/custom', methods=['GET'])
+    @login_required
+    def api_custom_relays():
+        """Return user-added relay URLs."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        relays = startup.networkDB.get_user_added_relays()
+        return jsonify({'relays': relays})
+
+    @app.route('/api/relays/custom', methods=['POST'])
+    @login_required
+    def api_add_custom_relay():
+        """Add a custom relay URL."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json(force=True, silent=True) or {}
+        relay_url = (data.get('relay_url') or '').strip()
+        if not relay_url:
+            return jsonify({'error': 'relay_url required'}), 400
+        if not relay_url.startswith(('ws://', 'wss://')):
+            return jsonify({'error': 'relay_url must start with ws:// or wss://'}), 400
+        startup.networkDB.upsert_relay(relay_url, user_added=True)
+        return jsonify({'ok': True, 'relay_url': relay_url})
+
+    @app.route('/api/relays/custom', methods=['DELETE'])
+    @login_required
+    def api_delete_custom_relay():
+        """Remove a custom relay URL."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json(force=True, silent=True) or {}
+        relay_url = (data.get('relay_url') or '').strip()
+        if not relay_url:
+            return jsonify({'error': 'relay_url required'}), 400
+        startup.networkDB.delete_relay(relay_url)
+        return jsonify({'ok': True})
+
+    # ── Nostr-Evrmore Address Derivation ─────────────────────────
+
+    @app.route('/api/nostr/evr-address', methods=['GET'])
+    @login_required
+    def api_nostr_evr_address():
+        """Derive the Evrmore address for this node's Nostr pubkey."""
+        startup = get_startup()
+        if not startup or not getattr(startup, 'nostrPubkey', None):
+            return jsonify({'error': 'Not ready'}), 503
+        from satorineuron.common.nostr_evrmore import (
+            nostr_pubkey_to_evr_address)
+        address = nostr_pubkey_to_evr_address(startup.nostrPubkey)
+        return jsonify({
+            'nostr_pubkey': startup.nostrPubkey,
+            'evr_address': address,
+        })
+
+    @app.route('/api/nostr/normalize-key', methods=['POST'])
+    @login_required
+    def api_nostr_normalize_key():
+        """Normalize a Nostr private key for even-y Evrmore address derivation.
+
+        Takes a Nostr secret (hex or nsec) and returns the normalized key
+        that produces the even-y (0x02) compressed public key, ensuring the
+        Evrmore address matches the one derived from the Nostr pubkey.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        secret = (data.get('secret') or '').strip()
+        if not secret:
+            return jsonify({'error': 'secret required'}), 400
+        # Convert nsec to hex if needed
+        if secret.startswith('nsec'):
+            try:
+                from nostr_sdk import SecretKey
+                sk = SecretKey.parse(secret)
+                secret = sk.to_hex()
+            except Exception as e:
+                return jsonify({'error': f'Invalid nsec: {e}'}), 400
+        if len(secret) != 64:
+            return jsonify({'error': 'secret must be 64-char hex or nsec'}), 400
+        try:
+            from satorineuron.common.nostr_evrmore import (
+                normalize_nostr_secret)
+            result = normalize_nostr_secret(secret)
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400
