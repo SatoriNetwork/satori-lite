@@ -2226,7 +2226,7 @@ def register_routes(app):
     def api_network_subscribe():
         """Subscribe to a datastream.
 
-        When a `competition_host_pubkey` field is present, this is also a
+        When a `bounty_host_pubkey` field is present, this is also a
         "join competition" action — we persist the join, register the
         corresponding prediction publication, and the engine starts DM'ing
         predictions to that host on each observation.
@@ -2273,8 +2273,8 @@ def register_routes(app):
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
 
-        competition_host_pubkey = data.get('competition_host_pubkey')
-        if competition_host_pubkey:
+        bounty_host_pubkey = data.get('bounty_host_pubkey')
+        if bounty_host_pubkey:
             stream_name = data['stream_name']
             provider_pubkey = data['nostr_pubkey']
             # Persist the (stream, host) join so the engine knows where to
@@ -2282,7 +2282,7 @@ def register_routes(app):
             startup.networkDB.join_competition(
                 stream_name=stream_name,
                 stream_provider_pubkey=provider_pubkey,
-                host_pubkey=competition_host_pubkey)
+                host_pubkey=bounty_host_pubkey)
             # Mirror the /api/network/predict behaviour: register a _pred
             # publication so the prediction engine fires on new observations.
             pred_name = stream_name + '_pred'
@@ -2360,9 +2360,9 @@ def register_routes(app):
         startup.tombstonePublicationSync(pred_name)
         return jsonify({'success': True})
 
-    @app.route('/api/competition/submit-prediction', methods=['POST'])
+    @app.route('/api/bounty/submit-prediction', methods=['POST'])
     @login_required
-    def api_competition_submit_prediction():
+    def api_bounty_submit_prediction():
         """Submit a prediction to a competition host via Nostr DM (predictor side).
 
         Required fields: stream_name, stream_provider_pubkey, host_pubkey,
@@ -2393,9 +2393,9 @@ def register_routes(app):
         )
         return jsonify({'success': True, 'seq_num': data['seq_num']})
 
-    @app.route('/api/competition/simulate-observation', methods=['POST'])
+    @app.route('/api/bounty/simulate-observation', methods=['POST'])
     @login_required
-    def api_competition_simulate_observation():
+    def api_bounty_simulate_observation():
         """Simulate receiving an observation and trigger engine + DM prediction.
 
         For testing: injects an observation into the DB and runs the engine
@@ -2896,10 +2896,10 @@ def register_routes(app):
 
     @app.route('/bounties')
     @login_required
-    def competitions_page():
+    def bounties_page():
         """Prediction bounties page."""
         from satorineuron import VERSION
-        return render_template('competitions.html', version=VERSION)
+        return render_template('bounties.html', version=VERSION)
 
     @app.route('/api/channels')
     @login_required
@@ -3048,9 +3048,9 @@ def register_routes(app):
 
     # ── Competition routes ────────────────────────────────────────────────────
 
-    @app.route('/api/competition/scoring-modules', methods=['GET'])
+    @app.route('/api/bounty/scoring-modules', methods=['GET'])
     @login_required
-    def api_competition_scoring_modules():
+    def api_bounty_scoring_modules():
         """Return list of available scoring module names from the scoring/ dir."""
         import os as _os
         from satorineuron.competition_scoring import SCORING_DIR
@@ -3062,9 +3062,9 @@ def register_routes(app):
             modules = []
         return jsonify({'modules': modules})
 
-    @app.route('/api/competition', methods=['POST'])
+    @app.route('/api/bounty', methods=['POST'])
     @login_required
-    def api_competition_create():
+    def api_bounty_create():
         """Create and announce a prediction competition."""
         startup = get_startup()
         if not startup:
@@ -3101,9 +3101,9 @@ def register_routes(app):
         startup.announceCompetitionSync(data)
         return jsonify({'success': True})
 
-    @app.route('/api/competition/close', methods=['POST'])
+    @app.route('/api/bounty/close', methods=['POST'])
     @login_required
-    def api_competition_close():
+    def api_bounty_close():
         """Close an active competition."""
         startup = get_startup()
         if not startup:
@@ -3118,9 +3118,9 @@ def register_routes(app):
         startup.closeCompetitionSync(stream_name, provider_pubkey)
         return jsonify({'success': True})
 
-    @app.route('/api/competition/leave', methods=['POST'])
+    @app.route('/api/bounty/leave', methods=['POST'])
     @login_required
-    def api_competition_leave():
+    def api_bounty_leave():
         """Leave a competition the neuron has joined as a predictor."""
         startup = get_startup()
         if not startup:
@@ -3134,30 +3134,30 @@ def register_routes(app):
         startup.networkDB.leave_competition(stream_name, provider_pubkey, host_pubkey)
         return jsonify({'success': True})
 
-    @app.route('/api/competitions/mine', methods=['GET'])
+    @app.route('/api/bounties/mine', methods=['GET'])
     @login_required
-    def api_competitions_mine():
+    def api_bounties_mine():
         """Return competitions hosted by this neuron."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
         rows = startup.networkDB.get_competitions_hosted_by(startup.nostrPubkey)
-        return jsonify({'competitions': rows})
+        return jsonify({'bounties': rows})
 
-    @app.route('/api/competitions', methods=['GET'])
+    @app.route('/api/bounties', methods=['GET'])
     @login_required
-    def api_competitions_all():
+    def api_bounties_all():
         """Return all known competitions. Pass ?active=0 to include closed."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
         active_only = request.args.get('active', '1') == '1'
         rows = startup.networkDB.get_all_competitions(active_only=active_only)
-        return jsonify({'competitions': rows})
+        return jsonify({'bounties': rows})
 
-    @app.route('/api/competitions/discover', methods=['GET'])
+    @app.route('/api/bounties/discover', methods=['GET'])
     @login_required
-    def api_competitions_discover():
+    def api_bounties_discover():
         """Discover competitions from connected relays."""
         startup = get_startup()
         if not startup:
@@ -3172,11 +3172,11 @@ def register_routes(app):
             key = (c['stream_name'], c['stream_provider_pubkey'], c['host_pubkey'])
             c['is_mine'] = c['host_pubkey'] == my_pubkey
             c['joined'] = key in joined
-        return jsonify({'competitions': competitions, 'my_pubkey': my_pubkey})
+        return jsonify({'bounties': competitions, 'my_pubkey': my_pubkey})
 
-    @app.route('/api/competition/leaderboard', methods=['GET'])
+    @app.route('/api/bounty/leaderboard', methods=['GET'])
     @login_required
-    def api_competition_leaderboard():
+    def api_bounty_leaderboard():
         """Return per-predictor payment totals for a competition."""
         stream_name = request.args.get('stream_name')
         provider_pubkey = request.args.get('provider_pubkey')
@@ -3189,9 +3189,9 @@ def register_routes(app):
             stream_name, provider_pubkey)
         return jsonify(board)
 
-    @app.route('/api/competition/stats', methods=['GET'])
+    @app.route('/api/bounty/stats', methods=['GET'])
     @login_required
-    def api_competition_stats():
+    def api_bounty_stats():
         """Return payment consistency stats for a hosted competition."""
         stream_name = request.args.get('stream_name')
         provider_pubkey = request.args.get('provider_pubkey')
@@ -3207,7 +3207,7 @@ def register_routes(app):
         stats = startup.networkDB.get_host_payment_stats(
             stream_name, provider_pubkey, host_pubkey)
         if stats is None:
-            return jsonify({'error': 'Competition not found'}), 404
+            return jsonify({'error': 'Bounty not found'}), 404
         return jsonify(stats)
 
     # ── Access request routes (approval-gated streams) ───────────────────────
