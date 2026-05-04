@@ -2894,10 +2894,10 @@ def register_routes(app):
         from satorineuron import VERSION
         return render_template('channels.html', version=VERSION)
 
-    @app.route('/competitions')
+    @app.route('/bounties')
     @login_required
     def competitions_page():
-        """Prediction competitions page."""
+        """Prediction bounties page."""
         from satorineuron import VERSION
         return render_template('competitions.html', version=VERSION)
 

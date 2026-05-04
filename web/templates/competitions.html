@@ -5,7 +5,7 @@
 {% include "partials/navbar.html" %}
 
 <style>
-.cmp-tabs {
+.bnt-tabs {
   display: inline-flex;
   background: var(--bg-input);
   border: 1px solid var(--border-color);
@@ -15,7 +15,7 @@
   margin-bottom: 1.5rem;
   flex-wrap: wrap;
 }
-.cmp-tab {
+.bnt-tab {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -30,27 +30,27 @@
   transition: background 0.15s, color 0.15s;
   white-space: nowrap;
 }
-.cmp-tab i.material-icons { font-size: 14px; opacity: 0.8; }
-.cmp-tab:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
-[data-theme="light"] .cmp-tab:hover { background: rgba(0,0,0,0.05); }
-.cmp-tab.is-active {
+.bnt-tab i.material-icons { font-size: 14px; opacity: 0.8; }
+.bnt-tab:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+[data-theme="light"] .bnt-tab:hover { background: rgba(0,0,0,0.05); }
+.bnt-tab.is-active {
   background: var(--accent-primary);
   color: #fff;
   box-shadow: 0 1px 6px rgba(90,90,255,0.3);
 }
-.cmp-tab.is-active i { opacity: 1; }
+.bnt-tab.is-active i { opacity: 1; }
 @media (max-width: 600px) {
-  .cmp-tab span.tab-label { display: none; }
-  .cmp-tab { padding: 0.35rem 0.55rem; }
+  .bnt-tab span.tab-label { display: none; }
+  .bnt-tab { padding: 0.35rem 0.55rem; }
 }
 
 /* ── Shared modal skin (mirrors channels.html ch-modal) ──────── */
-.cmp-modal .modal-dialog {
+.bnt-modal .modal-dialog {
   max-width: 480px;
   margin: 1.75rem auto;
   padding: 0 0.75rem;
 }
-.cmp-modal .modal-content {
+.bnt-modal .modal-content {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 14px;
@@ -59,9 +59,9 @@
     0 4px 12px -4px rgba(0, 0, 0, 0.35);
   overflow: hidden;
   position: relative;
-  animation: cmp-modal-in 0.32s cubic-bezier(.2,.85,.2,1) both;
+  animation: bnt-modal-in 0.32s cubic-bezier(.2,.85,.2,1) both;
 }
-.cmp-modal .modal-content::before {
+.bnt-modal .modal-content::before {
   content: '';
   position: absolute;
   left: 0; top: 0; bottom: 0;
@@ -69,16 +69,16 @@
   background: var(--accent-primary, #5a5aff);
   box-shadow: 0 0 12px rgba(90, 90, 255, 0.4);
 }
-@keyframes cmp-modal-in {
+@keyframes bnt-modal-in {
   from { opacity: 0; transform: translateY(-8px) scale(0.985); }
   to   { opacity: 1; transform: translateY(0)    scale(1); }
 }
-.cmp-modal .modal-header {
+.bnt-modal .modal-header {
   padding: 0.85rem 1.2rem 0.75rem 1.3rem;
   border-bottom: 1px dashed var(--border-color);
   background: transparent;
 }
-.cmp-modal .modal-title {
+.bnt-modal .modal-title {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.68rem;
   font-weight: 700;
@@ -90,18 +90,18 @@
   align-items: center;
   gap: 0.6rem;
 }
-.cmp-modal .modal-title::before {
+.bnt-modal .modal-title::before {
   content: '';
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--accent-primary, #5a5aff);
   box-shadow: 0 0 6px rgba(90, 90, 255, 0.7);
-  animation: cmp-modal-pulse 1.5s ease-in-out infinite;
+  animation: bnt-modal-pulse 1.5s ease-in-out infinite;
 }
-@keyframes cmp-modal-pulse {
+@keyframes bnt-modal-pulse {
   0%, 100% { transform: scale(1);    opacity: 1; }
   50%       { transform: scale(1.35); opacity: 0.55; }
 }
-.cmp-modal .btn-close {
+.bnt-modal .btn-close {
   background: none;
   border: 0;
   padding: 2px 8px;
@@ -114,21 +114,21 @@
   border-radius: 6px;
   transition: background .15s ease, color .15s ease;
 }
-.cmp-modal .btn-close:hover { background: var(--bg-input); color: var(--text-primary); }
-.cmp-modal .btn-close:focus { box-shadow: none; outline: 1px solid var(--accent-primary, #5a5aff); outline-offset: 1px; }
-.cmp-modal .modal-body {
+.bnt-modal .btn-close:hover { background: var(--bg-input); color: var(--text-primary); }
+.bnt-modal .btn-close:focus { box-shadow: none; outline: 1px solid var(--accent-primary, #5a5aff); outline-offset: 1px; }
+.bnt-modal .modal-body {
   padding: 1.1rem 1.25rem 1rem 1.35rem;
 }
-.cmp-modal .modal-footer {
+.bnt-modal .modal-footer {
   display: flex;
   gap: 0.55rem;
   padding: 0.85rem 1.25rem 1rem 1.35rem;
   border-top: 1px dashed var(--border-color);
   background: transparent;
 }
-.cmp-field { margin-bottom: 0.95rem; }
-.cmp-field:last-child { margin-bottom: 0; }
-.cmp-modal .form-label {
+.bnt-field { margin-bottom: 0.95rem; }
+.bnt-field:last-child { margin-bottom: 0; }
+.bnt-modal .form-label {
   display: block;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.6rem;
@@ -138,8 +138,8 @@
   color: var(--text-muted);
   margin-bottom: 0.4rem;
 }
-.cmp-modal .form-control,
-.cmp-modal .form-select {
+.bnt-modal .form-control,
+.bnt-modal .form-select {
   background-color: var(--bg-input);
   border: 1px solid var(--border-color);
   color: var(--text-primary);
@@ -148,23 +148,23 @@
   border-radius: 9px;
   transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
-.cmp-modal .form-control::placeholder { color: var(--text-muted); opacity: 0.55; font-weight: 400; }
-.cmp-modal .form-control:focus,
-.cmp-modal .form-select:focus {
+.bnt-modal .form-control::placeholder { color: var(--text-muted); opacity: 0.55; font-weight: 400; }
+.bnt-modal .form-control:focus,
+.bnt-modal .form-select:focus {
   background-color: var(--bg-input);
   border-color: var(--accent-primary, #5a5aff);
   box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.18);
   color: var(--text-primary);
   outline: none;
 }
-.cmp-modal .form-select option { background: var(--bg-card); color: var(--text-primary); }
-.cmp-modal .form-text {
+.bnt-modal .form-select option { background: var(--bg-card); color: var(--text-primary); }
+.bnt-modal .form-text {
   font-size: 0.74rem;
   color: var(--text-muted);
   margin-top: 0.4rem;
   line-height: 1.45;
 }
-.cmp-modal-error {
+.bnt-modal-error {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem;
   color: var(--text-primary);
@@ -176,10 +176,10 @@
   word-break: break-word;
   white-space: pre-wrap;
 }
-.cmp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.bnt-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 
 /* ── Button system (mirrors set-btn from settings) ───────── */
-.cmp-btn {
+.bnt-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -195,50 +195,50 @@
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
   white-space: nowrap;
 }
-.cmp-btn:hover:not(:disabled) {
+.bnt-btn:hover:not(:disabled) {
   transform: translateY(-1px);
   border-color: var(--border-color-focus);
   background: var(--bg-input);
 }
-.cmp-btn:disabled { cursor: not-allowed; opacity: 0.45; }
-.cmp-btn .material-icons { font-size: 15px; }
-.cmp-btn-primary {
+.bnt-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+.bnt-btn .material-icons { font-size: 15px; }
+.bnt-btn-primary {
   background: var(--accent-gradient);
   border-color: transparent;
   color: #fff;
 }
-.cmp-btn-primary:hover:not(:disabled) {
+.bnt-btn-primary:hover:not(:disabled) {
   filter: brightness(1.08);
   background: var(--accent-gradient);
   transform: translateY(-1px);
 }
-.cmp-btn-ghost { background: transparent; }
-.cmp-btn-danger {
+.bnt-btn-ghost { background: transparent; }
+.bnt-btn-danger {
   color: #ff6b7a;
   border-color: rgba(220, 53, 69, 0.35);
   background: rgba(220, 53, 69, 0.06);
 }
-.cmp-btn-danger:hover:not(:disabled) {
+.bnt-btn-danger:hover:not(:disabled) {
   color: #ff3b50;
   border-color: rgba(220, 53, 69, 0.55);
   background: rgba(220, 53, 69, 0.1);
   transform: translateY(-1px);
 }
-.cmp-btn-success {
+.bnt-btn-success {
   color: #4ade80;
   border-color: rgba(34, 197, 94, 0.35);
   background: rgba(34, 197, 94, 0.06);
 }
-.cmp-btn-success:hover:not(:disabled) {
+.bnt-btn-success:hover:not(:disabled) {
   color: #22c55e;
   border-color: rgba(34, 197, 94, 0.55);
   background: rgba(34, 197, 94, 0.1);
   transform: translateY(-1px);
 }
-.cmp-btn-icon { padding: 0.38rem 0.45rem; }
+.bnt-btn-icon { padding: 0.38rem 0.45rem; }
 /* modal footer buttons */
-.cmp-modal .modal-footer .cmp-btn { flex: 1; }
-.cmp-modal .modal-footer .cmp-btn-primary { flex: 1.5; }
+.bnt-modal .modal-footer .bnt-btn { flex: 1; }
+.bnt-modal .modal-footer .bnt-btn-primary { flex: 1.5; }
 </style>
 
 <div class="container-fluid py-4" style="max-width: 960px;">
@@ -255,20 +255,20 @@
   <div id="alertArea"></div>
 
   <!-- Segmented tabs -->
-  <div class="cmp-tabs" role="tablist">
-    <button class="cmp-tab is-active" id="browseTab" onclick="showTab('browse')" role="tab">
+  <div class="bnt-tabs" role="tablist">
+    <button class="bnt-tab is-active" id="browseTab" onclick="showTab('browse')" role="tab">
       <i class="material-icons">search</i>
       <span class="tab-label">Browse</span>
     </button>
-    <button class="cmp-tab" id="mineTab" onclick="showTab('mine')" role="tab">
+    <button class="bnt-tab" id="mineTab" onclick="showTab('mine')" role="tab">
       <i class="material-icons">emoji_events</i>
       <span class="tab-label">My Bounties</span>
     </button>
-    <button class="cmp-tab" id="leaderboardTab" onclick="showTab('leaderboard')" role="tab">
+    <button class="bnt-tab" id="leaderboardTab" onclick="showTab('leaderboard')" role="tab">
       <i class="material-icons">leaderboard</i>
       <span class="tab-label">Leaderboard</span>
     </button>
-    <button class="cmp-tab" id="accessTab" onclick="showTab('access')" role="tab">
+    <button class="bnt-tab" id="accessTab" onclick="showTab('access')" role="tab">
       <i class="material-icons">lock_open</i>
       <span class="tab-label">Access Requests</span>
       <span class="badge bg-warning text-dark ms-1" id="pendingBadge" style="display:none;">0</span>
@@ -280,7 +280,7 @@
     <div class="card">
       <div class="card-header d-flex align-items-center justify-content-between">
         <span class="fw-600">Available Bounties <span class="badge bg-secondary ms-1" id="browseCount">0</span></span>
-        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadBrowse()">
+        <button class="bnt-btn bnt-btn-ghost bnt-btn-icon" onclick="loadBrowse()">
           <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
         </button>
       </div>
@@ -323,7 +323,7 @@
             <input type="text" class="form-control form-control-sm font-monospace" id="lb_provider" placeholder="Provider pubkey">
           </div>
           <div class="col-auto">
-            <button class="cmp-btn cmp-btn-primary" onclick="loadLeaderboard()">Load</button>
+            <button class="bnt-btn bnt-btn-primary" onclick="loadLeaderboard()">Load</button>
           </div>
         </div>
         <!-- Stats summary -->
@@ -349,10 +349,10 @@
     </div>
   </div>
 
-  <!-- ── My Competitions Tab ──────────────────────────────────── -->
+  <!-- ── My Bounties Tab ────────────────────────────────────────── -->
   <div id="minePanel" style="display:none;">
     <div class="d-flex justify-content-end mb-3">
-      <button class="cmp-btn cmp-btn-primary" data-bs-toggle="modal" data-bs-target="#newCompetitionModal">
+      <button class="bnt-btn bnt-btn-primary" data-bs-toggle="modal" data-bs-target="#newBountyModal">
         <i class="material-icons align-middle" style="font-size:16px;">add</i>
         New Bounty
       </button>
@@ -360,7 +360,7 @@
     <div class="card">
       <div class="card-header d-flex align-items-center justify-content-between">
         <span class="fw-600">Bounties I Host <span class="badge bg-secondary ms-1" id="mineCount">0</span></span>
-        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadMine()">
+        <button class="bnt-btn bnt-btn-ghost bnt-btn-icon" onclick="loadMine()">
           <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
         </button>
       </div>
@@ -394,7 +394,7 @@
     <div class="card mb-4">
       <div class="card-header d-flex align-items-center justify-content-between">
         <span class="fw-600">Pending Access Requests <span class="badge bg-warning text-dark ms-1" id="pendingCount">0</span></span>
-        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadPendingRequests()">
+        <button class="bnt-btn bnt-btn-ghost bnt-btn-icon" onclick="loadPendingRequests()">
           <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
         </button>
       </div>
@@ -426,7 +426,7 @@
           <select class="form-select form-select-sm" id="approvedStreamSelect" style="width:auto;" onchange="loadApproved()">
             <option value="">Select stream</option>
           </select>
-          <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadApproved()">
+          <button class="bnt-btn bnt-btn-ghost bnt-btn-icon" onclick="loadApproved()">
             <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
           </button>
         </div>
@@ -468,7 +468,7 @@
             <input type="text" class="form-control form-control-sm" id="ra_message" placeholder="Optional message to the producer">
           </div>
           <div class="col-auto">
-            <button class="cmp-btn cmp-btn-primary" onclick="requestAccess()">
+            <button class="bnt-btn bnt-btn-primary" onclick="requestAccess()">
               <i class="material-icons align-middle" style="font-size:14px;">lock_open</i>
               Request Access
             </button>
@@ -482,8 +482,8 @@
 
 </div>
 
-<!-- ── New Competition Modal ──────────────────────────────────── -->
-<div class="modal fade cmp-modal" id="newCompetitionModal" tabindex="-1">
+<!-- ── New Bounty Modal ──────────────────────────────────────── -->
+<div class="modal fade bnt-modal" id="newBountyModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
@@ -491,7 +491,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="cmp-field">
+        <div class="bnt-field">
           <label class="form-label">Stream</label>
           <select class="form-select" id="nc_stream_select">
             <option value="">Loading subscribed streams...</option>
@@ -499,12 +499,12 @@
           <input type="hidden" id="nc_stream_name">
           <input type="hidden" id="nc_provider_pubkey">
         </div>
-        <div class="cmp-field">
+        <div class="bnt-field">
           <label class="form-label">Total Pay per Observation (sats)</label>
           <input type="number" class="form-control" id="nc_pay" min="1" placeholder="100">
           <div class="form-text">Total sats paid out each time the stream ticks, distributed however you choose.</div>
         </div>
-        <div class="cmp-row cmp-field">
+        <div class="bnt-row bnt-field">
           <div>
             <label class="form-label">Predictors to Pay</label>
             <input type="number" class="form-control" id="nc_paid" min="1" placeholder="3">
@@ -516,14 +516,14 @@
             <div class="form-text">How many channels you plan to maintain.</div>
           </div>
         </div>
-        <div class="cmp-field">
+        <div class="bnt-field">
           <label class="form-label">Scoring Module</label>
           <select class="form-select" id="nc_scoring">
             <option value="">Loading...</option>
           </select>
           <div class="form-text">Scoring algorithm used to rank and pay predictors.</div>
         </div>
-        <div class="cmp-field">
+        <div class="bnt-field">
           <label class="form-label">Prediction Horizon</label>
           <input type="number" class="form-control" id="nc_horizon" min="1" value="1">
           <div class="form-text">How many steps ahead predictors are predicting (usually 1).</div>
@@ -531,8 +531,8 @@
         <div id="newCompModal_alert"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="cmp-btn cmp-btn-ghost" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="cmp-btn cmp-btn-primary" onclick="createCompetition()">
+        <button type="button" class="bnt-btn bnt-btn-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="bnt-btn bnt-btn-primary" onclick="createBounty()">
           <i class="material-icons align-middle" style="font-size:16px;">campaign</i>Announce
         </button>
       </div>
@@ -563,7 +563,7 @@ function showAlert(msg, type='danger') {
 
 function modalAlert(msg, type='danger') {
   const el = document.getElementById('newCompModal_alert');
-  el.className = type === 'danger' ? 'cmp-modal-error' : 'alert alert-' + type + ' py-2 small';
+  el.className = type === 'danger' ? 'bnt-modal-error' : 'alert alert-' + type + ' py-2 small';
   el.textContent = msg;
 }
 
@@ -581,7 +581,7 @@ async function loadBrowse() {
     if (data.error) { showAlert(data.error); return; }
     renderBrowse(data.competitions || []);
   } catch(e) {
-    showAlert('Failed to load competitions: ' + e);
+    showAlert('Failed to load bounties: ' + e);
   }
 }
 
@@ -607,12 +607,12 @@ function renderBrowse(comps) {
         ${c.is_mine
           ? '<span class="badge bg-secondary">Your bounty</span>'
           : c.joined
-            ? `<button class="cmp-btn cmp-btn-danger"
-                onclick="leaveCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
+            ? `<button class="bnt-btn bnt-btn-danger"
+                onclick="leaveBounty('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
                 Leave
                </button>`
-            : `<button class="cmp-btn cmp-btn-primary"
-                onclick="joinCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
+            : `<button class="bnt-btn bnt-btn-primary"
+                onclick="joinBounty('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
                 Join
                </button>`
         }
@@ -621,7 +621,7 @@ function renderBrowse(comps) {
   `).join('');
 }
 
-async function joinCompetition(streamName, providerPubkey, hostPubkey) {
+async function joinBounty(streamName, providerPubkey, hostPubkey) {
   // Joining = subscribing to the stream so the neuron starts predicting it
   try {
     const resp = await fetch('/api/network/subscribe', {
@@ -642,7 +642,7 @@ async function joinCompetition(streamName, providerPubkey, hostPubkey) {
   }
 }
 
-async function leaveCompetition(streamName, providerPubkey, hostPubkey) {
+async function leaveBounty(streamName, providerPubkey, hostPubkey) {
   try {
     const resp = await fetch('/api/competition/leave', {
       method: 'POST',
@@ -670,7 +670,7 @@ async function loadMine() {
     if (data.error) { showAlert(data.error); return; }
     renderMine(data.competitions || []);
   } catch(e) {
-    showAlert('Failed to load my competitions: ' + e);
+    showAlert('Failed to load my bounties: ' + e);
   }
 }
 
@@ -697,13 +697,13 @@ function renderMine(comps) {
           : '<span class="badge bg-secondary">Closed</span>'}
       </td>
       <td class="text-end d-flex gap-1 justify-content-end">
-        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon"
+        <button class="bnt-btn bnt-btn-ghost bnt-btn-icon"
           onclick="viewLeaderboard('${c.stream_name}', '${c.stream_provider_pubkey}')">
           <i class="material-icons align-middle" style="font-size:14px;">leaderboard</i>
         </button>
         ${c.active ? `
-          <button class="cmp-btn cmp-btn-danger"
-            onclick="closeCompetition('${c.stream_name}', '${c.stream_provider_pubkey}')">
+          <button class="bnt-btn bnt-btn-danger"
+            onclick="closeBounty('${c.stream_name}', '${c.stream_provider_pubkey}')">
             Close
           </button>` : ''}
       </td>
@@ -711,7 +711,7 @@ function renderMine(comps) {
   `).join('');
 }
 
-async function closeCompetition(streamName, providerPubkey) {
+async function closeBounty(streamName, providerPubkey) {
   if (!confirm(`Close the bounty on "${streamName}"?`)) return;
   try {
     const resp = await fetch('/api/competition/close', {
@@ -783,13 +783,13 @@ async function loadScoringModules() {
   }
 }
 
-document.getElementById('newCompetitionModal').addEventListener('show.bs.modal', () => {
+document.getElementById('newBountyModal').addEventListener('show.bs.modal', () => {
   loadPublishedStreams();
   loadScoringModules();
 });
 
 // ── Create competition ────────────────────────────────────────
-async function createCompetition() {
+async function createBounty() {
   const selected = document.getElementById('nc_stream_select').value;
   if (!selected) {
     modalAlert('Please select a stream.'); return;
@@ -818,7 +818,7 @@ async function createCompetition() {
     });
     const data = await resp.json();
     if (data.error) { modalAlert(data.error); return; }
-    bootstrap.Modal.getInstance(document.getElementById('newCompetitionModal')).hide();
+    bootstrap.Modal.getInstance(document.getElementById('newBountyModal')).hide();
     showAlert('Bounty announced.', 'success');
     loadMine();
   } catch(e) {
@@ -914,9 +914,9 @@ async function loadPendingRequests() {
         <td class="small">${r.message || '-'}</td>
         <td class="small text-muted">${formatTime(r.requested_at)}</td>
         <td class="text-end d-flex gap-1 justify-content-end">
-          <button class="cmp-btn cmp-btn-success"
+          <button class="bnt-btn bnt-btn-success"
             onclick="approveRequest('${r.stream_name}', '${r.requester_pubkey}')">Approve</button>
-          <button class="cmp-btn cmp-btn-danger"
+          <button class="bnt-btn bnt-btn-danger"
             onclick="rejectRequest('${r.stream_name}', '${r.requester_pubkey}')">Reject</button>
         </td>
       </tr>
@@ -998,7 +998,7 @@ async function loadApproved() {
         <td class="font-monospace small">${shortKey(s.subscriber_pubkey)}</td>
         <td class="small text-muted">${formatTime(s.approved_at)}</td>
         <td class="text-end">
-          <button class="cmp-btn cmp-btn-danger"
+          <button class="bnt-btn bnt-btn-danger"
             onclick="revokeSubscriber('${streamName}', '${s.subscriber_pubkey}')">Revoke</button>
         </td>
       </tr>
