@@ -2,27 +2,27 @@
 
 ## Vision (Verbatim)
 
-> Maybe a company has a data stream or many data streams that they want predicted — we'll just pretend they have one. They have one data stream they want predicted, so they post it up for free, anybody can see the data. Then they host a competition and the competition says: I am going to pay the best X amount of predictors X amount of tokens for every observation.
+> Maybe a company has a data stream or many data streams that they want predicted — we'll just pretend they have one. They have one data stream they want predicted, so they post it up for free, anybody can see the data. Then they host a bounty and the bounty says: I am going to pay the best X amount of predictors X amount of tokens for every observation.
 >
-> The tricky thing about this is they get to decide how to score the predictors. They might say: I'm just going to go with a typical scoring, and we'll have some of these baked in. But maybe they say I just want straight up accuracy on the next timestamp, the next observation — if you predict that the best you're at the top of the list. But the interesting thing about predicting the future is you may want to weight predictions that are better at foreseeing the future in the long run. You may want to weight them more or give them more payment. You may not want to just use straight up accuracy as your scoring metric. So the competition host gets to choose how they will score the predictors.
+> The tricky thing about this is they get to decide how to score the predictors. They might say: I'm just going to go with a typical scoring, and we'll have some of these baked in. But maybe they say I just want straight up accuracy on the next timestamp, the next observation — if you predict that the best you're at the top of the list. But the interesting thing about predicting the future is you may want to weight predictions that are better at foreseeing the future in the long run. You may want to weight them more or give them more payment. You may not want to just use straight up accuracy as your scoring metric. So the bounty host gets to choose how they will score the predictors.
 >
 > They do score them and they keep their promise that they'll pay the best three predictors, or whatever number they want, however much money they promise, every observation. That way they can broadcast these payments openly — I don't know if the payment channels are open but I bet they are — they can broadcast these payments openly and people can then add the payments up to make sure that the host is doing what they promised and paying the amounts that they promised. This is important because if the host promises to pay a hundred Satori every day and everybody would want to predict their data stream, but then if they lie to everybody and say "well you weren't the top" they get all the predictions for free because they don't pay anybody. So we have to know that they're making these payment commitments and we have to be able to add them up, even though the community can't broadcast those payments because only the person that it's for can do so.
 >
 > This also means that the host can put a limit on how many people are allowed to predict. For instance they could say: I'm only going to pay the top three out of five predictors because I don't want to make a channel for every single predictor who gives me some random prediction. Opening a channel costs tokens, so I'm not going to open channels for thousands of predictors — you've got to be in the top five for like a month or something in order for me to open a channel and start paying you. So they can make rules like that, and it doesn't have to be public. I think it should be, but that's part of the scoring mechanism and they can do whatever they want with scoring, but they do have to pay out what they promised to pay or else everybody can see that they're not paying and nobody will want to predict for them.
 >
-> So the idea is that they post up a data stream — or they don't have to post it, maybe somebody else posts it and they just want to host the competition on the data stream. I think that means we're going to need a new Nostr relay type or kind so that we can announce a competition, and I think we probably want to be able to un-announce a competition because if the competition ends we want to tell everybody it's done. So I can envision those two updates to the Nostr API.
+> So the idea is that they post up a data stream — or they don't have to post it, maybe somebody else posts it and they just want to host the bounty on the data stream. I think that means we're going to need a new Nostr relay type or kind so that we can announce a bounty, and I think we probably want to be able to un-announce a bounty because if the bounty ends we want to tell everybody it's done. So I can envision those two updates to the Nostr API.
 >
-> After that I don't think there's too much API work that has to be done. It's kind of like the predictors subscribe to the data just like they normally would, they start predicting it just like they normally would. But here's one more thing about hosting a competition: by default, and perhaps this is the only option, the predictions are private. What I mean by that is the predictions are sent to the host of the competition directly as a DM — they are not broadcast publicly. So the predictors would send the predictions directly to the competition host, the host would score them according to their own metric and pay out according to their own metric, and the relationship would continue as long as the host is paying.
+> After that I don't think there's too much API work that has to be done. It's kind of like the predictors subscribe to the data just like they normally would, they start predicting it just like they normally would. But here's one more thing about hosting a bounty: by default, and perhaps this is the only option, the predictions are private. What I mean by that is the predictions are sent to the host of the bounty directly as a DM — they are not broadcast publicly. So the predictors would send the predictions directly to the bounty host, the host would score them according to their own metric and pay out according to their own metric, and the relationship would continue as long as the host is paying.
 >
-> It's courteous for the host to announce that they have stopped the competition when they do decide to stop, but everybody can see the amount of money in the channels and if there's nothing left everybody can know this competition is dead.
+> It's courteous for the host to announce that they have stopped the bounty when they do decide to stop, but everybody can see the amount of money in the channels and if there's nothing left everybody can know this bounty is dead.
 >
-> During the competition the host will pay out the tokens on the channels — it's not very much because it's probably just a little bit, but that's all in the announcement: how much is paid. The host can re-announce for the same data stream and it's just a replacement of the competition — everybody knows okay, that means they've changed the price that they're willing to pay, or whatever. So the host should be able to re-announce the competition.
+> During the bounty the host will pay out the tokens on the channels — it's not very much because it's probably just a little bit, but that's all in the announcement: how much is paid. The host can re-announce for the same data stream and it's just a replacement of the bounty — everybody knows okay, that means they've changed the price that they're willing to pay, or whatever. So the host should be able to re-announce the bounty.
 >
 > That reminds me of just announcing the data stream and its cost — that's how that should work too. You should be able to announce your data stream again if you're charging for your data stream. So I don't know if that's actually baked into what we've built already but that's probably important if it's not.
 >
 > Then that's basically it with this feature. People can come onto the Satori network and request that the network predict their private data. They can't keep that data private, but what they can do is not let everybody know the predictions — the predictions are meant to be private, just for them.
 >
-> As a stretch goal: I think hosts should be allowed to authorize predictors, not only because they don't want to have to make a bunch of data stream channels, but also because perhaps there are predictors they trust and they want to send them encrypted data. They want the data stream to be encrypted, and therefore they can authorize particular predictors and give them the prediction key. They'll probably change that key on occasion so they have to broadcast it out again. That seems like an extra layer of features on top of this competition framework, but I think that is also a valuable thing to do in case a company or something wants some kind of pseudo-privatization of their data so that it's not just broadcast publicly for everybody to see.
+> As a stretch goal: I think hosts should be allowed to authorize predictors, not only because they don't want to have to make a bunch of data stream channels, but also because perhaps there are predictors they trust and they want to send them encrypted data. They want the data stream to be encrypted, and therefore they can authorize particular predictors and give them the prediction key. They'll probably change that key on occasion so they have to broadcast it out again. That seems like an extra layer of features on top of this bounty framework, but I think that is also a valuable thing to do in case a company or something wants some kind of pseudo-privatization of their data so that it's not just broadcast publicly for everybody to see.
 >
 > Over time we could credentialize certain neurons, certain predictors — we know who they are, they have a business relationship, they always keep private information private. Being able to choose your predictors and give them encrypted data would be a valuable, trustworthy thing to do.
 
@@ -30,7 +30,7 @@
 
 ## Overview
 
-The prediction market is the second layer of the Satori data stream marketplace. The first layer (already built) lets producers charge for data. This layer lets **hosts** pay for predictions of data — essentially a structured, open, accountable prediction competition running over the same Nostr + payment channel infrastructure.
+The prediction market is the second layer of the Satori data stream marketplace. The first layer (already built) lets producers charge for data. This layer lets **hosts** pay for predictions of data — essentially a structured, open, accountable prediction bounty running over the same Nostr + payment channel infrastructure.
 
 ---
 
@@ -38,9 +38,9 @@ The prediction market is the second layer of the Satori data stream marketplace.
 
 | Role | Description |
 |------|-------------|
-| **Host** | Posts a data stream (or references an existing one), announces a competition, scores predictors, and pays winners via channels |
+| **Host** | Posts a data stream (or references an existing one), announces a bounty, scores predictors, and pays winners via channels |
 | **Predictor** | Subscribes to the data stream, sends predictions privately to the host as encrypted DMs, earns SATORI per observation if they rank |
-| **Observer** | Anyone on the network — can see competition announcements, verify channel payment activity, and assess whether a host is trustworthy |
+| **Observer** | Anyone on the network — can see bounty announcements, verify channel payment activity, and assess whether a host is trustworthy |
 
 ---
 
@@ -50,10 +50,10 @@ Two new kinds are needed:
 
 | Kind | Name | Type | Description |
 |------|------|------|-------------|
-| 34607 | `KIND_COMPETITION_ANNOUNCE` | Parameterized replaceable (`d=stream_name:host_pubkey`) | Host announces or updates a competition. Re-publishing replaces the previous announcement. |
+| 34607 | `KIND_COMPETITION_ANNOUNCE` | Parameterized replaceable (`d=stream_name:host_pubkey`) | Host announces or updates a bounty. Re-publishing replaces the previous announcement. |
 | 34608 | `KIND_PREDICTION` | Encrypted DM | Predictor sends a prediction directly to the host. Not broadcast publicly. |
 
-`KIND_COMPETITION_ANNOUNCE` being parameterized replaceable means re-announcing is free — it simply replaces the old event on the relay. A host closes a competition by publishing a tombstone (empty content) for the same `d` tag, or by draining their payment channels (which observers can see).
+`KIND_COMPETITION_ANNOUNCE` being parameterized replaceable means re-announcing is free — it simply replaces the old event on the relay. A host closes a bounty by publishing a tombstone (empty content) for the same `d` tag, or by draining their payment channels (which observers can see).
 
 ### KIND_COMPETITION_ANNOUNCE Content
 
@@ -80,7 +80,7 @@ Key fields:
 - `scoring_metric` — baked-in scorer name (`"mae"`, `"rmse"`, `"directional_accuracy"`, etc.) or `"custom"`
 - `scoring_params` — optional extra parameters passed to the scorer
 - `horizon` — how many steps ahead the prediction covers
-- `active` — set to `false` (or publish empty content) to close the competition
+- `active` — set to `false` (or publish empty content) to close the bounty
 
 These fields are **intent metadata, not enforced constraints**. The host announces them as a social signal to the community — "here is what I plan to do." Nothing at the protocol level enforces them. A host who consistently misrepresents their intent becomes visible through payment records and loses predictors.
 
@@ -116,7 +116,7 @@ This is the core framework. An observation on the primary stream is the trigger.
 5. Pass payload to scoring module:
        - predictions (predictor_pubkey, predicted_value, timestamp, has_channel)
        - observation (the actual value that triggered this)
-       - competition details (pay_per_obs_sats, paid_predictors, competing_predictors, etc.)
+       - bounty details (pay_per_obs_sats, paid_predictors, competing_predictors, etc.)
 6. Scoring module returns: { predictor_pubkey → sats }
 7. Execute payments:
        - predictor has a channel → send payment
@@ -141,7 +141,7 @@ The scoring module is a black box. The framework defines only what goes in and w
         ...
     ],
     'observation': 67500.00,
-    'competition': {
+    'bounty': {
         'stream_name': 'btc-price-usd',
         'stream_provider_pubkey': 'hex...',
         'pay_per_obs_sats': 300,
@@ -174,7 +174,7 @@ def score(payload: dict) -> dict:
     ...
 ```
 
-The `scoring_metric` field in the competition announcement is the filename (without `.py`). The neuron loads it with `importlib` at competition setup time and calls `score(payload)` on each observation.
+The `scoring_metric` field in the bounty announcement is the filename (without `.py`). The neuron loads it with `importlib` at bounty setup time and calls `score(payload)` on each observation.
 
 Built-in modules ship in `neuron-lite/scoring/` alongside any custom ones. The loader makes no distinction — it just looks up the filename. A minimal template:
 
@@ -184,8 +184,8 @@ Built-in modules ship in `neuron-lite/scoring/` alongside any custom ones. The l
 def score(payload: dict) -> dict:
     predictions = payload['predictions']
     observation = payload['observation']
-    competition = payload['competition']
-    total = competition['pay_per_obs_sats']
+    bounty = payload['bounty']
+    total = bounty['pay_per_obs_sats']
 
     # your logic here — rank predictors, decide splits
     # return { predictor_pubkey: sats_to_pay }
@@ -220,7 +220,7 @@ The existing `KIND_DATASTREAM_ANNOUNCE` (34600) is already parameterized replace
 
 ## Stretch Goal: Private Streams with Approval-Gated Access
 
-For data producers who want to control who can see their stream — e.g. a company publishing proprietary metrics that they want predicted but not broadcast publicly. This is a general capability of any data stream, not specific to competitions, though competitions on private streams are the motivating use case.
+For data producers who want to control who can see their stream — e.g. a company publishing proprietary metrics that they want predicted but not broadcast publicly. This is a general capability of any data stream, not specific to bounties, though bounties on private streams are the motivating use case.
 
 **Key insight:** The existing per-subscriber NIP-04 encryption already handles privacy. The producer only encrypts for subscribers on their list — if you're not on the list, you never see the data. No symmetric keys, key rotation, or new crypto is needed. The only missing piece is an **approval gate** between "I want to subscribe" and "I receive data."
 
@@ -248,7 +248,7 @@ For data producers who want to control who can see their stream — e.g. a compa
 - The stream announcement (everyone knows the stream exists, but not who has access)
 - Payment channel commitments (KIND_34604) — observers can see payment activity but not stream contents
 
-**Competition integration:** For the private competition use case (Scenario A — host is also the producer), the host announces both the stream (with `approval_required: true`) and the competition. Predictors request access to the stream, the host approves them, and the rest of the competition flow (predictions, scoring, payment) works unchanged. The host controls exactly who can predict by controlling who can see the data.
+**Bounty integration:** For the private bounty use case (Scenario A — host is also the producer), the host announces both the stream (with `approval_required: true`) and the bounty. Predictors request access to the stream, the host approves them, and the rest of the bounty flow (predictions, scoring, payment) works unchanged. The host controls exactly who can predict by controlling who can see the data.
 
 Over time predictors can build trust reputation — known to keep private data private, reliable prediction partners. This maps naturally onto future neuron credentialing work.
 
@@ -256,14 +256,14 @@ Over time predictors can build trust reputation — known to keep private data p
 
 ## Implementation Phases
 
-### Phase 1 — Competition Announcement + Discovery
+### Phase 1 — Bounty Announcement + Discovery
 - Add `KIND_COMPETITION_ANNOUNCE` (34607) to `models.py`
-- `announce_competition` and `close_competition` methods on `SatoriNostr`
-- `discover_competitions` query method (subscribes to KIND_34607 on relays)
-- DB table: `competitions` in `network_db.py`
-- UI (host): competition announcement page — create, update, close a competition
-- UI (predictor): competition browser — list available competitions from Nostr, show details (stream, pay_per_obs_sats, paid_predictors, competing_predictors, scoring_metric), join button that tells the neuron to start predicting for that competition
-- UI (host): my competitions page — list competitions this neuron is hosting, status of each
+- `announce_bounty` and `close_bounty` methods on `SatoriNostr`
+- `discover_bounties` query method (subscribes to KIND_34607 on relays)
+- DB table: `bounties` in `network_db.py`
+- UI (host): bounty announcement page — create, update, close a bounty
+- UI (predictor): bounty browser — list available bounties from Nostr, show details (stream, pay_per_obs_sats, paid_predictors, competing_predictors, scoring_metric), join button that tells the neuron to start predicting for that bounty
+- UI (host): my bounties page — list bounties this neuron is hosting, status of each
 
 ### Phase 2 — Prediction Submission
 - Add `KIND_PREDICTION` (34608) encrypted DM to `SatoriNostr`
@@ -274,18 +274,18 @@ Over time predictors can build trust reputation — known to keep private data p
 ### Phase 3 — Scoring and Payment
 - Observation trigger wired to scoring pipeline
 - Load scoring module from `neuron-lite/scoring/` by `scoring_metric` name via `importlib`
-- Pass payload (predictions, observation, competition details) → receive `{pubkey: sats}`
+- Pass payload (predictions, observation, bounty details) → receive `{pubkey: sats}`
 - Execute payments: existing channel → send; no channel → open then send
-- UI (host): per-competition predictor list — who is predicting, channel status, total paid, payment history per observation
+- UI (host): per-bounty predictor list — who is predicting, channel status, total paid, payment history per observation
 
 ### Phase 4 — Accountability Tooling
 
 **What is implemented (Phase 4a — host-local):**
-- `competition_payments` table records each payout made by this node as host
-- `get_competition_leaderboard()` — per-predictor totals from local DB
+- `bounty_payments` table records each payout made by this node as host
+- `get_bounty_leaderboard()` — per-predictor totals from local DB
 - `get_host_payment_stats()` — total paid, obs scored, avg vs. announced (follow-through %)
-- `/api/competition/leaderboard` and `/api/competition/stats` routes
-- Leaderboard tab in the competitions UI with host follow-through percentage
+- `/api/bounty/leaderboard` and `/api/bounty/stats` routes
+- Leaderboard tab in the bounties UI with host follow-through percentage
 - Limitation: only the host node has this data; observers and predictors see nothing
 
 **What is deferred (Phase 4b — public verifiability):**
@@ -297,9 +297,9 @@ Over time predictors can build trust reputation — known to keep private data p
 - Nodes that are offline miss payments made during that time — this is accepted
   best-effort behaviour, not a fatal flaw
 - The infrastructure challenge: we don't want every neuron subscribing to every
-  competition's payment stream. Doing this properly requires sharding and
+  bounty's payment stream. Doing this properly requires sharding and
   peer-to-peer distributed database infrastructure so nodes selectively sync only
-  the competitions they care about. That architecture is deferred until the broader
+  the bounties they care about. That architecture is deferred until the broader
   P2P data layer is designed.
 
 ### Phase 5 (Stretch) — Private Streams with Approval-Gated Access

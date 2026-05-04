@@ -19,11 +19,11 @@ _db_mod = importlib.util.module_from_spec(_db_spec)
 _db_spec.loader.exec_module(_db_mod)
 NetworkDB = _db_mod.NetworkDB
 
-# ── Load competition_scoring ──────────────────────────────────────────────────
+# ── Load bounty_scoring ──────────────────────────────────────────────────
 
 _cs_spec = importlib.util.spec_from_file_location(
-    'competition_scoring',
-    os.path.join(_NEURON_LITE, 'satorineuron', 'competition_scoring.py'))
+    'bounty_scoring',
+    os.path.join(_NEURON_LITE, 'satorineuron', 'bounty_scoring.py'))
 _cs_mod = importlib.util.module_from_spec(_cs_spec)
 _cs_spec.loader.exec_module(_cs_mod)
 compute_payouts = _cs_mod.compute_payouts
@@ -42,8 +42,8 @@ def _load_scorer(metric: str):
     return mod
 
 
-def _make_competition(db, host_pubkey='host01', active=True):
-    db.add_competition(
+def _make_bounty(db, host_pubkey='host01', active=True):
+    db.add_bounty(
         stream_name='btc-price-usd',
         stream_provider_pubkey='provider01',
         host_pubkey=host_pubkey,
@@ -59,7 +59,7 @@ def _make_competition(db, host_pubkey='host01', active=True):
 
 
 def _add_prediction(db, predictor_pubkey, predicted_value, seq_num=1):
-    db.save_competition_prediction(
+    db.save_bounty_prediction(
         stream_name='btc-price-usd',
         stream_provider_pubkey='provider01',
         predictor_pubkey=predictor_pubkey,
@@ -159,7 +159,7 @@ class TestMaeScorer:
 
 # ── Tests: compute_payouts pipeline ─────────────────────────────────────────
 
-def _competition_row(host_pubkey='host01', active=True):
+def _bounty_row(host_pubkey='host01', active=True):
     return {
         'stream_name': 'btc-price-usd',
         'stream_provider_pubkey': 'provider01',
@@ -188,8 +188,8 @@ def _prediction_row(predictor_pubkey, predicted_value, seq_num=1):
 
 class TestComputePayouts:
 
-    def test_triggers_payment_for_active_competition(self):
-        comp = _competition_row(active=True)
+    def test_triggers_payment_for_active_bounty(self):
+        comp = _bounty_row(active=True)
         preds = [
             _prediction_row('alice', 99.0),
             _prediction_row('bob', 95.0),
@@ -198,25 +198,25 @@ class TestComputePayouts:
         assert len(result) > 0
         assert all(v > 0 for v in result.values())
 
-    def test_skips_inactive_competition(self):
-        comp = _competition_row(active=False)
+    def test_skips_inactive_bounty(self):
+        comp = _bounty_row(active=False)
         preds = [_prediction_row('alice', 99.0)]
         result = compute_payouts(comp, preds, observed_value=100.0)
         assert result == {}
 
     def test_skips_empty_predictions(self):
-        comp = _competition_row(active=True)
+        comp = _bounty_row(active=True)
         result = compute_payouts(comp, [], observed_value=100.0)
         assert result == {}
 
     def test_unknown_scorer_returns_empty(self):
-        comp = {**_competition_row(), 'scoring_metric': 'nonexistent_metric'}
+        comp = {**_bounty_row(), 'scoring_metric': 'nonexistent_metric'}
         preds = [_prediction_row('alice', 99.0)]
         result = compute_payouts(comp, preds, observed_value=100.0)
         assert result == {}
 
     def test_total_within_budget(self):
-        comp = _competition_row()
+        comp = _bounty_row()
         preds = [
             _prediction_row('a', 99.0),
             _prediction_row('b', 101.0),
@@ -226,7 +226,7 @@ class TestComputePayouts:
         assert sum(result.values()) <= comp['pay_per_obs_sats']
 
     def test_better_predictor_gets_more(self):
-        comp = _competition_row()
+        comp = _bounty_row()
         preds = [
             _prediction_row('close', 100.5),   # error 0.5
             _prediction_row('far', 110.0),      # error 10.0

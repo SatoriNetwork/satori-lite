@@ -509,15 +509,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # an open channel to this provider
             await self._channelPayForObservation(
                 obs.stream_name, obs.nostr_pubkey, obs.observation.seq_num)
-            # Score competition predictions and pay predictors if we host one
-            await self._competitionScoreAndPay(
+            # Score bounty predictions and pay predictors if we host one
+            await self._bountyScoreAndPay(
                 stream_name=obs.stream_name,
                 provider_pubkey=obs.nostr_pubkey,
                 seq_num=obs.observation.seq_num,
                 raw_value=obs.observation.value,
             )
 
-    async def _competitionScoreAndPay(
+    async def _bountyScoreAndPay(
         self,
         stream_name: str,
         provider_pubkey: str,
@@ -526,19 +526,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Score predictions and pay winners when an observation arrives (host side).
 
-        Only runs if this node is the host of an active competition for the stream.
-        Delegates scoring logic to competition_scoring.compute_payouts(), then
-        calls _competitionPayPredictor for each non-zero payout.
+        Only runs if this node is the host of an active bounty for the stream.
+        Delegates scoring logic to bounty_scoring.compute_payouts(), then
+        calls _bountyPayPredictor for each non-zero payout.
 
         raw_value is the observation value as-is; the cast to float happens
-        only after the competition-host gate, so non-numeric streams do not
+        only after the bounty-host gate, so non-numeric streams do not
         crash the observation pipeline.
         """
         try:
-            competition = await asyncio.to_thread(
-                self.networkDB.get_competition,
+            bounty = await asyncio.to_thread(
+                self.networkDB.get_bounty,
                 stream_name, provider_pubkey, self.nostrPubkey)
-            if not competition or not competition.get('active'):
+            if not bounty or not bounty.get('active'):
                 return
 
             # Dedup: skip if we've already scored this seq_num
@@ -552,12 +552,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 observed_value = float(raw_value)
             except (TypeError, ValueError):
                 logging.warning(
-                    f'Competition: skipping score for {stream_name} seq={seq_num} '
+                    f'Bounty: skipping score for {stream_name} seq={seq_num} '
                     f'— non-numeric observation value')
                 return
 
             predictions = await asyncio.to_thread(
-                self.networkDB.get_competition_predictions,
+                self.networkDB.get_bounty_predictions,
                 stream_name, provider_pubkey, seq_num)
             if not predictions:
                 return
@@ -571,7 +571,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # (seq_num - horizon), not the immediately preceding one.
             # The window runs from the trigger to the target observation,
             # so the 90% late-cutoff scales naturally with horizon.
-            horizon = competition.get('horizon', 1)
+            horizon = bounty.get('horizon', 1)
             cur_obs = await asyncio.to_thread(
                 self.networkDB.get_observation_by_seq,
                 stream_name, provider_pubkey, seq_num)
@@ -584,9 +584,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     stream_name, provider_pubkey, trigger_seq)
             prev_observed_at = (trigger_obs or {}).get('observed_at', 0)
 
-            from satorineuron.competition_scoring import compute_payouts
+            from satorineuron.bounty_scoring import compute_payouts
             payouts = await asyncio.to_thread(
-                compute_payouts, competition, predictions, observed_value,
+                compute_payouts, bounty, predictions, observed_value,
                 observed_at, prev_observed_at)
 
             # Index predictions by pubkey so we can look up wallet pubkey
@@ -596,13 +596,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             for pubkey, sats in payouts.items():
                 row = preds_by_pubkey.get(pubkey)
                 wallet_pubkey = (row or {}).get('predictor_wallet_pubkey')
-                await self._competitionPayPredictor(
+                await self._bountyPayPredictor(
                     pubkey, wallet_pubkey, sats,
                     stream_name, provider_pubkey, seq_num)
         except Exception as e:
-            logging.warning(f'Competition: score-and-pay failed: {e}')
+            logging.warning(f'Bounty: score-and-pay failed: {e}')
 
-    async def _competitionScoreLateArrival(
+    async def _bountyScoreLateArrival(
         self,
         stream_name: str,
         provider_pubkey: str,
@@ -612,7 +612,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         No-op if the observation hasn't been received yet (the normal
         _networkProcessObservation path will score once it arrives) or
-        if this node isn't hosting the competition.
+        if this node isn't hosting the bounty.
         """
         try:
             observation = await asyncio.to_thread(
@@ -637,14 +637,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 candidate = parsed
         except (ValueError, TypeError):
             pass
-        await self._competitionScoreAndPay(
+        await self._bountyScoreAndPay(
             stream_name=stream_name,
             provider_pubkey=provider_pubkey,
             seq_num=seq_num,
             raw_value=candidate,
         )
 
-    async def _competitionPayPredictor(
+    async def _bountyPayPredictor(
         self,
         predictor_nostr_pubkey: str,
         predictor_wallet_pubkey: Optional[str],
@@ -653,7 +653,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         provider_pubkey: str,
         seq_num: int,
     ) -> None:
-        """Score and pay a predictor for a competition (host side).
+        """Score and pay a predictor for a bounty (host side).
 
         Always records the payment obligation in the DB (for leaderboard /
         accountability) even if the actual channel payment fails.  The channel
@@ -664,7 +664,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Always record the scoring result first
         try:
             await asyncio.to_thread(
-                self.networkDB.record_competition_payment,
+                self.networkDB.record_bounty_payment,
                 stream_name,
                 provider_pubkey,
                 predictor_nostr_pubkey,
@@ -673,19 +673,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 int(_time.time()),
             )
             logging.info(
-                f'Competition: scored {sats} sats for '
+                f'Bounty: scored {sats} sats for '
                 f'{predictor_nostr_pubkey[:12]}… seq={seq_num}',
                 color='green')
         except Exception as e:
             logging.warning(
-                f'Competition: failed to record payment for '
+                f'Bounty: failed to record payment for '
                 f'{predictor_nostr_pubkey[:12]}…: {e}')
             return
 
         # Now attempt the actual channel payment (best-effort)
         if not predictor_wallet_pubkey:
             logging.warning(
-                f'Competition: no wallet pubkey for predictor '
+                f'Bounty: no wallet pubkey for predictor '
                 f'{predictor_nostr_pubkey[:12]}…, payment recorded but '
                 f'channel transfer skipped')
             return
@@ -702,7 +702,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 fund_sats = self._channelFundSats()
                 timeout_minutes = self._channelTimeoutMinutes()
                 logging.info(
-                    f'Competition: opening channel to predictor '
+                    f'Bounty: opening channel to predictor '
                     f'{predictor_wallet_pubkey[:16]}… '
                     f'fund={fund_sats} sats',
                     color='cyan')
@@ -716,7 +716,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     self.networkDB.get_channel, p2sh)
                 if not channel or channel['remainder_sats'] < sats:
                     logging.warning(
-                        f'Competition: channel insufficient for '
+                        f'Bounty: channel insufficient for '
                         f'{sats} sats to {predictor_wallet_pubkey[:16]}… '
                         f'(payment recorded, transfer pending)')
                     return
@@ -724,12 +724,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             await self.sendChannelPayment(
                 channel['p2sh_address'], sats, stream_name)
             logging.info(
-                f'Competition: channel payment sent — {sats} sats to '
+                f'Bounty: channel payment sent — {sats} sats to '
                 f'{predictor_nostr_pubkey[:12]}… for seq={seq_num}',
                 color='green')
         except Exception as e:
             logging.warning(
-                f'Competition: channel transfer failed for '
+                f'Bounty: channel transfer failed for '
                 f'{predictor_nostr_pubkey[:12]}… (payment recorded, '
                 f'transfer pending): {e}')
 
@@ -1000,13 +1000,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Network: prediction failed: {e}')
 
-        # Submit this prediction privately (encrypted DM) to every competition
+        # Submit this prediction privately (encrypted DM) to every bounty
         # host we've joined for this stream. The engine's prediction is public
-        # via {stream}_pred above; competition DMs are in addition to that,
+        # via {stream}_pred above; bounty DMs are in addition to that,
         # private to each host.
         try:
             joined = await asyncio.to_thread(
-                self.networkDB.get_joined_competitions_for_stream,
+                self.networkDB.get_joined_bounties_for_stream,
                 stream_name, provider_pubkey)
             if joined:
                 try:
@@ -1015,12 +1015,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     predicted_float = None
                 if predicted_float is not None:
                     for j in joined:
-                        # Look up competition horizon so we target the right
+                        # Look up bounty horizon so we target the right
                         # future observation.  horizon=1 (default) means
                         # "predict the next value"; horizon=2 means "predict
                         # two steps ahead", etc.
                         comp = await asyncio.to_thread(
-                            self.networkDB.get_competition,
+                            self.networkDB.get_bounty,
                             stream_name, provider_pubkey,
                             j['host_pubkey'])
                         horizon = (comp or {}).get('horizon', 1)
@@ -1033,7 +1033,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         )
         except Exception as e:
             logging.warning(
-                f'Network: competition DM submit failed for {stream_name}: {e}')
+                f'Network: bounty DM submit failed for {stream_name}: {e}')
 
     def _networkEnsureListener(self, relay_url: str):
         """Start an observation listener for a relay if one isn't running."""
@@ -3082,10 +3082,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.warning(
                     f'Network: publish failed on {relay_url}: {e}')
-        # Score competition predictions for this observation (host side).
+        # Score bounty predictions for this observation (host side).
         # The host publishes observations but doesn't subscribe to its own
         # stream, so _networkProcessObservation never fires for its own data.
-        await self._competitionScoreAndPay(
+        await self._bountyScoreAndPay(
             stream_name=stream_name,
             provider_pubkey=self.nostrPubkey,
             seq_num=seq_num,
@@ -3605,54 +3605,54 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 needed.add(r['relay_url'])
         return needed
 
-    # ── Competition sync wrappers ──────────────────────────────────
+    # ── Bounty sync wrappers ──────────────────────────────────
 
-    def announceCompetitionSync(self, competition_data: dict) -> None:
-        """Announce a competition on all connected relays (sync context)."""
-        from satorilib.satori_nostr.models import CompetitionAnnouncement
+    def announceBountySync(self, bounty_data: dict) -> None:
+        """Announce a bounty on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import BountyAnnouncement
         if not hasattr(self, '_networkSecretHex') or not self._networkClients:
             return
         loop = getattr(self, '_networkLoop', None)
         if loop is None or loop.is_closed():
             return
         import json as _json
-        competition = CompetitionAnnouncement(
-            stream_name=competition_data['stream_name'],
-            stream_provider_pubkey=competition_data['stream_provider_pubkey'],
+        bounty = BountyAnnouncement(
+            stream_name=bounty_data['stream_name'],
+            stream_provider_pubkey=bounty_data['stream_provider_pubkey'],
             host_pubkey=self.nostrPubkey,
-            pay_per_obs_sats=int(competition_data['pay_per_obs_sats']),
-            paid_predictors=int(competition_data['paid_predictors']),
-            competing_predictors=int(competition_data['competing_predictors']),
-            scoring_metric=competition_data['scoring_metric'],
-            scoring_params=competition_data.get('scoring_params', {}),
-            horizon=int(competition_data.get('horizon', 1)),
+            pay_per_obs_sats=int(bounty_data['pay_per_obs_sats']),
+            paid_predictors=int(bounty_data['paid_predictors']),
+            competing_predictors=int(bounty_data['competing_predictors']),
+            scoring_metric=bounty_data['scoring_metric'],
+            scoring_params=bounty_data.get('scoring_params', {}),
+            horizon=int(bounty_data.get('horizon', 1)),
             active=True,
             timestamp=int(time.time()),
         )
         async def _announce():
             for client in self._networkClients.values():
                 try:
-                    await client.announce_competition(competition)
+                    await client.announce_bounty(bounty)
                 except Exception as e:
-                    logging.warning(f'Competition: announce failed: {e}')
+                    logging.warning(f'Bounty: announce failed: {e}')
         asyncio.run_coroutine_threadsafe(_announce(), loop)
 
-    def closeCompetitionSync(
+    def closeBountySync(
         self, stream_name: str, stream_provider_pubkey: str
     ) -> None:
-        """Close a competition on all connected relays (sync context)."""
-        from satorilib.satori_nostr.models import CompetitionAnnouncement
+        """Close a bounty on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import BountyAnnouncement
         if not hasattr(self, '_networkSecretHex') or not self._networkClients:
             return
         loop = getattr(self, '_networkLoop', None)
         if loop is None or loop.is_closed():
             return
-        row = self.networkDB.get_competition(
+        row = self.networkDB.get_bounty(
             stream_name, stream_provider_pubkey, self.nostrPubkey)
         if not row:
             return
         import json as _json
-        competition = CompetitionAnnouncement(
+        bounty = BountyAnnouncement(
             stream_name=row['stream_name'],
             stream_provider_pubkey=row['stream_provider_pubkey'],
             host_pubkey=row['host_pubkey'],
@@ -3668,36 +3668,36 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         async def _close():
             for client in self._networkClients.values():
                 try:
-                    await client.close_competition(competition)
+                    await client.close_bounty(bounty)
                 except Exception as e:
-                    logging.warning(f'Competition: close failed: {e}')
+                    logging.warning(f'Bounty: close failed: {e}')
         asyncio.run_coroutine_threadsafe(_close(), loop)
 
-    def discoverCompetitionsSync(self, active_only: bool = True) -> list:
-        """Discover competitions from connected relays (sync context)."""
+    def discoverBountiesSync(self, active_only: bool = True) -> list:
+        """Discover bounties from connected relays (sync context)."""
         if not self._networkClients:
-            return self.networkDB.get_all_competitions(active_only=active_only)
+            return self.networkDB.get_all_bounties(active_only=active_only)
         loop = getattr(self, '_networkLoop', None)
         if loop is None or loop.is_closed():
-            return self.networkDB.get_all_competitions(active_only=active_only)
+            return self.networkDB.get_all_bounties(active_only=active_only)
         async def _discover():
             seen: dict[str, tuple[int, dict]] = {}
             for client in self._networkClients.values():
                 try:
-                    comps = await client.discover_competitions(
+                    comps = await client.discover_bounties(
                         active_only=active_only)
                     for c in comps:
                         d = c.d_tag()
                         if d not in seen or c.timestamp > seen[d][0]:
                             seen[d] = (c.timestamp, c.to_dict())
                 except Exception as e:
-                    logging.warning(f'Competition: discover failed: {e}')
+                    logging.warning(f'Bounty: discover failed: {e}')
             return [v for _, v in seen.values()]
         future = asyncio.run_coroutine_threadsafe(_discover(), loop)
         try:
             return future.result(timeout=15)
         except Exception:
-            return self.networkDB.get_all_competitions(active_only=active_only)
+            return self.networkDB.get_all_bounties(active_only=active_only)
 
     async def _incomingPredictionsLoop(self, client, relay_url: str):
         """Consume incoming prediction submissions from a relay client (host side).
@@ -3709,13 +3709,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         When a prediction arrives after its target observation is already
         in hand, it is scored immediately (late-arrival recovery).
         """
-        logging.info(f'Competition: listening for predictions on {relay_url}')
+        logging.info(f'Bounty: listening for predictions on {relay_url}')
         try:
             async for inbound in client.incoming_predictions():
                 try:
                     p = inbound.prediction
                     await asyncio.to_thread(
-                        self.networkDB.save_competition_prediction,
+                        self.networkDB.save_bounty_prediction,
                         stream_name=p.stream_name,
                         stream_provider_pubkey=p.stream_provider_pubkey,
                         predictor_pubkey=p.predictor_pubkey,
@@ -3727,23 +3727,23 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                             p, 'predictor_wallet_pubkey', None),
                     )
                     logging.info(
-                        f'Competition: received prediction from '
+                        f'Bounty: received prediction from '
                         f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
                         f'seq={p.seq_num}')
                     # Late-arrival: if we already have the observation this
                     # prediction was meant to predict, score it now.
-                    await self._competitionScoreLateArrival(
+                    await self._bountyScoreLateArrival(
                         stream_name=p.stream_name,
                         provider_pubkey=p.stream_provider_pubkey,
                         seq_num=p.seq_num,
                     )
                 except Exception as e:
-                    logging.warning(f'Competition: failed to save prediction: {e}')
+                    logging.warning(f'Bounty: failed to save prediction: {e}')
         except asyncio.CancelledError:
             return
         except Exception as e:
             logging.warning(
-                f'Competition: prediction listener stopped on {relay_url}: {e}')
+                f'Bounty: prediction listener stopped on {relay_url}: {e}')
 
     async def submitPrediction(
         self,
@@ -3753,7 +3753,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         seq_num: int,
         predicted_value: float,
     ) -> None:
-        """Submit a prediction to a competition host on all connected relays (predictor side).
+        """Submit a prediction to a bounty host on all connected relays (predictor side).
 
         The predictor's own wallet pubkey is attached so the host can open a
         payment channel back without needing a separate directory lookup.
@@ -3771,7 +3771,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     predictor_wallet_pubkey=wallet_pubkey,
                 )
             except Exception as e:
-                logging.warning(f'Competition: submit prediction failed: {e}')
+                logging.warning(f'Bounty: submit prediction failed: {e}')
 
     def submitPredictionSync(
         self,

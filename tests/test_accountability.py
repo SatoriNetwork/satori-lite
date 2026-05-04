@@ -22,8 +22,8 @@ def db():
         yield NetworkDB(os.path.join(tmpdir, 'test.db'))
 
 
-def _add_competition(db, host_pubkey='host01', pay_per_obs_sats=1000, active=True):
-    db.add_competition(
+def _add_bounty(db, host_pubkey='host01', pay_per_obs_sats=1000, active=True):
+    db.add_bounty(
         stream_name='btc-price-usd',
         stream_provider_pubkey='provider01',
         host_pubkey=host_pubkey,
@@ -39,7 +39,7 @@ def _add_competition(db, host_pubkey='host01', pay_per_obs_sats=1000, active=Tru
 
 
 def _record(db, predictor, sats, seq_num=1):
-    db.record_competition_payment(
+    db.record_bounty_payment(
         stream_name='btc-price-usd',
         stream_provider_pubkey='provider01',
         predictor_pubkey=predictor,
@@ -53,21 +53,21 @@ def _record(db, predictor, sats, seq_num=1):
 
 class TestSchema:
 
-    def test_competition_payments_table_exists(self, db):
+    def test_bounty_payments_table_exists(self, db):
         conn = db._get_conn()
         tables = {r['name'] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
-        assert 'competition_payments' in tables
+        assert 'bounty_payments' in tables
 
 
-# ── record_competition_payment ────────────────────────────────────────────────
+# ── record_bounty_payment ────────────────────────────────────────────────
 
 class TestRecordPayment:
 
     def test_record_and_retrieve(self, db):
         _record(db, 'alice', 600, seq_num=1)
-        rows = db.get_competition_payments(
+        rows = db.get_bounty_payments(
             'btc-price-usd', 'provider01')
         assert len(rows) == 1
         assert rows[0]['predictor_pubkey'] == 'alice'
@@ -76,21 +76,21 @@ class TestRecordPayment:
     def test_multiple_payments_same_seq(self, db):
         _record(db, 'alice', 600, seq_num=1)
         _record(db, 'bob', 400, seq_num=1)
-        rows = db.get_competition_payments('btc-price-usd', 'provider01')
+        rows = db.get_bounty_payments('btc-price-usd', 'provider01')
         assert len(rows) == 2
 
     def test_multiple_seq_nums(self, db):
         _record(db, 'alice', 600, seq_num=1)
         _record(db, 'alice', 650, seq_num=2)
-        rows = db.get_competition_payments('btc-price-usd', 'provider01')
+        rows = db.get_bounty_payments('btc-price-usd', 'provider01')
         assert len(rows) == 2
 
     def test_empty_returns_empty_list(self, db):
-        rows = db.get_competition_payments('btc-price-usd', 'provider01')
+        rows = db.get_bounty_payments('btc-price-usd', 'provider01')
         assert rows == []
 
 
-# ── get_competition_leaderboard ───────────────────────────────────────────────
+# ── get_bounty_leaderboard ───────────────────────────────────────────────
 
 class TestLeaderboard:
 
@@ -98,7 +98,7 @@ class TestLeaderboard:
         _record(db, 'alice', 600, seq_num=1)
         _record(db, 'alice', 650, seq_num=2)
         _record(db, 'bob', 400, seq_num=1)
-        board = db.get_competition_leaderboard('btc-price-usd', 'provider01')
+        board = db.get_bounty_leaderboard('btc-price-usd', 'provider01')
         by_key = {r['predictor_pubkey']: r for r in board}
         assert by_key['alice']['total_sats'] == 1250
         assert by_key['alice']['prediction_count'] == 2
@@ -107,11 +107,11 @@ class TestLeaderboard:
     def test_leaderboard_sorted_descending(self, db):
         _record(db, 'alice', 100)
         _record(db, 'bob', 900)
-        board = db.get_competition_leaderboard('btc-price-usd', 'provider01')
+        board = db.get_bounty_leaderboard('btc-price-usd', 'provider01')
         assert board[0]['predictor_pubkey'] == 'bob'
 
     def test_leaderboard_empty(self, db):
-        board = db.get_competition_leaderboard('btc-price-usd', 'provider01')
+        board = db.get_bounty_leaderboard('btc-price-usd', 'provider01')
         assert board == []
 
 
@@ -120,7 +120,7 @@ class TestLeaderboard:
 class TestHostPaymentStats:
 
     def test_stats_returns_correct_totals(self, db):
-        _add_competition(db, pay_per_obs_sats=1000)
+        _add_bounty(db, pay_per_obs_sats=1000)
         _record(db, 'alice', 600, seq_num=1)
         _record(db, 'bob', 400, seq_num=1)
         _record(db, 'alice', 700, seq_num=2)
@@ -133,13 +133,13 @@ class TestHostPaymentStats:
         assert stats['announced_per_obs'] == 1000
 
     def test_stats_no_payments(self, db):
-        _add_competition(db, pay_per_obs_sats=1000)
+        _add_bounty(db, pay_per_obs_sats=1000)
         stats = db.get_host_payment_stats(
             'btc-price-usd', 'provider01', 'host01')
         assert stats['total_paid_sats'] == 0
         assert stats['scored_observations'] == 0
 
-    def test_stats_no_competition(self, db):
+    def test_stats_no_bounty(self, db):
         stats = db.get_host_payment_stats(
             'btc-price-usd', 'provider01', 'nobody')
         assert stats is None
@@ -156,15 +156,15 @@ def _create_test_app(db):
     app.config['TESTING'] = True
     app.config['SECRET_KEY'] = 'test'
 
-    @app.route('/api/competition/leaderboard')
+    @app.route('/api/bounty/leaderboard')
     def leaderboard():
         stream_name = flask_request.args.get('stream_name')
         provider_pubkey = flask_request.args.get('provider_pubkey')
         if not stream_name or not provider_pubkey:
             return jsonify({'error': 'stream_name and provider_pubkey required'}), 400
-        return jsonify(db.get_competition_leaderboard(stream_name, provider_pubkey))
+        return jsonify(db.get_bounty_leaderboard(stream_name, provider_pubkey))
 
-    @app.route('/api/competition/stats')
+    @app.route('/api/bounty/stats')
     def stats():
         stream_name = flask_request.args.get('stream_name')
         provider_pubkey = flask_request.args.get('provider_pubkey')
@@ -181,7 +181,7 @@ def _create_test_app(db):
 
 @pytest.fixture
 def client(db):
-    _add_competition(db, pay_per_obs_sats=1000)
+    _add_bounty(db, pay_per_obs_sats=1000)
     _record(db, 'alice', 600, seq_num=1)
     _record(db, 'bob', 400, seq_num=1)
     return _create_test_app(db).test_client()
@@ -191,13 +191,13 @@ class TestLeaderboardRoute:
 
     def test_leaderboard_returns_200(self, client):
         resp = client.get(
-            '/api/competition/leaderboard'
+            '/api/bounty/leaderboard'
             '?stream_name=btc-price-usd&provider_pubkey=provider01')
         assert resp.status_code == 200
 
     def test_leaderboard_contains_predictors(self, client):
         resp = client.get(
-            '/api/competition/leaderboard'
+            '/api/bounty/leaderboard'
             '?stream_name=btc-price-usd&provider_pubkey=provider01')
         data = json.loads(resp.data)
         pubkeys = [r['predictor_pubkey'] for r in data]
@@ -205,7 +205,7 @@ class TestLeaderboardRoute:
         assert 'bob' in pubkeys
 
     def test_leaderboard_missing_params_returns_400(self, client):
-        resp = client.get('/api/competition/leaderboard')
+        resp = client.get('/api/bounty/leaderboard')
         assert resp.status_code == 400
 
 
@@ -213,14 +213,14 @@ class TestHostStatsRoute:
 
     def test_stats_returns_200(self, client):
         resp = client.get(
-            '/api/competition/stats'
+            '/api/bounty/stats'
             '?stream_name=btc-price-usd&provider_pubkey=provider01'
             '&host_pubkey=host01')
         assert resp.status_code == 200
 
     def test_stats_has_expected_fields(self, client):
         resp = client.get(
-            '/api/competition/stats'
+            '/api/bounty/stats'
             '?stream_name=btc-price-usd&provider_pubkey=provider01'
             '&host_pubkey=host01')
         data = json.loads(resp.data)

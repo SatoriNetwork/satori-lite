@@ -1,4 +1,4 @@
-"""Scoring pipeline for prediction market competitions.
+"""Scoring pipeline for prediction market bounties.
 
 Separated from start.py so it can be imported and tested without the full
 neuron dependency tree (pandas, evrmore, etc.).
@@ -34,7 +34,7 @@ def load_scorer(metric: str):
 
 
 def build_payload(
-    competition: dict,
+    bounty: dict,
     predictions: list,
     observed_value: float,
     observed_at: int = 0,
@@ -43,8 +43,8 @@ def build_payload(
     """Build the payload dict passed to a scoring module's score() function.
 
     Args:
-        competition: Row dict from the competitions table.
-        predictions: List of row dicts from competition_predictions table.
+        bounty: Row dict from the bounties table.
+        predictions: List of row dicts from bounty_predictions table.
         observed_value: The actual observed value for this seq_num.
         observed_at: Unix timestamp of the current observation.
         prev_observed_at: Unix timestamp of the previous observation (0 if none).
@@ -52,7 +52,7 @@ def build_payload(
     Returns:
         Payload dict matching the scoring module interface contract.
     """
-    scoring_params = json.loads(competition.get('scoring_params') or '{}')
+    scoring_params = json.loads(bounty.get('scoring_params') or '{}')
     return {
         'observed_value': observed_value,
         'observed_at': observed_at,
@@ -65,23 +65,23 @@ def build_payload(
             }
             for p in predictions
         ],
-        'pay_per_obs_sats': competition['pay_per_obs_sats'],
-        'paid_predictors': competition['paid_predictors'],
+        'pay_per_obs_sats': bounty['pay_per_obs_sats'],
+        'paid_predictors': bounty['paid_predictors'],
         'scoring_params': scoring_params,
     }
 
 
 def compute_payouts(
-    competition: dict,
+    bounty: dict,
     predictions: list,
     observed_value: float,
     observed_at: int = 0,
     prev_observed_at: int = 0,
 ) -> dict:
-    """Run the scoring module for a competition and return payout amounts.
+    """Run the scoring module for a bounty and return payout amounts.
 
     Args:
-        competition: Row dict from the competitions table (must have active=1).
+        bounty: Row dict from the bounties table (must have active=1).
         predictions: List of prediction row dicts for this seq_num.
         observed_value: The actual value to score against.
         observed_at: Unix timestamp of the current observation.
@@ -89,25 +89,25 @@ def compute_payouts(
 
     Returns:
         Dict mapping predictor_pubkey -> sats (only non-zero entries included).
-        Empty dict if competition is inactive, no predictions, or scorer fails.
+        Empty dict if bounty is inactive, no predictions, or scorer fails.
     """
-    if not competition.get('active'):
+    if not bounty.get('active'):
         return {}
     if not predictions:
         return {}
 
-    metric = competition['scoring_metric']
+    metric = bounty['scoring_metric']
     try:
         mod = load_scorer(metric)
     except (FileNotFoundError, Exception) as e:
-        logging.warning(f'Competition: scoring module error ({metric}): {e}')
+        logging.warning(f'Bounty: scoring module error ({metric}): {e}')
         return {}
 
     try:
         payload = build_payload(
-            competition, predictions, observed_value,
+            bounty, predictions, observed_value,
             observed_at, prev_observed_at)
         return {k: v for k, v in mod.score(payload).items() if v > 0}
     except Exception as e:
-        logging.warning(f'Competition: scorer {metric} raised: {e}')
+        logging.warning(f'Bounty: scorer {metric} raised: {e}')
         return {}

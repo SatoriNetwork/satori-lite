@@ -311,7 +311,7 @@ class NetworkDB:
             )
         """)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS competition_predictions (
+            CREATE TABLE IF NOT EXISTS bounty_predictions (
                 id                      INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_name             TEXT NOT NULL,
                 stream_provider_pubkey  TEXT NOT NULL,
@@ -327,17 +327,17 @@ class NetworkDB:
         # Migration: add predictor_wallet_pubkey if missing (existing DBs)
         try:
             conn.execute(
-                "SELECT predictor_wallet_pubkey FROM competition_predictions LIMIT 1")
+                "SELECT predictor_wallet_pubkey FROM bounty_predictions LIMIT 1")
         except sqlite3.OperationalError:
             conn.execute(
-                "ALTER TABLE competition_predictions "
+                "ALTER TABLE bounty_predictions "
                 "ADD COLUMN predictor_wallet_pubkey TEXT")
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_comp_pred_seq
-            ON competition_predictions(stream_name, stream_provider_pubkey, seq_num)
+            ON bounty_predictions(stream_name, stream_provider_pubkey, seq_num)
         """)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS competitions (
+            CREATE TABLE IF NOT EXISTS bounties (
                 id                      INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_name             TEXT NOT NULL,
                 stream_provider_pubkey  TEXT NOT NULL,
@@ -354,7 +354,7 @@ class NetworkDB:
             )
         """)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS competition_payments (
+            CREATE TABLE IF NOT EXISTS bounty_payments (
                 id                      INTEGER PRIMARY KEY AUTOINCREMENT,
                 stream_name             TEXT NOT NULL,
                 stream_provider_pubkey  TEXT NOT NULL,
@@ -367,18 +367,18 @@ class NetworkDB:
         """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_comp_pay_stream
-            ON competition_payments(stream_name, stream_provider_pubkey)
+            ON bounty_payments(stream_name, stream_provider_pubkey)
         """)
         # Migration: add UNIQUE constraint for existing databases.
         # SQLite can't ALTER a constraint, so we create a unique index
         # that enforces the same rule on tables already created without it.
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_comp_pay_dedup
-            ON competition_payments(stream_name, stream_provider_pubkey,
+            ON bounty_payments(stream_name, stream_provider_pubkey,
                                     predictor_pubkey, seq_num)
         """)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS joined_competitions (
+            CREATE TABLE IF NOT EXISTS joined_bounties (
                 stream_name             TEXT NOT NULL,
                 stream_provider_pubkey  TEXT NOT NULL,
                 host_pubkey             TEXT NOT NULL,
@@ -388,7 +388,7 @@ class NetworkDB:
         """)
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_joined_comp_stream
-            ON joined_competitions(stream_name, stream_provider_pubkey)
+            ON joined_bounties(stream_name, stream_provider_pubkey)
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS access_requests (
@@ -1119,9 +1119,9 @@ class NetworkDB:
               ts, p2sh_address))
         conn.commit()
 
-    # ── Competitions ───────────────────────────────────────────────
+    # ── Bounties ───────────────────────────────────────────────
 
-    def add_competition(
+    def add_bounty(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1135,10 +1135,10 @@ class NetworkDB:
         active: int = 1,
         timestamp: int = 0,
     ) -> None:
-        """Insert or replace a competition announcement."""
+        """Insert or replace a bounty announcement."""
         conn = self._get_conn()
         conn.execute("""
-            INSERT INTO competitions (
+            INSERT INTO bounties (
                 stream_name, stream_provider_pubkey, host_pubkey,
                 pay_per_obs_sats, paid_predictors, competing_predictors,
                 scoring_metric, scoring_params, horizon, active, timestamp
@@ -1158,7 +1158,7 @@ class NetworkDB:
               scoring_metric, scoring_params, horizon, active, timestamp))
         conn.commit()
 
-    def get_competition(
+    def get_bounty(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1166,28 +1166,28 @@ class NetworkDB:
     ) -> dict | None:
         conn = self._get_conn()
         row = conn.execute("""
-            SELECT * FROM competitions
+            SELECT * FROM bounties
             WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
         """, (stream_name, stream_provider_pubkey, host_pubkey)).fetchone()
         return dict(row) if row else None
 
-    def get_all_competitions(self, active_only: bool = False) -> list[dict]:
+    def get_all_bounties(self, active_only: bool = False) -> list[dict]:
         conn = self._get_conn()
         if active_only:
             rows = conn.execute(
-                "SELECT * FROM competitions WHERE active = 1").fetchall()
+                "SELECT * FROM bounties WHERE active = 1").fetchall()
         else:
-            rows = conn.execute("SELECT * FROM competitions").fetchall()
+            rows = conn.execute("SELECT * FROM bounties").fetchall()
         return [dict(r) for r in rows]
 
-    def get_competitions_hosted_by(self, host_pubkey: str) -> list[dict]:
+    def get_bounties_hosted_by(self, host_pubkey: str) -> list[dict]:
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM competitions WHERE host_pubkey = ?",
+            "SELECT * FROM bounties WHERE host_pubkey = ?",
             (host_pubkey,)).fetchall()
         return [dict(r) for r in rows]
 
-    def close_competition(
+    def close_bounty(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1195,34 +1195,34 @@ class NetworkDB:
     ) -> None:
         conn = self._get_conn()
         conn.execute("""
-            UPDATE competitions SET active = 0
+            UPDATE bounties SET active = 0
             WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
         """, (stream_name, stream_provider_pubkey, host_pubkey))
         conn.commit()
 
-    # ── Joined Competitions (predictor side) ───────────────────────
+    # ── Joined Bounties (predictor side) ───────────────────────
 
-    def join_competition(
+    def join_bounty(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
         host_pubkey: str,
     ) -> None:
-        """Record that this neuron has joined a competition as a predictor.
+        """Record that this neuron has joined a bounty as a predictor.
 
         The (stream, host) pair is what the engine uses to know where to
         send its prediction DMs when it predicts for a given stream.
-        Idempotent — re-joining the same competition does nothing.
+        Idempotent — re-joining the same bounty does nothing.
         """
         conn = self._get_conn()
         conn.execute("""
-            INSERT OR IGNORE INTO joined_competitions
+            INSERT OR IGNORE INTO joined_bounties
                 (stream_name, stream_provider_pubkey, host_pubkey, joined_at)
             VALUES (?, ?, ?, ?)
         """, (stream_name, stream_provider_pubkey, host_pubkey, int(time.time())))
         conn.commit()
 
-    def leave_competition(
+    def leave_bounty(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1230,34 +1230,34 @@ class NetworkDB:
     ) -> None:
         conn = self._get_conn()
         conn.execute("""
-            DELETE FROM joined_competitions
+            DELETE FROM joined_bounties
             WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
         """, (stream_name, stream_provider_pubkey, host_pubkey))
         conn.commit()
 
-    def get_joined_competitions_for_stream(
+    def get_joined_bounties_for_stream(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
     ) -> list[dict]:
-        """Return joined competitions for a stream — one row per host."""
+        """Return joined bounties for a stream — one row per host."""
         conn = self._get_conn()
         rows = conn.execute("""
-            SELECT * FROM joined_competitions
+            SELECT * FROM joined_bounties
             WHERE stream_name = ? AND stream_provider_pubkey = ?
         """, (stream_name, stream_provider_pubkey)).fetchall()
         return [dict(r) for r in rows]
 
-    def get_all_joined_competitions(self) -> list[dict]:
+    def get_all_joined_bounties(self) -> list[dict]:
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM joined_competitions ORDER BY joined_at DESC"
+            "SELECT * FROM joined_bounties ORDER BY joined_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
-    # ── Competition Predictions ────────────────────────────────────
+    # ── Bounty Predictions ────────────────────────────────────
 
-    def save_competition_prediction(
+    def save_bounty_prediction(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1275,7 +1275,7 @@ class NetworkDB:
         """
         conn = self._get_conn()
         conn.execute("""
-            INSERT INTO competition_predictions (
+            INSERT INTO bounty_predictions (
                 stream_name, stream_provider_pubkey, predictor_pubkey,
                 predictor_wallet_pubkey, host_pubkey, seq_num,
                 predicted_value, received_at
@@ -1285,15 +1285,15 @@ class NetworkDB:
                 predicted_value         = excluded.predicted_value,
                 predictor_wallet_pubkey = COALESCE(
                     excluded.predictor_wallet_pubkey,
-                    competition_predictions.predictor_wallet_pubkey),
+                    bounty_predictions.predictor_wallet_pubkey),
                 received_at             = excluded.received_at
-            WHERE excluded.received_at > competition_predictions.received_at
+            WHERE excluded.received_at > bounty_predictions.received_at
         """, (stream_name, stream_provider_pubkey, predictor_pubkey,
               predictor_wallet_pubkey, host_pubkey, seq_num,
               predicted_value, received_at))
         conn.commit()
 
-    def get_competition_predictions(
+    def get_bounty_predictions(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1302,14 +1302,14 @@ class NetworkDB:
         """Return all predictions received for a given stream+seq_num."""
         conn = self._get_conn()
         rows = conn.execute("""
-            SELECT * FROM competition_predictions
+            SELECT * FROM bounty_predictions
             WHERE stream_name = ? AND stream_provider_pubkey = ? AND seq_num = ?
         """, (stream_name, stream_provider_pubkey, seq_num)).fetchall()
         return [dict(r) for r in rows]
 
-    # ── Competition Payments (accountability) ──────────────────────
+    # ── Bounty Payments (accountability) ──────────────────────
 
-    def record_competition_payment(
+    def record_bounty_payment(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1321,7 +1321,7 @@ class NetworkDB:
         """Record a successful payment to a predictor after scoring."""
         conn = self._get_conn()
         conn.execute("""
-            INSERT OR IGNORE INTO competition_payments
+            INSERT OR IGNORE INTO bounty_payments
                 (stream_name, stream_provider_pubkey, predictor_pubkey,
                  seq_num, sats_paid, paid_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -1329,15 +1329,15 @@ class NetworkDB:
               seq_num, sats_paid, paid_at))
         conn.commit()
 
-    def get_competition_payments(
+    def get_bounty_payments(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
     ) -> list[dict]:
-        """Return all payment records for a stream competition."""
+        """Return all payment records for a stream bounty."""
         conn = self._get_conn()
         rows = conn.execute("""
-            SELECT * FROM competition_payments
+            SELECT * FROM bounty_payments
             WHERE stream_name = ? AND stream_provider_pubkey = ?
             ORDER BY paid_at DESC
         """, (stream_name, stream_provider_pubkey)).fetchall()
@@ -1352,13 +1352,13 @@ class NetworkDB:
         """Return True if any payment record exists for this seq_num."""
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT 1 FROM competition_payments "
+            "SELECT 1 FROM bounty_payments "
             "WHERE stream_name = ? AND stream_provider_pubkey = ? "
             "AND seq_num = ? LIMIT 1",
             (stream_name, stream_provider_pubkey, seq_num)).fetchone()
         return row is not None
 
-    def get_competition_leaderboard(
+    def get_bounty_leaderboard(
         self,
         stream_name: str,
         stream_provider_pubkey: str,
@@ -1370,7 +1370,7 @@ class NetworkDB:
                 predictor_pubkey,
                 SUM(sats_paid)  AS total_sats,
                 COUNT(*)        AS prediction_count
-            FROM competition_payments
+            FROM bounty_payments
             WHERE stream_name = ? AND stream_provider_pubkey = ?
             GROUP BY predictor_pubkey
             ORDER BY total_sats DESC
@@ -1383,14 +1383,14 @@ class NetworkDB:
         stream_provider_pubkey: str,
         host_pubkey: str,
     ) -> dict | None:
-        """Return payment consistency stats for a hosted competition.
+        """Return payment consistency stats for a hosted bounty.
 
-        Returns None if no competition exists for this host.
+        Returns None if no bounty exists for this host.
         scored_observations counts distinct seq_nums that received payments.
         """
         conn = self._get_conn()
         comp = conn.execute("""
-            SELECT pay_per_obs_sats FROM competitions
+            SELECT pay_per_obs_sats FROM bounties
             WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
         """, (stream_name, stream_provider_pubkey, host_pubkey)).fetchone()
         if not comp:
@@ -1402,7 +1402,7 @@ class NetworkDB:
                 COALESCE(AVG(obs_total), 0.0)  AS avg_paid_per_obs
             FROM (
                 SELECT seq_num, SUM(sats_paid) AS obs_total
-                FROM competition_payments
+                FROM bounty_payments
                 WHERE stream_name = ? AND stream_provider_pubkey = ?
                 GROUP BY seq_num
             )

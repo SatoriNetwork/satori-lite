@@ -1,4 +1,4 @@
-# Competition Marketplace — Test Status
+# Bounty Marketplace — Test Status
 
 **Date:** 2026-04-13
 **Branch:** `prediction-market`
@@ -17,14 +17,14 @@
 
 ## Bugs Found and Fixed During Testing
 
-### Bug 1 — Competition dropdown loaded subscriptions instead of publications
-- **Symptom:** "New Competition" modal showed "no subscribed streams found"
-- **Root cause:** `loadSubscribedStreams()` in `competitions.html` fetched from
-  `/api/network/subscriptions`. The competition host is the stream *producer*,
+### Bug 1 — Bounty dropdown loaded subscriptions instead of publications
+- **Symptom:** "New Bounty" modal showed "no subscribed streams found"
+- **Root cause:** `loadSubscribedStreams()` in `bounties.html` fetched from
+  `/api/network/subscriptions`. The bounty host is the stream *producer*,
   so the dropdown should load from `/api/network/publications`.
 - **Fix:** Renamed to `loadPublishedStreams()`, changed fetch to
   `/api/network/publications` + `/api/settings/relay/status` (for own pubkey).
-- **File:** `web/templates/competitions.html` lines 481-511
+- **File:** `web/templates/bounties.html` lines 481-511
 - **Status:** Fixed
 
 ### Bug 2 — Stale session after container restart
@@ -35,23 +35,23 @@
 - **Fix:** Logout + re-login after container restart.
 - **Status:** Cosmetic / known behavior (not a code bug)
 
-### Bug 3 — Host publish path did not trigger competition scoring
-- **Symptom:** Alice published observations but `_competitionScoreAndPay` never
+### Bug 3 — Host publish path did not trigger bounty scoring
+- **Symptom:** Alice published observations but `_bountyScoreAndPay` never
   fired; no scoring or payment messages appeared in logs.
-- **Root cause:** `_competitionScoreAndPay` was only called from
+- **Root cause:** `_bountyScoreAndPay` was only called from
   `_networkProcessObservation`, which handles observations received from relay
   subscriptions. Since the host publishes observations but does *not* subscribe
   to its own stream, the scoring path was never reached on publish.
-- **Fix:** Added `await self._competitionScoreAndPay(...)` at the end of
+- **Fix:** Added `await self._bountyScoreAndPay(...)` at the end of
   `_networkPublishObservation()` in `start.py`, after the relay broadcast loop.
 - **File:** `neuron-lite/start.py` (after line 2076)
 - **Status:** Fixed
 
 ### Bug 4 — Stats endpoint returned 404 for `host_pubkey=self`
 - **Symptom:** Leaderboard tab showed Bob's ranking but the "Host stats" bar
-  was missing (console showed 404 for `/api/competition/stats?...&host_pubkey=self`).
-- **Root cause:** The `competitions.html` JS passes `host_pubkey=self` as a
-  literal string. The `/api/competition/stats` route passed this through to
+  was missing (console showed 404 for `/api/bounty/stats?...&host_pubkey=self`).
+- **Root cause:** The `bounties.html` JS passes `host_pubkey=self` as a
+  literal string. The `/api/bounty/stats` route passed this through to
   `get_host_payment_stats()` which found no match and returned 404.
 - **Fix:** Added `if host_pubkey == 'self': host_pubkey = startup.nostrPubkey`
   to the stats route in `routes.py`.
@@ -67,9 +67,9 @@
   `/Satori/Neuron/config/config.yaml` before restarting.
 - **Status:** Known behavior (anti-abuse throttle)
 
-### Issue 6 — Competition payment fails due to insufficient wallet balance
+### Issue 6 — Bounty payment fails due to insufficient wallet balance
 - **Symptom:** Scoring pipeline runs correctly, `compute_payouts` produces
-  correct results, but `_competitionPayPredictor` fails trying to open a
+  correct results, but `_bountyPayPredictor` fails trying to open a
   100,000,000 sat channel: `TransactionFailure: tx: not enough satori to send`.
 - **Root cause:** Default channel fund amount (`_channelFundSats()`) is very
   large (100M sats). Alice's test wallet has only ~10,000 sats (0.01 SATORI).
@@ -84,13 +84,13 @@
 - **Root cause:** The `_networkReconcileLoop` runs every 5 minutes (300s sleep).
   After startup, it takes up to one full cycle for the reconciler to call
   `server.getRelays()`, connect to returned relays, and start listeners.
-- **Impact:** Competition discovery via relay was delayed but eventually worked.
-  Bob discovered Alice's competition once relay connections were established.
+- **Impact:** Bounty discovery via relay was delayed but eventually worked.
+  Bob discovered Alice's bounty once relay connections were established.
 - **Status:** Known behavior — normal reconciliation timing.
 
 ### Bug 8 — Prediction listeners not spawning on publisher-only path
-- **Symptom:** After restart, Alice's logs showed NO "Competition: listening
-  for predictions" messages despite having active competitions.
+- **Symptom:** After restart, Alice's logs showed NO "Bounty: listening
+  for predictions" messages despite having active bounties.
 - **Root cause:** `_networkEnsurePublisherConnections` (the publisher path)
   connects to relays and announces publications but does NOT start prediction
   or access-request listeners. Those listeners are only started from
@@ -108,17 +108,17 @@
   instead of 1.
 - **Root cause:** Alice's prediction listeners on 3 relays each receive the
   same prediction DM (Nostr events propagate to all connected relays). Each
-  listener triggers `_competitionScoreLateArrival` → `_competitionScoreAndPay`,
+  listener triggers `_bountyScoreLateArrival` → `_bountyScoreAndPay`,
   resulting in 3 scoring runs for the same prediction.
 - **Fix:** Added `is_seq_already_scored()` method to `network_db.py` that
-  checks `competition_payments` for existing records. Added dedup guard at
-  the top of `_competitionScoreAndPay` that returns early if the seq_num
+  checks `bounty_payments` for existing records. Added dedup guard at
+  the top of `_bountyScoreAndPay` that returns early if the seq_num
   has already been scored.
 - **Files:** `neuron-lite/satorineuron/network_db.py`, `neuron-lite/start.py`
 - **Status:** Fixed
 
 ### Bug 10 — Prediction and access-request async iterators exit after 1s
-- **Symptom:** Alice's prediction listeners started (`Competition: listening
+- **Symptom:** Alice's prediction listeners started (`Bounty: listening
   for predictions on ...`) but never received any DMs — even when the DM
   event was confirmed present on the relay.
 - **Root cause:** `incoming_predictions()` and `incoming_access_requests()`
@@ -145,47 +145,47 @@
 
 ## Scenario Results
 
-### Scenario 1 — Competition Announcement and Discovery ✅
+### Scenario 1 — Bounty Announcement and Discovery ✅
 
 **Alice (host):**
-- [x] Navigate to `/competitions` → "My Competitions" tab
-- [x] Click "New Competition"
+- [x] Navigate to `/bounties` → "My Bounties" tab
+- [x] Click "New Bounty"
 - [x] Select `e2e-paid-ticker` from stream dropdown (after Bug 1 fix)
 - [x] Set: Total Pay = 200, Predictors = 1, Channels = 1, Scoring = mae, Horizon = 1
 - [x] Click "Announce" → `{"success": true}`
-- [x] Competition appears in "My Competitions" with status "Active"
+- [x] Bounty appears in "My Bounties" with status "Active"
 
 **Bob (predictor):**
-- [x] Navigate to `/competitions` → "Browse" tab
-- [x] Alice's competition appears (via live relay discovery — network connected)
+- [x] Navigate to `/bounties` → "Browse" tab
+- [x] Alice's bounty appears (via live relay discovery — network connected)
 - [x] Correct details: 200 sats/obs, mae scoring, 1 paid predictor
 - [x] "Join" button visible (or "Joined" badge if already joined)
 
 **Relay verification:**
-- [x] Competition announcement (kind 34607) confirmed on shared relay `ws://nginx/`
+- [x] Bounty announcement (kind 34607) confirmed on shared relay `ws://nginx/`
   via direct websocket query — event contains correct payload
-- [x] Also discovered a third-party competition (`matic-usdt-binance`) from public relays
+- [x] Also discovered a third-party bounty (`matic-usdt-binance`) from public relays
 
-### Scenario 2 — Join Competition ✅
+### Scenario 2 — Join Bounty ✅
 
 **Bob:**
-- [x] Click "Join" on Alice's competition
+- [x] Click "Join" on Alice's bounty
 - [x] Success alert: "Joined — your neuron will now predict this stream."
 - [x] Button changed from "Join" to "Joined" badge
-- [x] Bob's DB shows `joined_competitions` entry and `e2e-paid-ticker_pred` publication
+- [x] Bob's DB shows `joined_bounties` entry and `e2e-paid-ticker_pred` publication
 
 ### Scenario 3 — Scoring and Payment ✅ (partial)
 
 **Scoring pipeline (after Bug 3 fix):**
 - [x] Prediction seeded into Alice's DB for seq_num 11 (predicted=55.0, wallet pubkey included)
 - [x] Alice publishes observation seq_num 11 (value=52.0)
-- [x] `_competitionScoreAndPay` fires correctly (confirmed in logs)
+- [x] `_bountyScoreAndPay` fires correctly (confirmed in logs)
 - [x] `compute_payouts` calculates correct payout: Bob gets 200 sats
-- [x] `_competitionPayPredictor` attempts to open channel to Bob (Issue 6 — insufficient funds)
+- [x] `_bountyPayPredictor` attempts to open channel to Bob (Issue 6 — insufficient funds)
 
 **API verification:**
-- [x] `GET /api/competition/leaderboard` → Bob ranked #1 with 1 prediction, 200 sats
-- [x] `GET /api/competition/stats` → scored_observations=1, total_paid=200, 100% follow-through
+- [x] `GET /api/bounty/leaderboard` → Bob ranked #1 with 1 prediction, 200 sats
+- [x] `GET /api/bounty/stats` → scored_observations=1, total_paid=200, 100% follow-through
 
 **Note:** Channel payment failed due to insufficient wallet balance (Issue 6).
 Payment recording verified via manual DB seed. The scoring and payout calculation
@@ -194,25 +194,25 @@ pipelines are fully functional.
 ### Scenario 4 — Leaderboard and Stats ✅ (after Bug 4 fix)
 
 **Alice:**
-- [x] Navigate to `/competitions` → "My Competitions" tab
-- [x] Click the leaderboard icon on the competition row
+- [x] Navigate to `/bounties` → "My Bounties" tab
+- [x] Click the leaderboard icon on the bounty row
 - [x] Leaderboard tab shows Bob ranked #1 with correct prediction count and total sats
 - [x] Host stats bar shows:
   - `1 observations scored` (later updated to 2 after late-arrival test)
   - `200 sats total paid` (later updated to 400)
   - `avg 200 / 200 announced (100.0% follow-through)`
 
-### Scenario 5 — Close Competition ✅
+### Scenario 5 — Close Bounty ✅
 
 **Alice:**
-- [x] Navigate to "My Competitions" tab
-- [x] Click "Close" on the competition
-- [x] Confirm dialog: "Close the competition on 'e2e-paid-ticker'?"
+- [x] Navigate to "My Bounties" tab
+- [x] Click "Close" on the bounty
+- [x] Confirm dialog: "Close the bounty on 'e2e-paid-ticker'?"
 - [x] Status changed to "Closed"
 - [x] "Close" button removed, only "leaderboard" button remains
-- [x] Success alert: "Competition closed."
+- [x] Success alert: "Bounty closed."
 
-**Note:** Competition was re-created after closing for Scenario 3/4/6 testing.
+**Note:** Bounty was re-created after closing for Scenario 3/4/6 testing.
 
 ### Scenario 6 — Late Arrival Recovery ✅
 
@@ -227,7 +227,7 @@ pipelines are fully functional.
 - [x] Stats updated: 2 observations scored, 400 sats total, 100% follow-through
 
 **Note:** Late-arrival scoring logic tested via direct function call rather than
-Nostr DM delivery. The `_competitionScoreLateArrival` function correctly detects
+Nostr DM delivery. The `_bountyScoreLateArrival` function correctly detects
 that the observation already exists and runs scoring immediately.
 
 ### Scenario 7 — Access Request Flow (Phase 5) ✅
@@ -285,11 +285,11 @@ that the observation already exists and runs scoring immediately.
 
 **After Bug 8 fix (publisher prediction listeners):**
 - [x] Alice's logs show prediction listeners on all 3 connected relays
-- [x] Bob submits prediction via `/api/competition/submit-prediction`
+- [x] Bob submits prediction via `/api/bounty/submit-prediction`
 - [x] Encrypted DM (KIND_PREDICTION) sent to all relays
 - [x] Alice's `_incomingPredictionsLoop` receives prediction on relay reconnect
-- [x] `_competitionScoreLateArrival` fires and scores correctly
-- [x] Payment recorded in `competition_payments` table
+- [x] `_bountyScoreLateArrival` fires and scores correctly
+- [x] Payment recorded in `bounty_payments` table
 
 **Note:** After Bug 10 fix, DM encryption, transmission, and real-time
 processing pipeline is fully functional end-to-end.
@@ -305,7 +305,7 @@ processing pipeline is fully functional end-to-end.
 - [x] Bob publishes `e2e-paid-ticker_pred seq=5` to all relays
 - [x] Bob sends encrypted prediction DM to Alice's pubkey on all relays
 - [x] Alice's `_incomingPredictionsLoop` receives DM in real-time (810ms after publish)
-- [x] `_competitionScoreLateArrival` fires, scores 200 sats
+- [x] `_bountyScoreLateArrival` fires, scores 200 sats
 - [x] Second + third DM copies received from other relays — dedup prevents double scoring
 - [x] Total time: **816ms** from publish to scored payment
 
@@ -325,29 +325,29 @@ processing pipeline is fully functional end-to-end.
 - [x] `compute_payouts` → Charlie wins 200 sats, Bob gets 0 sats
 - [x] Only 1 payment recorded (Charlie)
 
-### Scenario 13 — Competition Close Visibility on Browse Tab ✅
+### Scenario 13 — Bounty Close Visibility on Browse Tab ✅
 
-**Purpose:** Verify closed competition disappears from Bob's Browse tab.
+**Purpose:** Verify closed bounty disappears from Bob's Browse tab.
 
 **Alice:**
-- [x] Close competition via `POST /api/competition/close` → `{"success": true}`
-- [x] My Competitions shows `active: 0` (UI renders "Closed" badge)
+- [x] Close bounty via `POST /api/bounty/close` → `{"success": true}`
+- [x] My Bounties shows `active: 0` (UI renders "Closed" badge)
 - [x] Close button removed; only leaderboard button remains
 
 **Bob:**
-- [x] Browse tab (`/api/competitions/discover`) no longer shows Alice's competition
+- [x] Browse tab (`/api/bounties/discover`) no longer shows Alice's bounty
 - [x] Only third-party `matic-usdt-binance` remains in browse results
-- [x] Relay correctly filters closed competition (close event replaces announcement)
+- [x] Relay correctly filters closed bounty (close event replaces announcement)
 
 ## Summary
 
 | Scenario | Status | Notes |
 |---|---|---|
 | 1. Announcement & Discovery | ✅ PASS | Bug 1 fixed; relay verified; live discovery confirmed |
-| 2. Join Competition | ✅ PASS | Join + badge UI works |
+| 2. Join Bounty | ✅ PASS | Join + badge UI works |
 | 3. Scoring & Payment | ✅ PASS (partial) | Bug 3 fixed; scoring works; payment blocked by wallet balance |
 | 4. Leaderboard & Stats | ✅ PASS | Bug 4 fixed; stats bar + leaderboard table correct |
-| 5. Close Competition | ✅ PASS | Full lifecycle verified |
+| 5. Close Bounty | ✅ PASS | Full lifecycle verified |
 | 6. Late Arrival Recovery | ✅ PASS | Late-arrival scoring logic verified |
 | 7. Access Request Flow | ✅ PASS | Request → Approve → Approved list |
 | 8. Revoke Access | ✅ PASS | Revoke → removed from list → DB confirmed |
@@ -355,7 +355,7 @@ processing pipeline is fully functional end-to-end.
 | 10. Encrypted DM Prediction | ✅ PASS | Bug 8 fixed; DM pipeline verified end-to-end |
 | 11. Full E2E (No Mocks) | ✅ PASS | Bug 10 fixed; 816ms publish-to-score, real relay delivery |
 | 12. Multi-Predictor Scoring | ✅ PASS | 2 predictors, 2 scenarios; rank + pay-top-N correct |
-| 13. Close Visibility (Browse) | ✅ PASS | Closed competition removed from Bob's Browse relay discovery |
+| 13. Close Visibility (Browse) | ✅ PASS | Closed bounty removed from Bob's Browse relay discovery |
 
 **13 of 13 scenarios passed** (Scenario 3 partial — scoring verified but channel
 payment requires funded wallet).
@@ -364,8 +364,8 @@ payment requires funded wallet).
 
 | # | Bug | File | Status |
 |---|---|---|---|
-| 1 | Competition dropdown loaded subscriptions instead of publications | `competitions.html` | Fixed |
-| 3 | Host publish path didn't trigger competition scoring | `start.py` | Fixed |
+| 1 | Bounty dropdown loaded subscriptions instead of publications | `bounties.html` | Fixed |
+| 3 | Host publish path didn't trigger bounty scoring | `start.py` | Fixed |
 | 4 | Stats endpoint returned 404 for `host_pubkey=self` | `routes.py` | Fixed |
 | 8 | Prediction listeners not spawning on publisher-only path | `start.py` | Fixed |
 | 9 | Duplicate scoring when prediction received on multiple relays | `start.py`, `network_db.py` | Fixed |
@@ -377,22 +377,22 @@ payment requires funded wallet).
 |---|---|---|---|
 | 2 | Stale session after container restart | Cosmetic — re-login resolves | Known |
 | 5 | 10-minute startup throttle | Workaround: set `server checkin: 0` | Known |
-| 6 | Competition payment fails (insufficient wallet) | Scoring works; payment needs funded wallet | Known |
+| 6 | Bounty payment fails (insufficient wallet) | Scoring works; payment needs funded wallet | Known |
 | 7 | Network reconciliation takes ~15 min after restart | Normal timing; relay discovery eventually works | Known |
 
 ## Code Changes (Session 2)
 
-- **`_competitionPayPredictor` refactored** (`start.py`): Records payment in DB first
+- **`_bountyPayPredictor` refactored** (`start.py`): Records payment in DB first
   (for leaderboard/accountability), then attempts channel transfer as best-effort.
   Previously, DB recording happened only after successful channel payment, so
   insufficient wallet balance meant no scoring results were persisted.
 - **Test endpoints added** (`routes.py`):
-  - `POST /api/competition/submit-prediction` — submit prediction via encrypted DM
-  - `POST /api/competition/simulate-observation` — inject observation + trigger engine
+  - `POST /api/bounty/submit-prediction` — submit prediction via encrypted DM
+  - `POST /api/bounty/simulate-observation` — inject observation + trigger engine
 
 ## Next Steps
 
-1. Fund Alice's wallet with sufficient SATORI for channel-based competition payments.
+1. Fund Alice's wallet with sufficient SATORI for channel-based bounty payments.
 2. Re-test Scenario 3 channel payment with a funded wallet.
 3. ~~Fix real-time relay delivery~~ — was Bug 10 (satorilib async iterator
    `return` instead of `continue`). Fixed and verified: 100ms relay delivery.

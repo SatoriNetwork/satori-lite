@@ -1,4 +1,4 @@
-"""Tests for competitions table in NetworkDB (Phase 1)."""
+"""Tests for bounties table in NetworkDB (Phase 1)."""
 
 import importlib.util
 import os
@@ -40,19 +40,19 @@ def sample():
 
 class TestSchema:
 
-    def test_competitions_table_exists(self, db):
+    def test_bounties_table_exists(self, db):
         conn = db._get_conn()
         tables = {r['name'] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
-        assert 'competitions' in tables
+        assert 'bounties' in tables
 
 
-class TestAddCompetition:
+class TestAddBounty:
 
     def test_add_and_get(self, db, sample):
-        db.add_competition(**sample)
-        row = db.get_competition(
+        db.add_bounty(**sample)
+        row = db.get_bounty(
             sample['stream_name'],
             sample['stream_provider_pubkey'],
             sample['host_pubkey'])
@@ -61,64 +61,64 @@ class TestAddCompetition:
         assert row['scoring_metric'] == 'mae'
 
     def test_add_twice_upserts(self, db, sample):
-        db.add_competition(**sample)
+        db.add_bounty(**sample)
         updated = {**sample, 'pay_per_obs_sats': 500}
-        db.add_competition(**updated)
-        row = db.get_competition(
+        db.add_bounty(**updated)
+        row = db.get_bounty(
             sample['stream_name'],
             sample['stream_provider_pubkey'],
             sample['host_pubkey'])
         assert row['pay_per_obs_sats'] == 500
 
     def test_get_nonexistent_returns_none(self, db):
-        assert db.get_competition('x', 'y', 'z') is None
+        assert db.get_bounty('x', 'y', 'z') is None
 
 
-class TestGetAllCompetitions:
+class TestGetAllBounties:
 
     def test_empty(self, db):
-        assert db.get_all_competitions() == []
+        assert db.get_all_bounties() == []
 
     def test_returns_all(self, db, sample):
-        db.add_competition(**sample)
+        db.add_bounty(**sample)
         second = {**sample, 'stream_name': 'eth-price', 'host_pubkey': 'ff0011'}
-        db.add_competition(**second)
-        rows = db.get_all_competitions()
+        db.add_bounty(**second)
+        rows = db.get_all_bounties()
         assert len(rows) == 2
 
     def test_active_only(self, db, sample):
-        db.add_competition(**sample)
+        db.add_bounty(**sample)
         inactive = {**sample, 'stream_name': 'eth-price', 'host_pubkey': 'ff0011', 'active': 0}
-        db.add_competition(**inactive)
-        rows = db.get_all_competitions(active_only=True)
+        db.add_bounty(**inactive)
+        rows = db.get_all_bounties(active_only=True)
         assert len(rows) == 1
         assert rows[0]['stream_name'] == 'btc-price-usd'
 
 
-class TestCloseCompetition:
+class TestCloseBounty:
 
     def test_close_sets_inactive(self, db, sample):
-        db.add_competition(**sample)
-        db.close_competition(
+        db.add_bounty(**sample)
+        db.close_bounty(
             sample['stream_name'],
             sample['stream_provider_pubkey'],
             sample['host_pubkey'])
-        row = db.get_competition(
+        row = db.get_bounty(
             sample['stream_name'],
             sample['stream_provider_pubkey'],
             sample['host_pubkey'])
         assert row['active'] == 0
 
     def test_close_nonexistent_does_not_raise(self, db):
-        db.close_competition('x', 'y', 'z')  # should not raise
+        db.close_bounty('x', 'y', 'z')  # should not raise
 
 
-class TestMyCompetitions:
+class TestMyBounties:
 
     def test_get_hosted_by(self, db, sample):
-        db.add_competition(**sample)
+        db.add_bounty(**sample)
         other = {**sample, 'stream_name': 'eth-price', 'host_pubkey': 'other'}
-        db.add_competition(**other)
-        rows = db.get_competitions_hosted_by('ddeeff')
+        db.add_bounty(**other)
+        rows = db.get_bounties_hosted_by('ddeeff')
         assert len(rows) == 1
         assert rows[0]['host_pubkey'] == 'ddeeff'

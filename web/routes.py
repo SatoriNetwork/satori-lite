@@ -2227,7 +2227,7 @@ def register_routes(app):
         """Subscribe to a datastream.
 
         When a `bounty_host_pubkey` field is present, this is also a
-        "join competition" action — we persist the join, register the
+        "join bounty" action — we persist the join, register the
         corresponding prediction publication, and the engine starts DM'ing
         predictions to that host on each observation.
         """
@@ -2279,7 +2279,7 @@ def register_routes(app):
             provider_pubkey = data['nostr_pubkey']
             # Persist the (stream, host) join so the engine knows where to
             # DM predictions when it predicts this stream.
-            startup.networkDB.join_competition(
+            startup.networkDB.join_bounty(
                 stream_name=stream_name,
                 stream_provider_pubkey=provider_pubkey,
                 host_pubkey=bounty_host_pubkey)
@@ -2363,7 +2363,7 @@ def register_routes(app):
     @app.route('/api/bounty/submit-prediction', methods=['POST'])
     @login_required
     def api_bounty_submit_prediction():
-        """Submit a prediction to a competition host via Nostr DM (predictor side).
+        """Submit a prediction to a bounty host via Nostr DM (predictor side).
 
         Required fields: stream_name, stream_provider_pubkey, host_pubkey,
         seq_num, predicted_value.
@@ -2399,7 +2399,7 @@ def register_routes(app):
         """Simulate receiving an observation and trigger engine + DM prediction.
 
         For testing: injects an observation into the DB and runs the engine
-        path (predict → DM to competition host) without relying on relay
+        path (predict → DM to bounty host) without relying on relay
         delivery. Required: stream_name, provider_pubkey, seq_num, value.
         """
         import asyncio as _asyncio
@@ -3046,14 +3046,14 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)})
 
-    # ── Competition routes ────────────────────────────────────────────────────
+    # ── Bounty routes ────────────────────────────────────────────────────
 
     @app.route('/api/bounty/scoring-modules', methods=['GET'])
     @login_required
     def api_bounty_scoring_modules():
         """Return list of available scoring module names from the scoring/ dir."""
         import os as _os
-        from satorineuron.competition_scoring import SCORING_DIR
+        from satorineuron.bounty_scoring import SCORING_DIR
         try:
             modules = sorted(
                 f[:-3] for f in _os.listdir(SCORING_DIR)
@@ -3065,7 +3065,7 @@ def register_routes(app):
     @app.route('/api/bounty', methods=['POST'])
     @login_required
     def api_bounty_create():
-        """Create and announce a prediction competition."""
+        """Create and announce a prediction bounty."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
@@ -3085,7 +3085,7 @@ def register_routes(app):
         if pay <= 0:
             return jsonify({'error': 'pay_per_obs_sats must be positive'}), 400
         import json as _json
-        startup.networkDB.add_competition(
+        startup.networkDB.add_bounty(
             stream_name=data['stream_name'],
             stream_provider_pubkey=data['stream_provider_pubkey'],
             host_pubkey=startup.nostrPubkey,
@@ -3098,13 +3098,13 @@ def register_routes(app):
             active=1,
             timestamp=int(time.time()),
         )
-        startup.announceCompetitionSync(data)
+        startup.announceBountySync(data)
         return jsonify({'success': True})
 
     @app.route('/api/bounty/close', methods=['POST'])
     @login_required
     def api_bounty_close():
-        """Close an active competition."""
+        """Close an active bounty."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
@@ -3113,15 +3113,15 @@ def register_routes(app):
         provider_pubkey = data.get('stream_provider_pubkey', '').strip()
         if not stream_name or not provider_pubkey:
             return jsonify({'error': 'missing fields'}), 400
-        startup.networkDB.close_competition(
+        startup.networkDB.close_bounty(
             stream_name, provider_pubkey, startup.nostrPubkey)
-        startup.closeCompetitionSync(stream_name, provider_pubkey)
+        startup.closeBountySync(stream_name, provider_pubkey)
         return jsonify({'success': True})
 
     @app.route('/api/bounty/leave', methods=['POST'])
     @login_required
     def api_bounty_leave():
-        """Leave a competition the neuron has joined as a predictor."""
+        """Leave a bounty the neuron has joined as a predictor."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
@@ -3131,53 +3131,53 @@ def register_routes(app):
         host_pubkey = data.get('host_pubkey', '').strip()
         if not stream_name or not provider_pubkey or not host_pubkey:
             return jsonify({'error': 'missing fields'}), 400
-        startup.networkDB.leave_competition(stream_name, provider_pubkey, host_pubkey)
+        startup.networkDB.leave_bounty(stream_name, provider_pubkey, host_pubkey)
         return jsonify({'success': True})
 
     @app.route('/api/bounties/mine', methods=['GET'])
     @login_required
     def api_bounties_mine():
-        """Return competitions hosted by this neuron."""
+        """Return bounties hosted by this neuron."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
-        rows = startup.networkDB.get_competitions_hosted_by(startup.nostrPubkey)
+        rows = startup.networkDB.get_bounties_hosted_by(startup.nostrPubkey)
         return jsonify({'bounties': rows})
 
     @app.route('/api/bounties', methods=['GET'])
     @login_required
     def api_bounties_all():
-        """Return all known competitions. Pass ?active=0 to include closed."""
+        """Return all known bounties. Pass ?active=0 to include closed."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
         active_only = request.args.get('active', '1') == '1'
-        rows = startup.networkDB.get_all_competitions(active_only=active_only)
+        rows = startup.networkDB.get_all_bounties(active_only=active_only)
         return jsonify({'bounties': rows})
 
     @app.route('/api/bounties/discover', methods=['GET'])
     @login_required
     def api_bounties_discover():
-        """Discover competitions from connected relays."""
+        """Discover bounties from connected relays."""
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Not ready'}), 503
         my_pubkey = startup.nostrPubkey
         joined = {
             (r['stream_name'], r['stream_provider_pubkey'], r['host_pubkey'])
-            for r in startup.networkDB.get_all_joined_competitions()
+            for r in startup.networkDB.get_all_joined_bounties()
         }
-        competitions = startup.discoverCompetitionsSync()
-        for c in competitions:
+        bounties = startup.discoverBountiesSync()
+        for c in bounties:
             key = (c['stream_name'], c['stream_provider_pubkey'], c['host_pubkey'])
             c['is_mine'] = c['host_pubkey'] == my_pubkey
             c['joined'] = key in joined
-        return jsonify({'bounties': competitions, 'my_pubkey': my_pubkey})
+        return jsonify({'bounties': bounties, 'my_pubkey': my_pubkey})
 
     @app.route('/api/bounty/leaderboard', methods=['GET'])
     @login_required
     def api_bounty_leaderboard():
-        """Return per-predictor payment totals for a competition."""
+        """Return per-predictor payment totals for a bounty."""
         stream_name = request.args.get('stream_name')
         provider_pubkey = request.args.get('provider_pubkey')
         if not stream_name or not provider_pubkey:
@@ -3185,14 +3185,14 @@ def register_routes(app):
         startup = get_startup()
         if not startup or not hasattr(startup, 'networkDB'):
             return jsonify({'error': 'Not ready'}), 503
-        board = startup.networkDB.get_competition_leaderboard(
+        board = startup.networkDB.get_bounty_leaderboard(
             stream_name, provider_pubkey)
         return jsonify(board)
 
     @app.route('/api/bounty/stats', methods=['GET'])
     @login_required
     def api_bounty_stats():
-        """Return payment consistency stats for a hosted competition."""
+        """Return payment consistency stats for a hosted bounty."""
         stream_name = request.args.get('stream_name')
         provider_pubkey = request.args.get('provider_pubkey')
         host_pubkey = request.args.get('host_pubkey')

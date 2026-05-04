@@ -1,4 +1,4 @@
-"""Tests for competition API routes (Phase 1).
+"""Tests for bounty API routes (Phase 1).
 
 Uses a minimal Flask app with a real NetworkDB and MockStartup,
 matching the pattern in test_network_routes.py.
@@ -28,14 +28,14 @@ class MockStartup:
         self._close_calls = []
         self._discover_result = []
 
-    def announceCompetitionSync(self, competition: dict):
-        self._announce_calls.append(competition)
+    def announceBountySync(self, bounty: dict):
+        self._announce_calls.append(bounty)
 
-    def closeCompetitionSync(self, stream_name: str,
+    def closeBountySync(self, stream_name: str,
                              stream_provider_pubkey: str):
         self._close_calls.append((stream_name, stream_provider_pubkey))
 
-    def discoverCompetitionsSync(self) -> list:
+    def discoverBountiesSync(self) -> list:
         return self._discover_result
 
 
@@ -47,8 +47,8 @@ def create_test_app(startup):
     def get_startup():
         return startup
 
-    @app.route('/api/competition', methods=['POST'])
-    def api_competition_create():
+    @app.route('/api/bounty', methods=['POST'])
+    def api_bounty_create():
         s = get_startup()
         if not s:
             return jsonify({'error': 'not ready'}), 503
@@ -65,7 +65,7 @@ def create_test_app(startup):
             competing = int(data['competing_predictors'])
         except (ValueError, TypeError):
             return jsonify({'error': 'invalid number fields'}), 400
-        s.networkDB.add_competition(
+        s.networkDB.add_bounty(
             stream_name=data['stream_name'],
             stream_provider_pubkey=data['stream_provider_pubkey'],
             host_pubkey=s.nostrPubkey,
@@ -78,11 +78,11 @@ def create_test_app(startup):
             active=1,
             timestamp=int(time.time()),
         )
-        s.announceCompetitionSync(data)
+        s.announceBountySync(data)
         return jsonify({'success': True})
 
-    @app.route('/api/competition/close', methods=['POST'])
-    def api_competition_close():
+    @app.route('/api/bounty/close', methods=['POST'])
+    def api_bounty_close():
         s = get_startup()
         if not s:
             return jsonify({'error': 'not ready'}), 503
@@ -91,34 +91,34 @@ def create_test_app(startup):
         provider_pubkey = data.get('stream_provider_pubkey', '').strip()
         if not stream_name or not provider_pubkey:
             return jsonify({'error': 'missing fields'}), 400
-        s.networkDB.close_competition(
+        s.networkDB.close_bounty(
             stream_name, provider_pubkey, s.nostrPubkey)
-        s.closeCompetitionSync(stream_name, provider_pubkey)
+        s.closeBountySync(stream_name, provider_pubkey)
         return jsonify({'success': True})
 
-    @app.route('/api/competitions/mine', methods=['GET'])
-    def api_competitions_mine():
+    @app.route('/api/bounties/mine', methods=['GET'])
+    def api_bounties_mine():
         s = get_startup()
         if not s:
             return jsonify({'error': 'not ready'}), 503
-        rows = s.networkDB.get_competitions_hosted_by(s.nostrPubkey)
-        return jsonify({'competitions': rows})
+        rows = s.networkDB.get_bounties_hosted_by(s.nostrPubkey)
+        return jsonify({'bounties': rows})
 
-    @app.route('/api/competitions/discover', methods=['GET'])
-    def api_competitions_discover():
+    @app.route('/api/bounties/discover', methods=['GET'])
+    def api_bounties_discover():
         s = get_startup()
         if not s:
             return jsonify({'error': 'not ready'}), 503
-        return jsonify({'competitions': s.discoverCompetitionsSync()})
+        return jsonify({'bounties': s.discoverBountiesSync()})
 
-    @app.route('/api/competitions', methods=['GET'])
-    def api_competitions_all():
+    @app.route('/api/bounties', methods=['GET'])
+    def api_bounties_all():
         s = get_startup()
         if not s:
             return jsonify({'error': 'not ready'}), 503
         active_only = request.args.get('active', '1') == '1'
-        rows = s.networkDB.get_all_competitions(active_only=active_only)
-        return jsonify({'competitions': rows})
+        rows = s.networkDB.get_all_bounties(active_only=active_only)
+        return jsonify({'bounties': rows})
 
     return app
 
@@ -139,12 +139,12 @@ def post_json(client, url, data):
                        content_type='application/json')
 
 
-# ── POST /api/competition ──────────────────────────────────────────
+# ── POST /api/bounty ──────────────────────────────────────────
 
-class TestCreateCompetition:
+class TestCreateBounty:
 
     def test_creates_and_announces(self, client):
-        resp = post_json(client, '/api/competition', {
+        resp = post_json(client, '/api/bounty', {
             'stream_name': 'btc-price',
             'stream_provider_pubkey': 'aabbcc',
             'pay_per_obs_sats': 300,
@@ -157,13 +157,13 @@ class TestCreateCompetition:
         assert len(client.startup._announce_calls) == 1
 
     def test_missing_field_returns_400(self, client):
-        resp = post_json(client, '/api/competition', {
+        resp = post_json(client, '/api/bounty', {
             'stream_name': 'btc-price',
         })
         assert resp.status_code == 400
 
     def test_persists_to_db(self, client):
-        post_json(client, '/api/competition', {
+        post_json(client, '/api/bounty', {
             'stream_name': 'btc-price',
             'stream_provider_pubkey': 'aabbcc',
             'pay_per_obs_sats': 300,
@@ -171,18 +171,18 @@ class TestCreateCompetition:
             'competing_predictors': 5,
             'scoring_metric': 'mae',
         })
-        resp = client.get('/api/competitions/mine')
+        resp = client.get('/api/bounties/mine')
         data = resp.get_json()
-        assert len(data['competitions']) == 1
-        assert data['competitions'][0]['stream_name'] == 'btc-price'
+        assert len(data['bounties']) == 1
+        assert data['bounties'][0]['stream_name'] == 'btc-price'
 
 
-# ── POST /api/competition/close ────────────────────────────────────
+# ── POST /api/bounty/close ────────────────────────────────────
 
-class TestCloseCompetition:
+class TestCloseBounty:
 
     def test_closes_and_notifies(self, client):
-        post_json(client, '/api/competition', {
+        post_json(client, '/api/bounty', {
             'stream_name': 'btc-price',
             'stream_provider_pubkey': 'aabbcc',
             'pay_per_obs_sats': 300,
@@ -190,7 +190,7 @@ class TestCloseCompetition:
             'competing_predictors': 5,
             'scoring_metric': 'mae',
         })
-        resp = post_json(client, '/api/competition/close', {
+        resp = post_json(client, '/api/bounty/close', {
             'stream_name': 'btc-price',
             'stream_provider_pubkey': 'aabbcc',
         })
@@ -198,7 +198,7 @@ class TestCloseCompetition:
         assert len(client.startup._close_calls) == 1
 
     def test_sets_inactive_in_db(self, client):
-        post_json(client, '/api/competition', {
+        post_json(client, '/api/bounty', {
             'stream_name': 'btc-price',
             'stream_provider_pubkey': 'aabbcc',
             'pay_per_obs_sats': 300,
@@ -206,29 +206,29 @@ class TestCloseCompetition:
             'competing_predictors': 5,
             'scoring_metric': 'mae',
         })
-        post_json(client, '/api/competition/close', {
+        post_json(client, '/api/bounty/close', {
             'stream_name': 'btc-price',
             'stream_provider_pubkey': 'aabbcc',
         })
-        resp = client.get('/api/competitions?active=1')
+        resp = client.get('/api/bounties?active=1')
         data = resp.get_json()
-        assert data['competitions'] == []
+        assert data['bounties'] == []
 
     def test_missing_fields_returns_400(self, client):
-        resp = post_json(client, '/api/competition/close', {})
+        resp = post_json(client, '/api/bounty/close', {})
         assert resp.status_code == 400
 
 
-# ── GET /api/competitions/mine ─────────────────────────────────────
+# ── GET /api/bounties/mine ─────────────────────────────────────
 
-class TestMyCompetitions:
+class TestMyBounties:
 
     def test_empty(self, client):
-        resp = client.get('/api/competitions/mine')
-        assert resp.get_json()['competitions'] == []
+        resp = client.get('/api/bounties/mine')
+        assert resp.get_json()['bounties'] == []
 
     def test_only_returns_mine(self, client):
-        post_json(client, '/api/competition', {
+        post_json(client, '/api/bounty', {
             'stream_name': 'btc-price',
             'stream_provider_pubkey': 'aabbcc',
             'pay_per_obs_sats': 300,
@@ -236,21 +236,21 @@ class TestMyCompetitions:
             'competing_predictors': 5,
             'scoring_metric': 'mae',
         })
-        resp = client.get('/api/competitions/mine')
+        resp = client.get('/api/bounties/mine')
         data = resp.get_json()
-        assert len(data['competitions']) == 1
-        assert data['competitions'][0]['host_pubkey'] == 'host_nostr_pubkey'
+        assert len(data['bounties']) == 1
+        assert data['bounties'][0]['host_pubkey'] == 'host_nostr_pubkey'
 
 
-# ── GET /api/competitions/discover ────────────────────────────────
+# ── GET /api/bounties/discover ────────────────────────────────
 
-class TestDiscoverCompetitions:
+class TestDiscoverBounties:
 
     def test_returns_discover_result(self, client):
         client.startup._discover_result = [
             {'stream_name': 'btc-price', 'pay_per_obs_sats': 300}
         ]
-        resp = client.get('/api/competitions/discover')
+        resp = client.get('/api/bounties/discover')
         data = resp.get_json()
-        assert len(data['competitions']) == 1
-        assert data['competitions'][0]['stream_name'] == 'btc-price'
+        assert len(data['bounties']) == 1
+        assert data['bounties'][0]['stream_name'] == 'btc-price'

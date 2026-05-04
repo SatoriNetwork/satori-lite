@@ -1,14 +1,14 @@
-# Competition Marketplace Manual Testing Plan
+# Bounty Marketplace Manual Testing Plan
 
 Status: **READY TO EXECUTE**
-Scope: **Prediction competition market** (layer 2) and **approval-gated private streams** (Phase 5).
+Scope: **Prediction bounty market** (layer 2) and **approval-gated private streams** (Phase 5).
 Prerequisite: Stream market testing completed (all scenarios verified 2026-04-13).
 
 ## 1. Goal
 
-Test the prediction competition lifecycle and approval-gated private streams
+Test the prediction bounty lifecycle and approval-gated private streams
 end-to-end using the existing two-neuron simulation environment. Alice acts
-as the competition host (and stream producer); Bob acts as the predictor
+as the bounty host (and stream producer); Bob acts as the predictor
 (and stream subscriber). Both roles exercise the full UI-to-relay-to-DB
 pipeline.
 
@@ -35,43 +35,43 @@ on disk, but the running Python processes have the old modules cached.
 
 ## 3. Preconditions
 
-Before starting competition testing, verify:
+Before starting bounty testing, verify:
 
 1. Both neurons are running and accessible (health check / dashboard loads)
 2. Both have funded wallets (from stream market testing — no new funding needed)
 3. Alice has at least one active published stream (e.g. `e2e-paid-ticker`)
 4. The relay is up and both neurons can reach it
-5. Both neurons show the **Competitions** page at `/competitions` with the
+5. Both neurons show the **Bounties** page at `/bounties` with the
    new "Access Requests" tab visible
 
 ## 4. Test Scenarios
 
-### Scenario 1 — Competition Announcement and Discovery
+### Scenario 1 — Bounty Announcement and Discovery
 
-**Purpose:** Verify Phase 1 — Alice announces a competition, Bob discovers it.
+**Purpose:** Verify Phase 1 — Alice announces a bounty, Bob discovers it.
 
 **Alice (host):**
-1. Navigate to `/competitions` -> "My Competitions" tab
-2. Click "New Competition"
+1. Navigate to `/bounties` -> "My Bounties" tab
+2. Click "New Bounty"
 3. Select `e2e-paid-ticker` from the stream dropdown
 4. Set: Total Pay per Obs = `200` sats, Predictors to Pay = `1`,
    Channels to Open = `1`, Scoring Module = `mae`, Horizon = `1`
 5. Click "Announce"
-6. **Verify:** Competition appears in "My Competitions" table with status "Active"
+6. **Verify:** Bounty appears in "My Bounties" table with status "Active"
 
 **Bob (predictor):**
-1. Navigate to `/competitions` -> "Browse" tab
+1. Navigate to `/bounties` -> "Browse" tab
 2. Click refresh
-3. **Verify:** Alice's competition for `e2e-paid-ticker` appears in the list
+3. **Verify:** Alice's bounty for `e2e-paid-ticker` appears in the list
 4. **Verify:** Shows correct details: 200 sats/obs, mae scoring, 1 paid predictor
-5. **Verify:** "Join" button is visible (not "Your competition" or "Joined")
+5. **Verify:** "Join" button is visible (not "Your bounty" or "Joined")
 
-### Scenario 2 — Join Competition and Submit Predictions
+### Scenario 2 — Join Bounty and Submit Predictions
 
 **Purpose:** Verify Phase 2 — Bob joins and predictions flow to Alice.
 
 **Bob:**
-1. Click "Join" on Alice's competition
+1. Click "Join" on Alice's bounty
 2. **Verify:** Button changes to "Joined" badge
 3. **Verify:** Bob's neuron is now subscribed to `e2e-paid-ticker` (check
    `/api/network/subscriptions`)
@@ -87,7 +87,7 @@ Before starting competition testing, verify:
 1. Bob's neuron should automatically predict the next observation
    (the prediction engine generates a prediction and submits it via encrypted DM)
 2. **Verify:** Check Alice's DB for received predictions:
-   `GET /api/competition/leaderboard?stream_name=e2e-paid-ticker&provider_pubkey=<alice_pubkey>`
+   `GET /api/bounty/leaderboard?stream_name=e2e-paid-ticker&provider_pubkey=<alice_pubkey>`
    — should eventually show Bob's pubkey
 
 **Note:** If the prediction engine doesn't auto-predict (it may need multiple
@@ -111,14 +111,14 @@ POST /api/network/predict
 
 **Alice:**
 1. Publish the observation that Bob predicted (the seq_num Bob predicted for)
-2. **Verify:** Alice's `_competitionScoreAndPay` fires:
-   - Check logs: `Competition: received prediction from <bob_pubkey>...`
-   - Check `GET /api/competition/leaderboard` — Bob should have `total_sats > 0`
+2. **Verify:** Alice's `_bountyScoreAndPay` fires:
+   - Check logs: `Bounty: received prediction from <bob_pubkey>...`
+   - Check `GET /api/bounty/leaderboard` — Bob should have `total_sats > 0`
 3. **Verify:** Alice opens a payment channel to Bob (or reuses existing one)
    - Check `/api/channels` on Alice — should show a sender channel to Bob's
      wallet pubkey
-4. **Verify:** Payment recorded in `competition_payments` table:
-   - `GET /api/competition/stats?stream_name=e2e-paid-ticker&provider_pubkey=<alice>&host_pubkey=<alice>`
+4. **Verify:** Payment recorded in `bounty_payments` table:
+   - `GET /api/bounty/stats?stream_name=e2e-paid-ticker&provider_pubkey=<alice>&host_pubkey=<alice>`
    - Should show `scored_observations >= 1`, `total_paid_sats >= 200`
 
 **Bob:**
@@ -130,8 +130,8 @@ POST /api/network/predict
 **Purpose:** Verify Phase 4 — accountability UI shows correct data.
 
 **Alice:**
-1. Navigate to `/competitions` -> "My Competitions" tab
-2. Click the leaderboard icon on the competition row
+1. Navigate to `/bounties` -> "My Bounties" tab
+2. Click the leaderboard icon on the bounty row
 3. **Verify:** Leaderboard tab shows Bob ranked #1 with correct prediction count
    and total sats
 4. **Verify:** Host stats bar shows:
@@ -139,19 +139,19 @@ POST /api/network/predict
    - `total_paid_sats` = sum of all payouts
    - Follow-through % > 0
 
-### Scenario 5 — Close Competition
+### Scenario 5 — Close Bounty
 
-**Purpose:** Verify competition lifecycle end.
+**Purpose:** Verify bounty lifecycle end.
 
 **Alice:**
-1. Navigate to "My Competitions" tab
-2. Click "Close" on the competition
+1. Navigate to "My Bounties" tab
+2. Click "Close" on the bounty
 3. Confirm the dialog
 4. **Verify:** Status changes to "Closed"
 
 **Bob:**
 1. Refresh the "Browse" tab
-2. **Verify:** The competition no longer appears (or appears as inactive if
+2. **Verify:** The bounty no longer appears (or appears as inactive if
    `?active=0` is used)
 
 ### Scenario 6 — Multiple Predictions, Late Arrival Recovery
@@ -159,13 +159,13 @@ POST /api/network/predict
 **Purpose:** Verify late-arrival scoring path.
 
 **Alice:**
-1. Create a new competition on the same or different stream
+1. Create a new bounty on the same or different stream
 2. Publish observation for seq_num N
 
 **Bob:**
 1. Submit a prediction for seq_num N **after** Alice has already published
    the observation (late arrival)
-2. **Verify:** Alice's `_competitionScoreLateArrival` fires and scores
+2. **Verify:** Alice's `_bountyScoreLateArrival` fires and scores
    immediately
 3. **Verify:** Bob appears on the leaderboard with payment for seq_num N
 
@@ -174,13 +174,13 @@ POST /api/network/predict
 **Purpose:** Verify approval-gated private streams end-to-end.
 
 **Alice (producer):**
-1. Navigate to `/competitions` -> "Access Requests" tab
+1. Navigate to `/bounties` -> "Access Requests" tab
 2. **Verify:** The tab loads with three sections: Pending Requests, Approved
    Subscribers, Request Access form
 3. Verify no pending requests initially
 
 **Bob (subscriber):**
-1. Navigate to `/competitions` -> "Access Requests" tab
+1. Navigate to `/bounties` -> "Access Requests" tab
 2. In the "Request Access to a Private Stream" form:
    - Stream name: `e2e-paid-ticker` (or a new stream Alice creates)
    - Producer pubkey: Alice's nostr pubkey (from Alice's settings/status API)
@@ -242,16 +242,16 @@ spot-checks for data that isn't surfaced in the UI.
 
 1. Restart both neuron containers (pick up new code from branch switch)
 2. Verify preconditions (Scenario 0 — health check)
-3. Run Scenarios 1-5 in order (competition lifecycle — depends on prior state)
-4. Run Scenario 6 (late arrival — can use same or new competition)
-5. Run Scenarios 7-9 in order (access gate lifecycle — independent of competitions)
+3. Run Scenarios 1-5 in order (bounty lifecycle — depends on prior state)
+4. Run Scenario 6 (late arrival — can use same or new bounty)
+5. Run Scenarios 7-9 in order (access gate lifecycle — independent of bounties)
 
 ## 7. Expected Issues
 
 - **Prediction engine may not auto-predict.** If Bob's neuron needs a history
   of observations before the engine fires, we'll use the manual predict API
   endpoint to submit predictions directly.
-- **Channel funding takes block confirmations.** If Alice's competition
+- **Channel funding takes block confirmations.** If Alice's bounty
   payment triggers a new channel open to Bob, expect 1-2 minute delay for
   the funding tx to confirm. Poll `/api/channels` on both sides.
 - **Container restart clears in-memory state.** After restart, the prediction
@@ -261,5 +261,5 @@ spot-checks for data that isn't surfaced in the UI.
 
 ## 8. Tracking
 
-Results will be documented in `docs/plans/competition-market-test-status.md`
+Results will be documented in `docs/plans/bounty-market-test-status.md`
 following the same format as `stream-market-test-status.md`.
