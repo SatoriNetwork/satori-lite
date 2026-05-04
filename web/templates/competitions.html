@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Competitions — Satori{% endblock %}
+{% block title %}Bounties | Satori{% endblock %}
 
 {% block content %}
 {% include "partials/navbar.html" %}
@@ -177,15 +177,77 @@
   white-space: pre-wrap;
 }
 .cmp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+
+/* ── Button system (mirrors set-btn from settings) ───────── */
+.cmp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 9px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+}
+.cmp-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--border-color-focus);
+  background: var(--bg-input);
+}
+.cmp-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+.cmp-btn .material-icons { font-size: 15px; }
+.cmp-btn-primary {
+  background: var(--accent-gradient);
+  border-color: transparent;
+  color: #fff;
+}
+.cmp-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  background: var(--accent-gradient);
+  transform: translateY(-1px);
+}
+.cmp-btn-ghost { background: transparent; }
+.cmp-btn-danger {
+  color: #ff6b7a;
+  border-color: rgba(220, 53, 69, 0.35);
+  background: rgba(220, 53, 69, 0.06);
+}
+.cmp-btn-danger:hover:not(:disabled) {
+  color: #ff3b50;
+  border-color: rgba(220, 53, 69, 0.55);
+  background: rgba(220, 53, 69, 0.1);
+  transform: translateY(-1px);
+}
+.cmp-btn-success {
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.06);
+}
+.cmp-btn-success:hover:not(:disabled) {
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.55);
+  background: rgba(34, 197, 94, 0.1);
+  transform: translateY(-1px);
+}
+.cmp-btn-icon { padding: 0.38rem 0.45rem; }
+/* modal footer buttons */
+.cmp-modal .modal-footer .cmp-btn { flex: 1; }
+.cmp-modal .modal-footer .cmp-btn-primary { flex: 1.5; }
 </style>
 
 <div class="container-fluid py-4" style="max-width: 960px;">
 
   <div class="d-flex align-items-end justify-content-between mb-3 gap-3 flex-wrap">
     <div>
-      <h4 class="mb-1">Prediction Competitions</h4>
+      <h4 class="mb-1">Prediction Bounties</h4>
       <p class="text-muted small mb-0">
-        Host a competition on any data stream, or browse and join competitions hosted by others.
+        Post a bounty on any data stream, or browse and join bounties hosted by others.
       </p>
     </div>
   </div>
@@ -200,7 +262,7 @@
     </button>
     <button class="cmp-tab" id="mineTab" onclick="showTab('mine')" role="tab">
       <i class="material-icons">emoji_events</i>
-      <span class="tab-label">My Competitions</span>
+      <span class="tab-label">My Bounties</span>
     </button>
     <button class="cmp-tab" id="leaderboardTab" onclick="showTab('leaderboard')" role="tab">
       <i class="material-icons">leaderboard</i>
@@ -217,8 +279,8 @@
   <div id="browsePanel">
     <div class="card">
       <div class="card-header d-flex align-items-center justify-content-between">
-        <span class="fw-600">Available Competitions <span class="badge bg-secondary ms-1" id="browseCount">0</span></span>
-        <button class="btn btn-outline-secondary btn-sm" onclick="loadBrowse()">
+        <span class="fw-600">Available Bounties <span class="badge bg-secondary ms-1" id="browseCount">0</span></span>
+        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadBrowse()">
           <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
         </button>
       </div>
@@ -261,7 +323,7 @@
             <input type="text" class="form-control form-control-sm font-monospace" id="lb_provider" placeholder="Provider pubkey">
           </div>
           <div class="col-auto">
-            <button class="btn btn-sm btn-primary" onclick="loadLeaderboard()">Load</button>
+            <button class="cmp-btn cmp-btn-primary" onclick="loadLeaderboard()">Load</button>
           </div>
         </div>
         <!-- Stats summary -->
@@ -290,15 +352,15 @@
   <!-- ── My Competitions Tab ──────────────────────────────────── -->
   <div id="minePanel" style="display:none;">
     <div class="d-flex justify-content-end mb-3">
-      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newCompetitionModal">
+      <button class="cmp-btn cmp-btn-primary" data-bs-toggle="modal" data-bs-target="#newCompetitionModal">
         <i class="material-icons align-middle" style="font-size:16px;">add</i>
-        New Competition
+        New Bounty
       </button>
     </div>
     <div class="card">
       <div class="card-header d-flex align-items-center justify-content-between">
-        <span class="fw-600">Competitions I Host <span class="badge bg-secondary ms-1" id="mineCount">0</span></span>
-        <button class="btn btn-outline-secondary btn-sm" onclick="loadMine()">
+        <span class="fw-600">Bounties I Host <span class="badge bg-secondary ms-1" id="mineCount">0</span></span>
+        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadMine()">
           <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
         </button>
       </div>
@@ -332,7 +394,7 @@
     <div class="card mb-4">
       <div class="card-header d-flex align-items-center justify-content-between">
         <span class="fw-600">Pending Access Requests <span class="badge bg-warning text-dark ms-1" id="pendingCount">0</span></span>
-        <button class="btn btn-outline-secondary btn-sm" onclick="loadPendingRequests()">
+        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadPendingRequests()">
           <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
         </button>
       </div>
@@ -362,9 +424,9 @@
         <span class="fw-600">Approved Subscribers</span>
         <div class="d-flex gap-2 align-items-center">
           <select class="form-select form-select-sm" id="approvedStreamSelect" style="width:auto;" onchange="loadApproved()">
-            <option value="">— select stream —</option>
+            <option value="">Select stream</option>
           </select>
-          <button class="btn btn-outline-secondary btn-sm" onclick="loadApproved()">
+          <button class="cmp-btn cmp-btn-ghost cmp-btn-icon" onclick="loadApproved()">
             <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
           </button>
         </div>
@@ -406,7 +468,7 @@
             <input type="text" class="form-control form-control-sm" id="ra_message" placeholder="Optional message to the producer">
           </div>
           <div class="col-auto">
-            <button class="btn btn-sm btn-primary" onclick="requestAccess()">
+            <button class="cmp-btn cmp-btn-primary" onclick="requestAccess()">
               <i class="material-icons align-middle" style="font-size:14px;">lock_open</i>
               Request Access
             </button>
@@ -425,14 +487,14 @@
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">New Competition</h5>
+        <h5 class="modal-title">New Bounty</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
         <div class="cmp-field">
           <label class="form-label">Stream</label>
           <select class="form-select" id="nc_stream_select">
-            <option value="">— loading subscribed streams… —</option>
+            <option value="">Loading subscribed streams...</option>
           </select>
           <input type="hidden" id="nc_stream_name">
           <input type="hidden" id="nc_provider_pubkey">
@@ -457,7 +519,7 @@
         <div class="cmp-field">
           <label class="form-label">Scoring Module</label>
           <select class="form-select" id="nc_scoring">
-            <option value="">— loading… —</option>
+            <option value="">Loading...</option>
           </select>
           <div class="form-text">Scoring algorithm used to rank and pay predictors.</div>
         </div>
@@ -469,8 +531,8 @@
         <div id="newCompModal_alert"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="createCompetition()">
+        <button type="button" class="cmp-btn cmp-btn-ghost" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="cmp-btn cmp-btn-primary" onclick="createCompetition()">
           <i class="material-icons align-middle" style="font-size:16px;">campaign</i>Announce
         </button>
       </div>
@@ -507,7 +569,7 @@ function modalAlert(msg, type='danger') {
 
 // ── Helpers ───────────────────────────────────────────────────
 function shortKey(key) {
-  if (!key || key.length < 12) return key || '—';
+  if (!key || key.length < 12) return key || '-';
   return key.slice(0, 8) + '…' + key.slice(-4);
 }
 
@@ -527,7 +589,7 @@ function renderBrowse(comps) {
   const tbody = document.getElementById('browseTable');
   document.getElementById('browseCount').textContent = comps.length;
   if (!comps.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">No active competitions found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">No active bounties found.</td></tr>';
     return;
   }
   tbody.innerHTML = comps.map(c => `
@@ -539,17 +601,17 @@ function renderBrowse(comps) {
       <td><span class="text-muted small font-monospace">${shortKey(c.host_pubkey)}</span></td>
       <td><span class="badge bg-secondary">${c.scoring_metric}</span></td>
       <td class="text-end">${(c.pay_per_obs_sats || 0).toLocaleString()} sats</td>
-      <td class="text-end">${c.paid_predictors ?? '—'}</td>
-      <td class="text-end">${c.competing_predictors ?? '—'}</td>
+      <td class="text-end">${c.paid_predictors ?? '-'}</td>
+      <td class="text-end">${c.competing_predictors ?? '-'}</td>
       <td class="text-end">
         ${c.is_mine
-          ? '<span class="badge bg-secondary">Your competition</span>'
+          ? '<span class="badge bg-secondary">Your bounty</span>'
           : c.joined
-            ? `<button class="btn btn-outline-danger btn-sm"
+            ? `<button class="cmp-btn cmp-btn-danger"
                 onclick="leaveCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
                 Leave
                </button>`
-            : `<button class="btn btn-outline-primary btn-sm"
+            : `<button class="cmp-btn cmp-btn-primary"
                 onclick="joinCompetition('${c.stream_name}', '${c.stream_provider_pubkey}', '${c.host_pubkey}')">
                 Join
                </button>`
@@ -573,7 +635,7 @@ async function joinCompetition(streamName, providerPubkey, hostPubkey) {
     });
     const data = await resp.json();
     if (data.error) { showAlert(data.error); return; }
-    showAlert('Joined — your neuron will now predict this stream.', 'success');
+    showAlert('Joined. Your neuron will now predict this stream.', 'success');
     loadBrowse();
   } catch(e) {
     showAlert('Failed to join: ' + e);
@@ -593,7 +655,7 @@ async function leaveCompetition(streamName, providerPubkey, hostPubkey) {
     });
     const data = await resp.json();
     if (data.error) { showAlert(data.error); return; }
-    showAlert('Left competition — your neuron will no longer submit predictions to this host.', 'success');
+    showAlert('Left bounty. Your neuron will no longer submit predictions to this host.', 'success');
     loadBrowse();
   } catch(e) {
     showAlert('Failed to leave: ' + e);
@@ -616,7 +678,7 @@ function renderMine(comps) {
   const tbody = document.getElementById('mineTable');
   document.getElementById('mineCount').textContent = comps.length;
   if (!comps.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">No competitions yet. Click "New Competition" to announce one.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted text-center py-4">No bounties yet. Click "New Bounty" to announce one.</td></tr>';
     return;
   }
   tbody.innerHTML = comps.map(c => `
@@ -627,20 +689,20 @@ function renderMine(comps) {
       </td>
       <td><span class="badge bg-secondary">${c.scoring_metric}</span></td>
       <td class="text-end">${(c.pay_per_obs_sats || 0).toLocaleString()} sats</td>
-      <td class="text-end">${c.paid_predictors ?? '—'}</td>
-      <td class="text-end">${c.competing_predictors ?? '—'}</td>
+      <td class="text-end">${c.paid_predictors ?? '-'}</td>
+      <td class="text-end">${c.competing_predictors ?? '-'}</td>
       <td>
         ${c.active
           ? '<span class="badge bg-success">Active</span>'
           : '<span class="badge bg-secondary">Closed</span>'}
       </td>
       <td class="text-end d-flex gap-1 justify-content-end">
-        <button class="btn btn-outline-secondary btn-sm"
+        <button class="cmp-btn cmp-btn-ghost cmp-btn-icon"
           onclick="viewLeaderboard('${c.stream_name}', '${c.stream_provider_pubkey}')">
           <i class="material-icons align-middle" style="font-size:14px;">leaderboard</i>
         </button>
         ${c.active ? `
-          <button class="btn btn-outline-danger btn-sm"
+          <button class="cmp-btn cmp-btn-danger"
             onclick="closeCompetition('${c.stream_name}', '${c.stream_provider_pubkey}')">
             Close
           </button>` : ''}
@@ -650,7 +712,7 @@ function renderMine(comps) {
 }
 
 async function closeCompetition(streamName, providerPubkey) {
-  if (!confirm(`Close the competition on "${streamName}"?`)) return;
+  if (!confirm(`Close the bounty on "${streamName}"?`)) return;
   try {
     const resp = await fetch('/api/competition/close', {
       method: 'POST',
@@ -662,7 +724,7 @@ async function closeCompetition(streamName, providerPubkey) {
     });
     const data = await resp.json();
     if (data.error) { showAlert(data.error); return; }
-    showAlert('Competition closed.', 'success');
+    showAlert('Bounty closed.', 'success');
     loadMine();
   } catch(e) {
     showAlert('Failed to close: ' + e);
@@ -672,7 +734,7 @@ async function closeCompetition(streamName, providerPubkey) {
 // ── Populate stream dropdown from own publications ────────────
 async function loadPublishedStreams() {
   const sel = document.getElementById('nc_stream_select');
-  sel.innerHTML = '<option value="">— loading… —</option>';
+  sel.innerHTML = '<option value="">Loading...</option>';
   try {
     const [pubResp, statusResp] = await Promise.all([
       fetch('/api/network/publications'),
@@ -684,7 +746,7 @@ async function loadPublishedStreams() {
     const streams = (pubData.publications || []).filter(
       s => !s.stream_name.endsWith('_pred')
     );
-    sel.innerHTML = '<option value="">— select a stream —</option>';
+    sel.innerHTML = '<option value="">Select a stream</option>';
     streams.forEach(s => {
       const opt = document.createElement('option');
       opt.value = JSON.stringify({stream_name: s.stream_name, provider_pubkey: myPubkey});
@@ -692,16 +754,16 @@ async function loadPublishedStreams() {
       sel.appendChild(opt);
     });
     if (streams.length === 0) {
-      sel.innerHTML = '<option value="">— no published streams found —</option>';
+      sel.innerHTML = '<option value="">No published streams found</option>';
     }
   } catch(e) {
-    sel.innerHTML = '<option value="">— failed to load streams —</option>';
+    sel.innerHTML = '<option value="">Failed to load streams</option>';
   }
 }
 
 async function loadScoringModules() {
   const sel = document.getElementById('nc_scoring');
-  sel.innerHTML = '<option value="">— loading… —</option>';
+  sel.innerHTML = '<option value="">Loading...</option>';
   try {
     const resp = await fetch('/api/competition/scoring-modules');
     const data = await resp.json();
@@ -714,10 +776,10 @@ async function loadScoringModules() {
       sel.appendChild(opt);
     });
     if (modules.length === 0) {
-      sel.innerHTML = '<option value="">— no modules found —</option>';
+      sel.innerHTML = '<option value="">No modules found</option>';
     }
   } catch(e) {
-    sel.innerHTML = '<option value="">— failed to load —</option>';
+    sel.innerHTML = '<option value="">Failed to load</option>';
   }
 }
 
@@ -757,7 +819,7 @@ async function createCompetition() {
     const data = await resp.json();
     if (data.error) { modalAlert(data.error); return; }
     bootstrap.Modal.getInstance(document.getElementById('newCompetitionModal')).hide();
-    showAlert('Competition announced.', 'success');
+    showAlert('Bounty announced.', 'success');
     loadMine();
   } catch(e) {
     modalAlert('Failed: ' + e);
@@ -805,7 +867,7 @@ async function loadLeaderboard() {
       if (!stats.error) {
         const ratio = stats.announced_per_obs > 0
           ? (stats.avg_paid_per_obs / stats.announced_per_obs * 100).toFixed(1)
-          : '—';
+          : '-';
         document.getElementById('lb_stats_text').innerHTML =
           `<strong>Host stats:</strong> ` +
           `${stats.scored_observations} observations scored · ` +
@@ -822,7 +884,7 @@ async function loadLeaderboard() {
 
 // ── Access Requests ──────────────────────────────────────────
 function formatTime(ts) {
-  if (!ts) return '—';
+  if (!ts) return '-';
   return new Date(ts * 1000).toLocaleString();
 }
 
@@ -849,12 +911,12 @@ async function loadPendingRequests() {
       <tr>
         <td class="fw-500">${r.stream_name}</td>
         <td class="font-monospace small">${shortKey(r.requester_pubkey)}</td>
-        <td class="small">${r.message || '—'}</td>
+        <td class="small">${r.message || '-'}</td>
         <td class="small text-muted">${formatTime(r.requested_at)}</td>
         <td class="text-end d-flex gap-1 justify-content-end">
-          <button class="btn btn-outline-success btn-sm"
+          <button class="cmp-btn cmp-btn-success"
             onclick="approveRequest('${r.stream_name}', '${r.requester_pubkey}')">Approve</button>
-          <button class="btn btn-outline-danger btn-sm"
+          <button class="cmp-btn cmp-btn-danger"
             onclick="rejectRequest('${r.stream_name}', '${r.requester_pubkey}')">Reject</button>
         </td>
       </tr>
@@ -903,7 +965,7 @@ async function loadApprovedStreamList() {
     const resp = await fetch('/api/network/publications');
     const data = await resp.json();
     const pubs = data.publications || [];
-    sel.innerHTML = '<option value="">— select stream —</option>';
+    sel.innerHTML = '<option value="">Select stream</option>';
     pubs.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.stream_name;
@@ -911,7 +973,7 @@ async function loadApprovedStreamList() {
       sel.appendChild(opt);
     });
   } catch(e) {
-    sel.innerHTML = '<option value="">— failed to load —</option>';
+    sel.innerHTML = '<option value="">Failed to load</option>';
   }
 }
 
@@ -936,7 +998,7 @@ async function loadApproved() {
         <td class="font-monospace small">${shortKey(s.subscriber_pubkey)}</td>
         <td class="small text-muted">${formatTime(s.approved_at)}</td>
         <td class="text-end">
-          <button class="btn btn-outline-danger btn-sm"
+          <button class="cmp-btn cmp-btn-danger"
             onclick="revokeSubscriber('${streamName}', '${s.subscriber_pubkey}')">Revoke</button>
         </td>
       </tr>
