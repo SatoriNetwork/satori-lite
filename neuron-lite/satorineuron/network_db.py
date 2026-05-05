@@ -125,6 +125,11 @@ class NetworkDB:
                 "INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass  # column already exists
+        # Migration: remove invalid relay URLs stored before validation was added
+        conn.execute(
+            "DELETE FROM relays WHERE relay_url = '' "
+            "OR (relay_url NOT LIKE 'ws://%' AND relay_url NOT LIKE 'wss://%')"
+        )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS publications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -679,6 +684,8 @@ class NetworkDB:
 
     def upsert_relay(self, relay_url: str, user_added: bool = False):
         """Record a relay, updating last_active if it already exists."""
+        if not relay_url or not relay_url.startswith(('ws://', 'wss://')):
+            return
         now = int(time.time())
         conn = self._get_conn()
         conn.execute("""
