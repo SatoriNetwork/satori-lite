@@ -304,7 +304,28 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
                     logger.info(f"Peer registered: peer_id={data.get('peer_id')}")
                     return data
 
-            logger.warning(f"Peer registration attempt {attempt + 1} failed: {resp.text}")
+            # 4xx responses are caused by the request itself — retrying with
+            # the same wallet/vault pubkeys won't change the outcome, so stop
+            # immediately and surface a clear message.
+            if 400 <= resp.status_code < 500:
+                detail = _extract_error_detail(resp)
+                if resp.status_code == 409:
+                    logger.error(
+                        f"Peer registration rejected by server (409 Conflict): {detail}. "
+                        "This wallet pubkey is already registered to a different peer "
+                        "and cannot be re-used as an identity."
+                    )
+                else:
+                    logger.error(
+                        f"Peer registration rejected by server "
+                        f"({resp.status_code}): {detail}"
+                    )
+                return None
+
+            logger.warning(
+                f"Peer registration attempt {attempt + 1} failed "
+                f"({resp.status_code}): {resp.text}"
+            )
 
         except requests.RequestException as e:
             logger.warning(f"Peer registration attempt {attempt + 1} error: {e}")
@@ -315,6 +336,19 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
 
     logger.error("Failed to register peer after all retries")
     return None
+
+
+def _extract_error_detail(resp):
+    """Pull a human-readable message out of a FastAPI error response."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return resp.text or f"HTTP {resp.status_code}"
+    if isinstance(body, dict):
+        detail = body.get('detail') or body.get('message')
+        if detail:
+            return detail if isinstance(detail, str) else str(detail)
+    return str(body)
 
 
 def login_required(f):
