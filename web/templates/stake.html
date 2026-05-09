@@ -753,6 +753,7 @@
                         <label class="stk-section-label">
                             <i class="material-icons">engineering</i>
                             Workers
+                            <span id="workerCount" style="display:none; margin-left:0.4rem; font-size:0.6rem; font-weight:700; background:var(--accent-primary, #6c757d); color:#fff; border-radius:999px; padding:1px 7px; vertical-align:middle; letter-spacing:0.04em;"></span>
                         </label>
                         <div id="workerList" class="stk-addr-list">
                             <div class="stk-empty">Loading...</div>
@@ -1160,9 +1161,12 @@
         const workerListEl = document.getElementById('workerList');
         const result = await apiCall('/pool/workers');
 
+        const workerCountEl = document.getElementById('workerCount');
         if (result && result.workers && result.workers.length > 0) {
             hasWorkers = true;
             workerListEl.innerHTML = '';
+            workerCountEl.textContent = result.workers.length;
+            workerCountEl.style.display = '';
             result.workers.forEach((worker) => {
                 const row = document.createElement('div');
                 row.className = 'stk-addr-row';
@@ -1181,6 +1185,7 @@
         } else {
             hasWorkers = false;
             workerListEl.innerHTML = '<div class="stk-empty">No workers added yet</div>';
+            workerCountEl.style.display = 'none';
         }
 
         updateMutualExclusionUI();
