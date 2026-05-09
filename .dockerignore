@@ -1,0 +1,39 @@
+# Sensitive data - never bake into image
+neuron-lite/wallet/
+neuron-lite/config/
+neuron-lite/models/
+neuron-lite/data/
+neuron-lite/network.db
+engine-lite/db/
+
+# Git and IDE
+.git/
+.gitignore
+.claude/
+.vscode/
+.idea/
+
+# Python cache
+**/__pycache__/
+**/*.py[cod]
+**/*.so
+**/*.egg-info/
+.pytest_cache/
+
+# Logs and temp
+**/*.log
+logs/
+**/*.tmp
+**/*.temp
+tmp/
+tasks/
+me-guide/
+
+# OS
+**/.DS_Store
+**/Thumbs.db
+
+# Docs and local config
+*.md
+*.bak
+.env

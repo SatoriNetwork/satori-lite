@@ -817,7 +817,7 @@
     .ds-price-help { font-size: 13px !important; opacity: 0.5; transition: opacity 0.15s; }
     .ds-price-tooltip-wrap:hover .ds-price-help { opacity: 1; }
     .ds-price-tooltip-wrap::after {
-        content: '1 sat = 0.00000001 SATORI — the smallest unit of SATORI';
+        content: '1 sat = 0.00000001 SATORI, the smallest unit of SATORI';
         position: absolute;
         bottom: calc(100% + 6px);
         left: 50%;
@@ -2038,11 +2038,11 @@
         <div class="dash-hero-meta">
             <span class="dash-meta-pill" id="dashHeroSatoriPill">
                 <i class="material-icons">savings</i>
-                <strong id="dashHeroSatori">—</strong> SATORI
+                <strong id="dashHeroSatori">-</strong> SATORI
             </span>
             <span class="dash-meta-pill" id="dashHeroEvrPill">
                 <i class="material-icons">bolt</i>
-                <strong id="dashHeroEvr">—</strong> EVR
+                <strong id="dashHeroEvr">-</strong> EVR
             </span>
         </div>
     </header>
@@ -2541,7 +2541,7 @@
                                         <i class="material-icons">bolt</i>
                                         <span id="dsPriceLabel">Sats (Satoshis) per Observation</span>
                                         <span class="ds-price-sub">(0 = free)</span>
-                                        <span class="ds-price-tooltip-wrap" title="1 sat = 0.00000001 SATORI — the smallest unit of SATORI">
+                                        <span class="ds-price-tooltip-wrap" title="1 sat = 0.00000001 SATORI, the smallest unit of SATORI">
                                             <i class="material-icons ds-price-help">help_outline</i>
                                         </span>
                                     </div>
@@ -2564,7 +2564,7 @@
                                 <div class="ds-field">
                                     <label>Classification</label>
                                     <select id="dsClassification" class="form-select">
-                                        <option value="">— pick one —</option>
+                                        <option value="">Pick one</option>
                                     </select>
                                 </div>
                                 <div class="ds-field">
@@ -2592,7 +2592,7 @@
                                 <div class="ds-field">
                                     <label>Cadence <span style="font-weight:400; text-transform:none; letter-spacing:0;">(optional)</span></label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="dsCadenceMin" class="form-control" value="" min="10" placeholder="—" style="font-size:0.82rem;">
+                                        <input type="number" id="dsCadenceMin" class="form-control" value="" min="10" placeholder="" style="font-size:0.82rem;">
                                         <span class="input-group-text ds-cadence-unit-group" style="padding: 0; background:var(--bg-input); border-color:var(--border-color);">
                                             <button type="button" class="ds-cadence-unit active" id="dsCadenceUnitMin" onclick="switchCadenceUnit('min')">min</button>
                                             <button type="button" class="ds-cadence-unit" id="dsCadenceUnitHr" onclick="switchCadenceUnit('hr')">hr</button>
@@ -2649,7 +2649,7 @@
 
                             <!-- External push hint -->
                             <div id="dsExternalHint" style="display: none;" class="ds-external-hint">
-                                No URL — this stream accepts data pushed via
+                                No URL. This stream accepts data pushed via
                                 <code>POST /api/network/publish</code>
                                 with <code>{"stream_name": "...", "value": "..."}</code>
                             </div>
@@ -3036,8 +3036,8 @@
         const evrEl = document.getElementById('dashHeroEvr');
         if (!satoriEl || !evrEl) return;
         if (!totals) {
-            satoriEl.textContent = '—';
-            evrEl.textContent = '—';
+            satoriEl.textContent = '-';
+            evrEl.textContent = '-';
             return;
         }
         satoriEl.textContent = formatBalance(totals.satori);
@@ -4679,7 +4679,7 @@
                     'onclick="event.stopPropagation(); editDataSource(\'' +
                     p.stream_name.replace(/'/g, "\\'") + '\'); return false;">+ Add</a>';
             } else {
-                classCell = '<span class="text-muted">—</span>';
+                classCell = '<span class="text-muted">-</span>';
             }
             row.innerHTML =
                 '<td><strong>' + (p.name || p.stream_name) + '</strong></td>' +
@@ -5706,7 +5706,7 @@
                 resultDiv.innerHTML =
                     '<div class="iw-result-title"><i class="material-icons">check_circle</i>Wallet imported · restarting</div>' +
                     'Redirecting to login in 15s. After restart, log in with your vault password and set a new reward address.' +
-                    '<span class="iw-result-meta">backup → ' + (data.backup_location || '—') + '</span>';
+                    '<span class="iw-result-meta">backup → ' + (data.backup_location || '-') + '</span>';
                 resultDiv.style.display = 'block';
 
                 showToast('Wallet imported! Container restarting...');

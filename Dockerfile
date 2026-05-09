@@ -30,8 +30,11 @@ RUN git clone --depth 1 https://github.com/hoytech/strfry.git /tmp/strfry && \
 # Create directory structure
 RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web
 
-# Copy satorilib from external build context (passed via --build-context satorilib=...)
-COPY --from=satorilib satorilib /Satori/Lib/satorilib
+# Copy only the Python package source into the image.
+# The package lives under src/satorilib in the repo, and /Satori/Lib must contain
+# the package root directly for `import satorilib...` to resolve in prod the same
+# way it does in dev mounts.
+COPY --from=satorilib satorilib/src/satorilib /Satori/Lib/satorilib
 # Copy neuron code
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine

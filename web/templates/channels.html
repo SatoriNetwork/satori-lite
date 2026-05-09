@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Channels — Satori{% endblock %}
+{% block title %}Channels | Satori{% endblock %}
 
 {% block content %}
 {% include "partials/navbar.html" %}
@@ -11,7 +11,7 @@
     <div>
       <h4 class="mb-1">Payment Channels</h4>
       <p class="text-muted small mb-2">
-        Off-chain micropayments for data streams — lock SATORI once, pay per observation with no on-chain fee each time.
+        Off-chain micropayments for data streams. Lock SATORI once, pay per observation with no on-chain fee each time.
       </p>
       <div class="ch-unit" role="group" aria-label="Display unit">
         <button class="is-active" data-unit="satori" onclick="setChannelUnit('satori', this)">SATORI</button>
@@ -40,7 +40,7 @@
           <div class="hiw-num">2</div>
           <div>
             <div class="hiw-title">Pay per observation</div>
-            <div class="small text-muted">Click <strong>Pay</strong> to send off-chain commitments to the receiver — no on-chain fee, no waiting for confirmations.</div>
+            <div class="small text-muted">Click <strong>Pay</strong> to send off-chain commitments to the receiver. No on-chain fee, no waiting for confirmations.</div>
           </div>
         </div>
         <div class="hiw-step">
@@ -135,7 +135,7 @@
         </div>
         <div class="ch-field">
           <label class="form-label" for="ocReceiverNostrPubkey">
-            Nostr pubkey <small>— optional · enables auto-notification</small>
+            Nostr pubkey <small>(optional, enables auto-notification)</small>
           </label>
           <input type="text" class="form-control font-monospace" id="ocReceiverNostrPubkey"
                  placeholder="Leave blank if unknown">
@@ -162,7 +162,7 @@
             After this timeout elapses you can reclaim unspent funds. Provide minutes <em>or</em> blocks.
           </div>
           <div class="form-text is-note">
-            Note — the chain rounds timeouts up in ~8.5 min steps, so actual expiry can drift up to ~9 min later.
+            Note: the chain rounds timeouts up in ~8.5 min steps, so actual expiry can drift up to ~9 min later.
           </div>
         </div>
         <div id="ocError" class="ch-modal-error d-none"></div>
@@ -946,7 +946,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-const fmtAddr = (s) => s ? s.slice(0, 10) + '…' + s.slice(-6) : '—';
+const fmtAddr = (s) => s ? s.slice(0, 10) + '…' + s.slice(-6) : '-';
 
 function fmtDuration(secs) {
   secs = Math.abs(Math.round(secs));
@@ -977,7 +977,7 @@ function channelTimeLeft(ch) {
     return { dotClass: 'ch-dot-closed', textClass: 'time-left-closed', label: 'closed', isClosed: true, expired: isExpired };
   }
   const expiresAt = channelExpiresAt(ch);
-  if (!expiresAt) return { dotClass: 'ch-dot-active', textClass: 'time-left-active', label: '—', isClosed: false };
+  if (!expiresAt) return { dotClass: 'ch-dot-active', textClass: 'time-left-active', label: '-', isClosed: false };
   const secsLeft = expiresAt - Math.floor(Date.now() / 1000);
   if (secsLeft <= 0) {
     return { dotClass: 'ch-dot-expired', textClass: 'time-left-expired', label: 'expired', isClosed: false, expired: true };
@@ -989,7 +989,7 @@ function channelTimeLeft(ch) {
 }
 
 function fmtTimestamp(ts) {
-  if (!ts) return '—';
+  if (!ts) return '-';
   return new Date(ts * 1000).toLocaleString();
 }
 
@@ -1115,7 +1115,7 @@ function tickTimers() {
           pbtn.classList.toggle('disabled', off);
         }
         const wantTitle = (tl.expired && !tl.isClosed)
-          ? 'Channel expired — new payments would race the on-chain reclaim and are not safe'
+          ? 'Channel expired. New payments would race the on-chain reclaim and are not safe'
           : '';
         if (pbtn.title !== wantTitle) pbtn.title = wantTitle;
       }
@@ -1130,7 +1130,7 @@ function tickTimers() {
           cbtn.classList.toggle('disabled', off);
         }
         const wantTitle = (tl.expired && !tl.isClosed)
-          ? 'Channel expired — the sender can now reclaim on-chain, so claiming here would race that reclaim and is not safe'
+          ? 'Channel expired. The sender can now reclaim on-chain, so claiming here would race that reclaim and is not safe'
           : '';
         if (cbtn.title !== wantTitle) cbtn.title = wantTitle;
       }
@@ -1156,7 +1156,7 @@ function buildDetailPanel(ch, isSender) {
   const counterpartyLabel = isSender ? 'Receiver Wallet Pubkey' : 'Sender Wallet Pubkey';
   const counterpartyKey = isSender ? ch.receiver_pubkey : ch.sender_pubkey;
   const pendingInfo = !isSender
-    ? detailField('Pending Commitment', ch.pending_commitment ? 'Yes — ready to claim' : 'No commitments received yet', false)
+    ? detailField('Pending Commitment', ch.pending_commitment ? 'Yes, ready to claim' : 'No commitments received yet', false)
     : '';
   const senderNostr = ch.sender_nostr_pubkey
     ? detailField('Sender Nostr Pubkey', ch.sender_nostr_pubkey, true)
@@ -1176,7 +1176,7 @@ function buildDetailPanel(ch, isSender) {
           ? detailField('Paid So Far', fmtSatori(paidSoFar), false)
           : detailField('Claimable', `<span class="claimable-amount">${fmtSatori(claimable)}</span>`, false)}
         ${detailField('Remaining', fmtSatori(ch.remainder_sats), false)}
-        ${detailField('Timeout', ch.minutes ? ch.minutes.toLocaleString() + ' min' : ch.blocks ? ch.blocks.toLocaleString() + ' blocks' : '—', false)}
+        ${detailField('Timeout', ch.minutes ? ch.minutes.toLocaleString() + ' min' : ch.blocks ? ch.blocks.toLocaleString() + ' blocks' : '-', false)}
         ${detailField('Opened At', fmtTimestamp(ch.created_at), false)}
         ${pendingInfo}
         ${ch.redeem_script ? `<div class="detail-field">
@@ -1228,7 +1228,7 @@ function renderSending(rows) {
                   data-pay-idx="${i}"
                   onclick="openPayModal('${ch.p2sh_address}')"
                   ${tl.isClosed || tl.expired ? 'disabled' : ''}
-                  title="${tl.expired && !tl.isClosed ? 'Channel expired — new payments would race the on-chain reclaim and are not safe' : ''}">Pay</button>
+                  title="${tl.expired && !tl.isClosed ? 'Channel expired. New payments would race the on-chain reclaim and are not safe' : ''}">Pay</button>
           <button class="btn ${reclaimClass} btn-sm" data-reclaim-idx="${i}"
                   onclick="reclaim('${ch.p2sh_address}')" ${reclaimDisabled}>${reclaimLabel}</button>
         </div>
@@ -1273,7 +1273,7 @@ function renderReceiving(rows) {
                 data-claim-idx="${i}"
                 onclick="claimChannel('${ch.p2sh_address}')"
                 ${hasPending && !tl.isClosed && !tl.expired ? '' : 'disabled'}
-                title="${tl.expired && !tl.isClosed ? 'Channel expired — the sender can now reclaim on-chain, so claiming here would race that reclaim and is not safe' : ''}">
+                title="${tl.expired && !tl.isClosed ? 'Channel expired. The sender can now reclaim on-chain, so claiming here would race that reclaim and is not safe' : ''}">
           Claim
         </button>
       </td>

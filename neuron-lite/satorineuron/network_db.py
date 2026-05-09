@@ -5,6 +5,7 @@ import random
 import sqlite3
 import threading
 import time
+from typing import Optional
 
 SQLITE_BUSY_TIMEOUT_MS = 30000
 SQLITE_READ_RETRIES = 3
@@ -113,9 +114,22 @@ class NetworkDB:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 relay_url TEXT NOT NULL UNIQUE,
                 first_seen INTEGER NOT NULL,
-                last_active INTEGER NOT NULL
+                last_active INTEGER NOT NULL,
+                user_added INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # Migration: add user_added column if missing (existing DBs)
+        try:
+            conn.execute(
+                "ALTER TABLE relays ADD COLUMN user_added "
+                "INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # column already exists
+        # Migration: remove invalid relay URLs stored before validation was added
+        conn.execute(
+            "DELETE FROM relays WHERE relay_url = '' "
+            "OR (relay_url NOT LIKE 'ws://%' AND relay_url NOT LIKE 'wss://%')"
+        )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS publications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -301,6 +315,123 @@ class NetworkDB:
                 PRIMARY KEY (stream_name, p2sh_address)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bounty_predictions (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                predictor_pubkey        TEXT NOT NULL,
+                predictor_wallet_pubkey TEXT,
+                host_pubkey             TEXT NOT NULL,
+                seq_num                 INTEGER NOT NULL,
+                predicted_value         TEXT NOT NULL,
+                received_at             INTEGER NOT NULL,
+                UNIQUE(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
+            )
+        """)
+        # Migration: add predictor_wallet_pubkey if missing (existing DBs)
+        try:
+            conn.execute(
+                "SELECT predictor_wallet_pubkey FROM bounty_predictions LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE bounty_predictions "
+                "ADD COLUMN predictor_wallet_pubkey TEXT")
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_comp_pred_seq
+            ON bounty_predictions(stream_name, stream_provider_pubkey, seq_num)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bounties (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                host_pubkey             TEXT NOT NULL,
+                pay_per_obs_sats        INTEGER NOT NULL,
+                paid_predictors         INTEGER NOT NULL,
+                competing_predictors    INTEGER NOT NULL,
+                scoring_metric          TEXT NOT NULL,
+                scoring_params          TEXT NOT NULL DEFAULT '{}',
+                horizon                 INTEGER NOT NULL DEFAULT 1,
+                active                  INTEGER NOT NULL DEFAULT 1,
+                timestamp               INTEGER NOT NULL,
+                UNIQUE(stream_name, stream_provider_pubkey, host_pubkey)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bounty_payments (
+                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                predictor_pubkey        TEXT NOT NULL,
+                seq_num                 INTEGER NOT NULL,
+                sats_paid               INTEGER NOT NULL,
+                paid_at                 INTEGER NOT NULL,
+                UNIQUE(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_comp_pay_stream
+            ON bounty_payments(stream_name, stream_provider_pubkey)
+        """)
+        # Migration: add UNIQUE constraint for existing databases.
+        # SQLite can't ALTER a constraint, so we create a unique index
+        # that enforces the same rule on tables already created without it.
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_comp_pay_dedup
+            ON bounty_payments(stream_name, stream_provider_pubkey,
+                                    predictor_pubkey, seq_num)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS joined_bounties (
+                stream_name             TEXT NOT NULL,
+                stream_provider_pubkey  TEXT NOT NULL,
+                host_pubkey             TEXT NOT NULL,
+                joined_at               INTEGER NOT NULL,
+                PRIMARY KEY (stream_name, stream_provider_pubkey, host_pubkey)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_joined_comp_stream
+            ON joined_bounties(stream_name, stream_provider_pubkey)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS access_requests (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name         TEXT NOT NULL,
+                requester_pubkey    TEXT NOT NULL,
+                message             TEXT DEFAULT '',
+                status              TEXT NOT NULL DEFAULT 'pending',
+                requested_at        INTEGER NOT NULL,
+                resolved_at         INTEGER,
+                UNIQUE(stream_name, requester_pubkey)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_access_req_stream
+            ON access_requests(stream_name, status)
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS approved_subscribers (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name         TEXT NOT NULL,
+                subscriber_pubkey   TEXT NOT NULL,
+                approved_at         INTEGER NOT NULL,
+                UNIQUE(stream_name, subscriber_pubkey)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_approved_sub_stream
+            ON approved_subscribers(stream_name)
+        """)
+        # Migration: add approval_required to publications if missing
+        try:
+            conn.execute(
+                "SELECT approval_required FROM publications LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE publications "
+                "ADD COLUMN approval_required INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -490,6 +621,16 @@ class NetworkDB:
         """, (stream_name, provider_pubkey, limit)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_observation_by_seq(self, stream_name: str, provider_pubkey: str,
+                               seq_num: int) -> Optional[dict]:
+        """Return a single observation row by (stream, provider, seq_num), or None."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT * FROM observations
+            WHERE stream_name = ? AND provider_pubkey = ? AND seq_num = ?
+        """, (stream_name, provider_pubkey, seq_num)).fetchone()
+        return dict(row) if row else None
+
     def last_observation_time(self, stream_name: str,
                               provider_pubkey: str) -> int | None:
         """Get the timestamp of the last received observation for a stream."""
@@ -541,15 +682,19 @@ class NetworkDB:
 
     # ── Relays ────────────────────────────────────────────────────
 
-    def upsert_relay(self, relay_url: str):
+    def upsert_relay(self, relay_url: str, user_added: bool = False):
         """Record a relay, updating last_active if it already exists."""
+        if not relay_url or not relay_url.startswith(('ws://', 'wss://')):
+            return
         now = int(time.time())
         conn = self._get_conn()
         conn.execute("""
-            INSERT INTO relays (relay_url, first_seen, last_active)
-            VALUES (?, ?, ?)
-            ON CONFLICT(relay_url) DO UPDATE SET last_active = ?
-        """, (relay_url, now, now, now))
+            INSERT INTO relays (relay_url, first_seen, last_active, user_added)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(relay_url) DO UPDATE SET
+                last_active = ?,
+                user_added = MAX(relays.user_added, ?)
+        """, (relay_url, now, now, int(user_added), now, int(user_added)))
         conn.commit()
 
     def get_relays(self) -> list[dict]:
@@ -557,6 +702,15 @@ class NetworkDB:
         rows = self._fetchall_with_retry(
             "SELECT * FROM relays ORDER BY last_active DESC"
         )
+        return [dict(r) for r in rows]
+
+    def get_user_added_relays(self) -> list[dict]:
+        """Return relays manually added by the user."""
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM relays WHERE user_added = 1 "
+            "ORDER BY last_active DESC"
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def delete_relay(self, relay_url: str):
@@ -971,6 +1125,437 @@ class NetworkDB:
         """, (funding_txid, funding_vout, locked_sats, locked_sats,
               ts, p2sh_address))
         conn.commit()
+
+    # ── Bounties ───────────────────────────────────────────────
+
+    def add_bounty(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        pay_per_obs_sats: int,
+        paid_predictors: int,
+        competing_predictors: int,
+        scoring_metric: str,
+        scoring_params: str = '{}',
+        horizon: int = 1,
+        active: int = 1,
+        timestamp: int = 0,
+    ) -> None:
+        """Insert or replace a bounty announcement."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO bounties (
+                stream_name, stream_provider_pubkey, host_pubkey,
+                pay_per_obs_sats, paid_predictors, competing_predictors,
+                scoring_metric, scoring_params, horizon, active, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stream_name, stream_provider_pubkey, host_pubkey)
+            DO UPDATE SET
+                pay_per_obs_sats     = excluded.pay_per_obs_sats,
+                paid_predictors      = excluded.paid_predictors,
+                competing_predictors = excluded.competing_predictors,
+                scoring_metric       = excluded.scoring_metric,
+                scoring_params       = excluded.scoring_params,
+                horizon              = excluded.horizon,
+                active               = excluded.active,
+                timestamp            = excluded.timestamp
+        """, (stream_name, stream_provider_pubkey, host_pubkey,
+              pay_per_obs_sats, paid_predictors, competing_predictors,
+              scoring_metric, scoring_params, horizon, active, timestamp))
+        conn.commit()
+
+    def get_bounty(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> dict | None:
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT * FROM bounties
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey)).fetchone()
+        return dict(row) if row else None
+
+    def get_all_bounties(self, active_only: bool = False) -> list[dict]:
+        conn = self._get_conn()
+        if active_only:
+            rows = conn.execute(
+                "SELECT * FROM bounties WHERE active = 1").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM bounties").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_bounties_hosted_by(self, host_pubkey: str) -> list[dict]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM bounties WHERE host_pubkey = ?",
+            (host_pubkey,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def close_bounty(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> None:
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE bounties SET active = 0
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey))
+        conn.commit()
+
+    # ── Joined Bounties (predictor side) ───────────────────────
+
+    def join_bounty(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> None:
+        """Record that this neuron has joined a bounty as a predictor.
+
+        The (stream, host) pair is what the engine uses to know where to
+        send its prediction DMs when it predicts for a given stream.
+        Idempotent — re-joining the same bounty does nothing.
+        """
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT OR IGNORE INTO joined_bounties
+                (stream_name, stream_provider_pubkey, host_pubkey, joined_at)
+            VALUES (?, ?, ?, ?)
+        """, (stream_name, stream_provider_pubkey, host_pubkey, int(time.time())))
+        conn.commit()
+
+    def leave_bounty(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> None:
+        conn = self._get_conn()
+        conn.execute("""
+            DELETE FROM joined_bounties
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey))
+        conn.commit()
+
+    def get_joined_bounties_for_stream(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+    ) -> list[dict]:
+        """Return joined bounties for a stream — one row per host."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM joined_bounties
+            WHERE stream_name = ? AND stream_provider_pubkey = ?
+        """, (stream_name, stream_provider_pubkey)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_joined_bounties(self) -> list[dict]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM joined_bounties ORDER BY joined_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Bounty Predictions ────────────────────────────────────
+
+    def save_bounty_prediction(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        predictor_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: str,
+        received_at: int,
+        predictor_wallet_pubkey: Optional[str] = None,
+    ) -> None:
+        """Save a received prediction, replacing any earlier one for this predictor+seq.
+
+        predictor_wallet_pubkey is recorded so the host can open a payment
+        channel to pay the predictor without needing a separate lookup.
+        """
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO bounty_predictions (
+                stream_name, stream_provider_pubkey, predictor_pubkey,
+                predictor_wallet_pubkey, host_pubkey, seq_num,
+                predicted_value, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
+            DO UPDATE SET
+                predicted_value         = excluded.predicted_value,
+                predictor_wallet_pubkey = COALESCE(
+                    excluded.predictor_wallet_pubkey,
+                    bounty_predictions.predictor_wallet_pubkey),
+                received_at             = excluded.received_at
+            WHERE excluded.received_at > bounty_predictions.received_at
+        """, (stream_name, stream_provider_pubkey, predictor_pubkey,
+              predictor_wallet_pubkey, host_pubkey, seq_num,
+              predicted_value, received_at))
+        conn.commit()
+
+    def get_bounty_predictions(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        seq_num: int,
+    ) -> list[dict]:
+        """Return all predictions received for a given stream+seq_num."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM bounty_predictions
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND seq_num = ?
+        """, (stream_name, stream_provider_pubkey, seq_num)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Bounty Payments (accountability) ──────────────────────
+
+    def record_bounty_payment(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        predictor_pubkey: str,
+        seq_num: int,
+        sats_paid: int,
+        paid_at: int,
+    ) -> None:
+        """Record a successful payment to a predictor after scoring."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT OR IGNORE INTO bounty_payments
+                (stream_name, stream_provider_pubkey, predictor_pubkey,
+                 seq_num, sats_paid, paid_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (stream_name, stream_provider_pubkey, predictor_pubkey,
+              seq_num, sats_paid, paid_at))
+        conn.commit()
+
+    def get_bounty_payments(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+    ) -> list[dict]:
+        """Return all payment records for a stream bounty."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM bounty_payments
+            WHERE stream_name = ? AND stream_provider_pubkey = ?
+            ORDER BY paid_at DESC
+        """, (stream_name, stream_provider_pubkey)).fetchall()
+        return [dict(r) for r in rows]
+
+    def is_seq_already_scored(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        seq_num: int,
+    ) -> bool:
+        """Return True if any payment record exists for this seq_num."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT 1 FROM bounty_payments "
+            "WHERE stream_name = ? AND stream_provider_pubkey = ? "
+            "AND seq_num = ? LIMIT 1",
+            (stream_name, stream_provider_pubkey, seq_num)).fetchone()
+        return row is not None
+
+    def get_bounty_leaderboard(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+    ) -> list[dict]:
+        """Return per-predictor payment totals, sorted by total_sats descending."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT
+                predictor_pubkey,
+                SUM(sats_paid)  AS total_sats,
+                COUNT(*)        AS prediction_count
+            FROM bounty_payments
+            WHERE stream_name = ? AND stream_provider_pubkey = ?
+            GROUP BY predictor_pubkey
+            ORDER BY total_sats DESC
+        """, (stream_name, stream_provider_pubkey)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_host_payment_stats(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+    ) -> dict | None:
+        """Return payment consistency stats for a hosted bounty.
+
+        Returns None if no bounty exists for this host.
+        scored_observations counts distinct seq_nums that received payments.
+        """
+        conn = self._get_conn()
+        comp = conn.execute("""
+            SELECT pay_per_obs_sats FROM bounties
+            WHERE stream_name = ? AND stream_provider_pubkey = ? AND host_pubkey = ?
+        """, (stream_name, stream_provider_pubkey, host_pubkey)).fetchone()
+        if not comp:
+            return None
+        row = conn.execute("""
+            SELECT
+                COALESCE(SUM(obs_total), 0)   AS total_paid_sats,
+                COUNT(*)                       AS scored_observations,
+                COALESCE(AVG(obs_total), 0.0)  AS avg_paid_per_obs
+            FROM (
+                SELECT seq_num, SUM(sats_paid) AS obs_total
+                FROM bounty_payments
+                WHERE stream_name = ? AND stream_provider_pubkey = ?
+                GROUP BY seq_num
+            )
+        """, (stream_name, stream_provider_pubkey)).fetchone()
+        return {
+            'total_paid_sats': row['total_paid_sats'],
+            'scored_observations': row['scored_observations'],
+            'avg_paid_per_obs': row['avg_paid_per_obs'],
+            'announced_per_obs': comp['pay_per_obs_sats'],
+        }
+
+    # ── Access Requests (producer side) ───────────────────────────
+
+    def add_access_request(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+        message: str = '',
+        requested_at: int = 0,
+    ) -> None:
+        """Record an incoming access request. Re-requesting resets to pending."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT INTO access_requests
+                (stream_name, requester_pubkey, message, status, requested_at)
+            VALUES (?, ?, ?, 'pending', ?)
+            ON CONFLICT(stream_name, requester_pubkey) DO UPDATE SET
+                message      = excluded.message,
+                status       = 'pending',
+                requested_at = excluded.requested_at,
+                resolved_at  = NULL
+        """, (stream_name, requester_pubkey, message,
+              requested_at or int(time.time())))
+        conn.commit()
+
+    def get_access_requests(
+        self,
+        stream_name: str,
+        status: str | None = None,
+    ) -> list[dict]:
+        """Return access requests for a stream, optionally filtered by status."""
+        conn = self._get_conn()
+        if status:
+            rows = conn.execute("""
+                SELECT * FROM access_requests
+                WHERE stream_name = ? AND status = ?
+                ORDER BY requested_at DESC
+            """, (stream_name, status)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT * FROM access_requests
+                WHERE stream_name = ?
+                ORDER BY requested_at DESC
+            """, (stream_name,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_pending_access_requests(self) -> list[dict]:
+        """Return all pending access requests across all streams."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM access_requests
+            WHERE status = 'pending'
+            ORDER BY requested_at DESC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+    def approve_access_request(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Approve a request and add to approved subscribers list."""
+        conn = self._get_conn()
+        now = int(time.time())
+        conn.execute("""
+            UPDATE access_requests SET status = 'approved', resolved_at = ?
+            WHERE stream_name = ? AND requester_pubkey = ?
+        """, (now, stream_name, requester_pubkey))
+        conn.execute("""
+            INSERT OR IGNORE INTO approved_subscribers
+                (stream_name, subscriber_pubkey, approved_at)
+            VALUES (?, ?, ?)
+        """, (stream_name, requester_pubkey, now))
+        conn.commit()
+
+    def reject_access_request(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Reject an access request."""
+        conn = self._get_conn()
+        conn.execute("""
+            UPDATE access_requests SET status = 'rejected', resolved_at = ?
+            WHERE stream_name = ? AND requester_pubkey = ?
+        """, (int(time.time()), stream_name, requester_pubkey))
+        conn.commit()
+
+    def revoke_subscriber(
+        self,
+        stream_name: str,
+        subscriber_pubkey: str,
+    ) -> None:
+        """Revoke a previously approved subscriber's access."""
+        conn = self._get_conn()
+        conn.execute("""
+            DELETE FROM approved_subscribers
+            WHERE stream_name = ? AND subscriber_pubkey = ?
+        """, (stream_name, subscriber_pubkey))
+        conn.execute("""
+            UPDATE access_requests SET status = 'revoked', resolved_at = ?
+            WHERE stream_name = ? AND requester_pubkey = ?
+        """, (int(time.time()), stream_name, subscriber_pubkey))
+        conn.commit()
+
+    def is_subscriber_approved(
+        self,
+        stream_name: str,
+        subscriber_pubkey: str,
+    ) -> bool:
+        """Check if a subscriber is on the approved list for a stream."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT 1 FROM approved_subscribers
+            WHERE stream_name = ? AND subscriber_pubkey = ?
+        """, (stream_name, subscriber_pubkey)).fetchone()
+        return row is not None
+
+    def get_approved_subscribers(self, stream_name: str) -> list[dict]:
+        """Return all approved subscribers for a stream."""
+        conn = self._get_conn()
+        rows = conn.execute("""
+            SELECT * FROM approved_subscribers
+            WHERE stream_name = ?
+            ORDER BY approved_at DESC
+        """, (stream_name,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def is_stream_approval_required(self, stream_name: str) -> bool:
+        """Check if a published stream requires approval for access."""
+        conn = self._get_conn()
+        row = conn.execute("""
+            SELECT approval_required FROM publications
+            WHERE stream_name = ? AND active = 1
+        """, (stream_name,)).fetchone()
+        return bool(row and row['approval_required'])
 
     def update_utxo_checked_at(self, p2sh_address: str) -> None:
         """Stamp the current time as the last UTXO liveness check."""

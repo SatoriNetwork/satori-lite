@@ -2,7 +2,7 @@
 
 Status: **PLAN** — not yet implemented.
 Scope: **stream market only** (layer 1 of the marketplace). The prediction
-competition market (layer 2) will reuse this environment in a follow-up plan.
+bounty market (layer 2) will reuse this environment in a follow-up plan.
 
 ## 1. Goal
 

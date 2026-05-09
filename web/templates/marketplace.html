@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Satori — Marketplace{% endblock %}
+{% block title %}Satori | Marketplace{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -1027,14 +1027,11 @@
             <div class="mkt-seg-title">Streams</div>
             <div class="mkt-seg-sub">Live datastreams to subscribe to and consume.</div>
         </button>
-        <button class="mkt-seg is-disabled" role="tab" aria-selected="false" disabled
-                title="Coming soon">
+        <button class="mkt-seg" role="tab" aria-selected="false"
+                onclick="window.location.href='/bounties'">
             <div class="mkt-seg-icon"><i class="material-icons">insights</i></div>
-            <div class="mkt-seg-title">
-                Predictions
-                <span class="mkt-seg-soon">Coming soon</span>
-            </div>
-            <div class="mkt-seg-sub">Host competitions on your data streams. Predict accurately to earn rewards.</div>
+            <div class="mkt-seg-title">Predictions</div>
+            <div class="mkt-seg-sub">Post a bounty on any data stream. Predict accurately to earn the reward.</div>
         </button>
     </div>
 
@@ -1774,7 +1771,7 @@
         const warnHtml = diverges
             ? `<div class="mkt-card-warn">
                 <i class="material-icons">warning_amber</i>
-                <span>Publishers disagree on metadata — expand to compare.</span>
+                <span>Publishers disagree on metadata. Expand to compare.</span>
               </div>`
             : '';
 

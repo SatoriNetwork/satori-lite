@@ -79,6 +79,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
+        self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
+        self._accessRequestListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
@@ -219,6 +221,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelOpenListeners.clear()
         self._channelSettlementListeners.clear()
         self._channelTombstoneListeners.clear()
+        self._predictionListeners.clear()
+        self._accessRequestListeners.clear()
         self._settledChannels.clear()
         self._networkSubscribed.clear()
         for _sn, (task, _cad) in list(self._dataSourceTasks.items()):
@@ -267,6 +271,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._channelResendStaleCommitments()
                 except Exception as e:
                     logging.error(f'Channel stale resend error: {e}')
+                try:
+                    await self._networkPublishRelayList()
+                except Exception as e:
+                    logging.error(f'NIP-65 relay list publish error: {e}')
                 await asyncio.sleep(3600)
         finally:
             if fetch_task is not None and not fetch_task.done():
@@ -304,6 +312,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 client = await self._networkConnect(relay_url, ConfigClass)
                 if client:
                     await self._networkAnnouncePublications(relay_url)
+            # Hosts need prediction + access-request listeners on every
+            # relay where they publish, even when the reconcile loop
+            # (subscription path) never touches that relay.
+            if relay_url in self._networkClients:
+                self._networkEnsurePredictionListener(relay_url)
+                self._networkEnsureAccessRequestListener(relay_url)
 
     async def _networkRestoreSubscriberAccess(self):
         """Restore persisted subscriber access into connected clients.
@@ -338,6 +352,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Channel: restored {restored} subscriber access records '
                 f'from DB',
                 color='cyan')
+
+    async def _networkPublishRelayList(self):
+        """Publish a NIP-65 relay list (kind 10002) to all connected relays.
+
+        Advertises every relay URL this node is currently connected to.
+        The central server subscribes to these events from known neuron
+        pubkeys to build its relay directory — replacing the old
+        neuron-claims-relay model.
+        """
+        relay_urls = list(self._networkClients.keys())
+        if not relay_urls:
+            return
+        for client in list(self._networkClients.values()):
+            try:
+                await client.publish_relay_list(relay_urls)
+            except Exception as e:
+                logging.warning(f'Network: NIP-65 publish failed: {e}')
+                continue
+        logging.info(
+            f'Network: published NIP-65 relay list '
+            f'({len(relay_urls)} relays)', color='cyan')
 
     async def _networkConnect(self, relay_url: str, ConfigClass):
         """Connect to a relay if not already connected. Returns client or None."""
@@ -429,6 +464,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         ttask = self._channelTombstoneListeners.pop(relay_url, None)
         if ttask and not ttask.done():
             ttask.cancel()
+        ptask = self._predictionListeners.pop(relay_url, None)
+        if ptask and not ptask.done():
+            ptask.cancel()
+        artask = self._accessRequestListeners.pop(relay_url, None)
+        if artask and not artask.done():
+            artask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -468,6 +509,229 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # an open channel to this provider
             await self._channelPayForObservation(
                 obs.stream_name, obs.nostr_pubkey, obs.observation.seq_num)
+            # Score bounty predictions and pay predictors if we host one
+            await self._bountyScoreAndPay(
+                stream_name=obs.stream_name,
+                provider_pubkey=obs.nostr_pubkey,
+                seq_num=obs.observation.seq_num,
+                raw_value=obs.observation.value,
+            )
+
+    async def _bountyScoreAndPay(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+        raw_value,
+    ) -> None:
+        """Score predictions and pay winners when an observation arrives (host side).
+
+        Only runs if this node is the host of an active bounty for the stream.
+        Delegates scoring logic to bounty_scoring.compute_payouts(), then
+        calls _bountyPayPredictor for each non-zero payout.
+
+        raw_value is the observation value as-is; the cast to float happens
+        only after the bounty-host gate, so non-numeric streams do not
+        crash the observation pipeline.
+        """
+        try:
+            bounty = await asyncio.to_thread(
+                self.networkDB.get_bounty,
+                stream_name, provider_pubkey, self.nostrPubkey)
+            if not bounty or not bounty.get('active'):
+                return
+
+            # Dedup: skip if we've already scored this seq_num
+            already_scored = await asyncio.to_thread(
+                self.networkDB.is_seq_already_scored,
+                stream_name, provider_pubkey, seq_num)
+            if already_scored:
+                return
+
+            try:
+                observed_value = float(raw_value)
+            except (TypeError, ValueError):
+                logging.warning(
+                    f'Bounty: skipping score for {stream_name} seq={seq_num} '
+                    f'— non-numeric observation value')
+                return
+
+            predictions = await asyncio.to_thread(
+                self.networkDB.get_bounty_predictions,
+                stream_name, provider_pubkey, seq_num)
+            if not predictions:
+                return
+
+            # Fetch observation timestamps so scoring modules can enforce
+            # timing windows (e.g. disqualify predictions submitted too
+            # close to the observation they're predicting).
+            #
+            # For horizon > 1 (step-ahead predictions), the relevant
+            # submission window starts at the trigger observation
+            # (seq_num - horizon), not the immediately preceding one.
+            # The window runs from the trigger to the target observation,
+            # so the 90% late-cutoff scales naturally with horizon.
+            horizon = bounty.get('horizon', 1)
+            cur_obs = await asyncio.to_thread(
+                self.networkDB.get_observation_by_seq,
+                stream_name, provider_pubkey, seq_num)
+            observed_at = (cur_obs or {}).get('observed_at', 0)
+            trigger_seq = seq_num - horizon
+            trigger_obs = None
+            if trigger_seq >= 1:
+                trigger_obs = await asyncio.to_thread(
+                    self.networkDB.get_observation_by_seq,
+                    stream_name, provider_pubkey, trigger_seq)
+            prev_observed_at = (trigger_obs or {}).get('observed_at', 0)
+
+            from satorineuron.bounty_scoring import compute_payouts
+            payouts = await asyncio.to_thread(
+                compute_payouts, bounty, predictions, observed_value,
+                observed_at, prev_observed_at)
+
+            # Index predictions by pubkey so we can look up wallet pubkey
+            preds_by_pubkey = {
+                row['predictor_pubkey']: row for row in predictions}
+
+            for pubkey, sats in payouts.items():
+                row = preds_by_pubkey.get(pubkey)
+                wallet_pubkey = (row or {}).get('predictor_wallet_pubkey')
+                await self._bountyPayPredictor(
+                    pubkey, wallet_pubkey, sats,
+                    stream_name, provider_pubkey, seq_num)
+        except Exception as e:
+            logging.warning(f'Bounty: score-and-pay failed: {e}')
+
+    async def _bountyScoreLateArrival(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+    ) -> None:
+        """Re-run scoring when a prediction arrives after its observation.
+
+        No-op if the observation hasn't been received yet (the normal
+        _networkProcessObservation path will score once it arrives) or
+        if this node isn't hosting the bounty.
+        """
+        try:
+            observation = await asyncio.to_thread(
+                self.networkDB.get_observation_by_seq,
+                stream_name, provider_pubkey, seq_num)
+        except Exception:
+            return
+        if not observation:
+            return
+        raw = observation.get('value')
+        if raw is None:
+            return
+        # Observations are stored as the JSON-serialised payload; try to
+        # extract the numeric value whether the row was saved as raw or JSON.
+        candidate = raw
+        try:
+            import json as _json
+            parsed = _json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict) and 'value' in parsed:
+                candidate = parsed['value']
+            else:
+                candidate = parsed
+        except (ValueError, TypeError):
+            pass
+        await self._bountyScoreAndPay(
+            stream_name=stream_name,
+            provider_pubkey=provider_pubkey,
+            seq_num=seq_num,
+            raw_value=candidate,
+        )
+
+    async def _bountyPayPredictor(
+        self,
+        predictor_nostr_pubkey: str,
+        predictor_wallet_pubkey: Optional[str],
+        sats: int,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+    ) -> None:
+        """Score and pay a predictor for a bounty (host side).
+
+        Always records the payment obligation in the DB (for leaderboard /
+        accountability) even if the actual channel payment fails.  The channel
+        payment is best-effort — wallet balance or network issues should not
+        prevent scoring results from being persisted.
+        """
+        import time as _time
+        # Always record the scoring result first
+        try:
+            await asyncio.to_thread(
+                self.networkDB.record_bounty_payment,
+                stream_name,
+                provider_pubkey,
+                predictor_nostr_pubkey,
+                seq_num,
+                sats,
+                int(_time.time()),
+            )
+            logging.info(
+                f'Bounty: scored {sats} sats for '
+                f'{predictor_nostr_pubkey[:12]}… seq={seq_num}',
+                color='green')
+        except Exception as e:
+            logging.warning(
+                f'Bounty: failed to record payment for '
+                f'{predictor_nostr_pubkey[:12]}…: {e}')
+            return
+
+        # Now attempt the actual channel payment (best-effort)
+        if not predictor_wallet_pubkey:
+            logging.warning(
+                f'Bounty: no wallet pubkey for predictor '
+                f'{predictor_nostr_pubkey[:12]}…, payment recorded but '
+                f'channel transfer skipped')
+            return
+        try:
+            # Find an open sender channel with enough remainder
+            channels = await asyncio.to_thread(
+                self.networkDB.get_channels_as_sender)
+            channel = next(
+                (c for c in channels
+                 if c['receiver_pubkey'] == predictor_wallet_pubkey
+                 and c['remainder_sats'] >= sats),
+                None)
+            if not channel:
+                fund_sats = self._channelFundSats()
+                timeout_minutes = self._channelTimeoutMinutes()
+                logging.info(
+                    f'Bounty: opening channel to predictor '
+                    f'{predictor_wallet_pubkey[:16]}… '
+                    f'fund={fund_sats} sats',
+                    color='cyan')
+                p2sh = await self.openChannel(
+                    receiver_pubkey=predictor_wallet_pubkey,
+                    amount_sats=fund_sats,
+                    minutes=timeout_minutes,
+                    receiver_nostr_pubkey=predictor_nostr_pubkey,
+                )
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, p2sh)
+                if not channel or channel['remainder_sats'] < sats:
+                    logging.warning(
+                        f'Bounty: channel insufficient for '
+                        f'{sats} sats to {predictor_wallet_pubkey[:16]}… '
+                        f'(payment recorded, transfer pending)')
+                    return
+
+            await self.sendChannelPayment(
+                channel['p2sh_address'], sats, stream_name)
+            logging.info(
+                f'Bounty: channel payment sent — {sats} sats to '
+                f'{predictor_nostr_pubkey[:12]}… for seq={seq_num}',
+                color='green')
+        except Exception as e:
+            logging.warning(
+                f'Bounty: channel transfer failed for '
+                f'{predictor_nostr_pubkey[:12]}… (payment recorded, '
+                f'transfer pending): {e}')
 
     async def _channelPayForObservation(
         self,
@@ -736,6 +1000,41 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Network: prediction failed: {e}')
 
+        # Submit this prediction privately (encrypted DM) to every bounty
+        # host we've joined for this stream. The engine's prediction is public
+        # via {stream}_pred above; bounty DMs are in addition to that,
+        # private to each host.
+        try:
+            joined = await asyncio.to_thread(
+                self.networkDB.get_joined_bounties_for_stream,
+                stream_name, provider_pubkey)
+            if joined:
+                try:
+                    predicted_float = float(value_str)
+                except (TypeError, ValueError):
+                    predicted_float = None
+                if predicted_float is not None:
+                    for j in joined:
+                        # Look up bounty horizon so we target the right
+                        # future observation.  horizon=1 (default) means
+                        # "predict the next value"; horizon=2 means "predict
+                        # two steps ahead", etc.
+                        comp = await asyncio.to_thread(
+                            self.networkDB.get_bounty,
+                            stream_name, provider_pubkey,
+                            j['host_pubkey'])
+                        horizon = (comp or {}).get('horizon', 1)
+                        await self.submitPrediction(
+                            stream_name=stream_name,
+                            stream_provider_pubkey=provider_pubkey,
+                            host_pubkey=j['host_pubkey'],
+                            seq_num=observation.seq_num + horizon,
+                            predicted_value=predicted_float,
+                        )
+        except Exception as e:
+            logging.warning(
+                f'Network: bounty DM submit failed for {stream_name}: {e}')
+
     def _networkEnsureListener(self, relay_url: str):
         """Start an observation listener for a relay if one isn't running."""
         task = self._networkListeners.get(relay_url)
@@ -747,6 +1046,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsureChannelOpenListener(relay_url)
         self._networkEnsureSettlementListener(relay_url)
         self._networkEnsureTombstoneListener(relay_url)
+        self._networkEnsurePredictionListener(relay_url)
+        self._networkEnsureAccessRequestListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -834,6 +1135,28 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         self._channelTombstoneListeners[relay_url] = asyncio.ensure_future(
             self._channelTombstoneListen(relay_url))
+
+    def _networkEnsurePredictionListener(self, relay_url: str):
+        """Start an incoming-predictions listener for a relay if one isn't running."""
+        task = self._predictionListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._predictionListeners[relay_url] = asyncio.ensure_future(
+            self._incomingPredictionsLoop(client, relay_url))
+
+    def _networkEnsureAccessRequestListener(self, relay_url: str):
+        """Start an incoming-access-requests listener for a relay if one isn't running."""
+        task = self._accessRequestListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._accessRequestListeners[relay_url] = asyncio.ensure_future(
+            self._incomingAccessRequestsLoop(client, relay_url))
 
     async def _channelTombstoneListen(self, relay_url: str):
         """Listen for commitment tombstones as a fallback reset (sender side).
@@ -1768,7 +2091,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         Fix K: instead of a hardcoded 1M sats, compute from price_per_obs *
         observations_per_refill (configurable, default 500). Clamped between
-        100k (min) and 10M (max) sats. Falls back to the static config value
+        100k (min) and 1M (max) sats. Falls back to the static config value
         or 1M when price_per_obs is not supplied.
         """
         static = int(config.get().get('channel_fund_sats', 1_000_000))
@@ -2759,6 +3082,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.warning(
                     f'Network: publish failed on {relay_url}: {e}')
+        # Score bounty predictions for this observation (host side).
+        # The host publishes observations but doesn't subscribe to its own
+        # stream, so _networkProcessObservation never fires for its own data.
+        await self._bountyScoreAndPay(
+            stream_name=stream_name,
+            provider_pubkey=self.nostrPubkey,
+            seq_num=seq_num,
+            raw_value=value,
+        )
         if delivered == 0:
             logging.warning(
                 f'Network: {stream_name} seq={seq_num} not delivered '
@@ -3273,23 +3605,283 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 needed.add(r['relay_url'])
         return needed
 
-    def scheduleChannelPay(
-        self, stream_name: str, provider_pubkey: str, price_sats: int
-    ):
-        """Trigger an initial channel payment from a sync context (e.g. Flask).
+    # ── Bounty sync wrappers ──────────────────────────────────
 
-        Called when subscribing to a paid stream so the subscriber pre-pays
-        before any observations arrive, breaking the circular dependency where
-        observations require payment and payment requires observations.
-        Fire-and-forget.
-        """
+    def announceBountySync(self, bounty_data: dict) -> None:
+        """Announce a bounty on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import BountyAnnouncement
+        if not hasattr(self, '_networkSecretHex') or not self._networkClients:
+            return
         loop = getattr(self, '_networkLoop', None)
         if loop is None or loop.is_closed():
             return
+        import json as _json
+        bounty = BountyAnnouncement(
+            stream_name=bounty_data['stream_name'],
+            stream_provider_pubkey=bounty_data['stream_provider_pubkey'],
+            host_pubkey=self.nostrPubkey,
+            pay_per_obs_sats=int(bounty_data['pay_per_obs_sats']),
+            paid_predictors=int(bounty_data['paid_predictors']),
+            competing_predictors=int(bounty_data['competing_predictors']),
+            scoring_metric=bounty_data['scoring_metric'],
+            scoring_params=bounty_data.get('scoring_params', {}),
+            horizon=int(bounty_data.get('horizon', 1)),
+            active=True,
+            timestamp=int(time.time()),
+        )
+        async def _announce():
+            for client in self._networkClients.values():
+                try:
+                    await client.announce_bounty(bounty)
+                except Exception as e:
+                    logging.warning(f'Bounty: announce failed: {e}')
+        asyncio.run_coroutine_threadsafe(_announce(), loop)
+
+    def closeBountySync(
+        self, stream_name: str, stream_provider_pubkey: str
+    ) -> None:
+        """Close a bounty on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import BountyAnnouncement
+        if not hasattr(self, '_networkSecretHex') or not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        row = self.networkDB.get_bounty(
+            stream_name, stream_provider_pubkey, self.nostrPubkey)
+        if not row:
+            return
+        import json as _json
+        bounty = BountyAnnouncement(
+            stream_name=row['stream_name'],
+            stream_provider_pubkey=row['stream_provider_pubkey'],
+            host_pubkey=row['host_pubkey'],
+            pay_per_obs_sats=row['pay_per_obs_sats'],
+            paid_predictors=row['paid_predictors'],
+            competing_predictors=row['competing_predictors'],
+            scoring_metric=row['scoring_metric'],
+            scoring_params=_json.loads(row.get('scoring_params', '{}')),
+            horizon=row.get('horizon', 1),
+            active=False,
+            timestamp=int(time.time()),
+        )
+        async def _close():
+            for client in self._networkClients.values():
+                try:
+                    await client.close_bounty(bounty)
+                except Exception as e:
+                    logging.warning(f'Bounty: close failed: {e}')
+        asyncio.run_coroutine_threadsafe(_close(), loop)
+
+    def discoverBountiesSync(self, active_only: bool = True) -> list:
+        """Discover bounties from connected relays (sync context)."""
+        if not self._networkClients:
+            return self.networkDB.get_all_bounties(active_only=active_only)
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return self.networkDB.get_all_bounties(active_only=active_only)
+        async def _discover():
+            seen: dict[str, tuple[int, dict]] = {}
+            for client in self._networkClients.values():
+                try:
+                    comps = await client.discover_bounties(
+                        active_only=active_only)
+                    for c in comps:
+                        d = c.d_tag()
+                        if d not in seen or c.timestamp > seen[d][0]:
+                            seen[d] = (c.timestamp, c.to_dict())
+                except Exception as e:
+                    logging.warning(f'Bounty: discover failed: {e}')
+            return [v for _, v in seen.values()]
+        future = asyncio.run_coroutine_threadsafe(_discover(), loop)
+        try:
+            return future.result(timeout=15)
+        except Exception:
+            return self.networkDB.get_all_bounties(active_only=active_only)
+
+    async def _incomingPredictionsLoop(self, client, relay_url: str):
+        """Consume incoming prediction submissions from a relay client (host side).
+
+        Runs as a background async task. Stores each received prediction in the
+        DB keyed by (stream_name, stream_provider_pubkey, predictor_pubkey, seq_num).
+        The scoring pipeline reads from the DB when an observation arrives.
+
+        When a prediction arrives after its target observation is already
+        in hand, it is scored immediately (late-arrival recovery).
+        """
+        logging.info(f'Bounty: listening for predictions on {relay_url}')
+        try:
+            async for inbound in client.incoming_predictions():
+                try:
+                    p = inbound.prediction
+                    await asyncio.to_thread(
+                        self.networkDB.save_bounty_prediction,
+                        stream_name=p.stream_name,
+                        stream_provider_pubkey=p.stream_provider_pubkey,
+                        predictor_pubkey=p.predictor_pubkey,
+                        host_pubkey=self.nostrPubkey,
+                        seq_num=p.seq_num,
+                        predicted_value=str(p.predicted_value),
+                        received_at=p.timestamp,
+                        predictor_wallet_pubkey=getattr(
+                            p, 'predictor_wallet_pubkey', None),
+                    )
+                    logging.info(
+                        f'Bounty: received prediction from '
+                        f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
+                        f'seq={p.seq_num}')
+                    # Late-arrival: if we already have the observation this
+                    # prediction was meant to predict, score it now.
+                    await self._bountyScoreLateArrival(
+                        stream_name=p.stream_name,
+                        provider_pubkey=p.stream_provider_pubkey,
+                        seq_num=p.seq_num,
+                    )
+                except Exception as e:
+                    logging.warning(f'Bounty: failed to save prediction: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'Bounty: prediction listener stopped on {relay_url}: {e}')
+
+    async def submitPrediction(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: float,
+    ) -> None:
+        """Submit a prediction to a bounty host on all connected relays (predictor side).
+
+        The predictor's own wallet pubkey is attached so the host can open a
+        payment channel back without needing a separate directory lookup.
+        """
+        wallet_pubkey = getattr(
+            getattr(self, 'wallet', None), 'pubkey', None) or ''
+        for client in self._networkClients.values():
+            try:
+                await client.submit_prediction(
+                    stream_name=stream_name,
+                    stream_provider_pubkey=stream_provider_pubkey,
+                    host_pubkey=host_pubkey,
+                    seq_num=seq_num,
+                    predicted_value=predicted_value,
+                    predictor_wallet_pubkey=wallet_pubkey,
+                )
+            except Exception as e:
+                logging.warning(f'Bounty: submit prediction failed: {e}')
+
+    def submitPredictionSync(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: float,
+    ) -> None:
+        """Submit a prediction from a sync context (e.g. prediction engine callback)."""
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed() or not self._networkClients:
+            return
         asyncio.run_coroutine_threadsafe(
-            self._channelPayNow(stream_name, provider_pubkey, price_sats),
+            self.submitPrediction(
+                stream_name, stream_provider_pubkey,
+                host_pubkey, seq_num, predicted_value),
             loop)
 
+    # ── Access Request handling (producer side) ─────────────────────────────
+
+    async def _incomingAccessRequestsLoop(self, client, relay_url: str):
+        """Consume incoming access requests from a relay client (producer side).
+
+        Runs as a background async task. Stores each request in the DB as
+        pending. The producer approves or rejects via the UI/API.
+        """
+        logging.info(f'AccessGate: listening for access requests on {relay_url}')
+        try:
+            async for inbound in client.incoming_access_requests():
+                try:
+                    req = inbound.access_request
+                    await asyncio.to_thread(
+                        self.networkDB.add_access_request,
+                        stream_name=req.stream_name,
+                        requester_pubkey=req.requester_pubkey,
+                        message=req.message,
+                        requested_at=req.timestamp,
+                    )
+                    logging.info(
+                        f'AccessGate: received request from '
+                        f'{req.requester_pubkey[:12]}… for {req.stream_name}')
+                except Exception as e:
+                    logging.warning(f'AccessGate: failed to save request: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'AccessGate: request listener stopped on {relay_url}: {e}')
+
+    def approveAccessRequestSync(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Approve an access request (sync context, e.g. Flask route).
+
+        Adds the requester to the approved_subscribers table and records
+        them in the in-memory subscriber list so they start receiving
+        encrypted observations immediately.
+        """
+        self.networkDB.approve_access_request(stream_name, requester_pubkey)
+        # Also register in the in-memory subscriber list on all clients
+        for client in self._networkClients.values():
+            client.record_subscription(stream_name, requester_pubkey)
+
+    def rejectAccessRequestSync(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Reject an access request (sync context)."""
+        self.networkDB.reject_access_request(stream_name, requester_pubkey)
+
+    def revokeSubscriberSync(
+        self,
+        stream_name: str,
+        subscriber_pubkey: str,
+    ) -> None:
+        """Revoke a previously approved subscriber (sync context).
+
+        Removes from the approved_subscribers table. The producer simply
+        stops encrypting for them on the next observation — no key
+        rotation needed since NIP-04 encrypts individually per subscriber.
+        """
+        self.networkDB.revoke_subscriber(stream_name, subscriber_pubkey)
+
+    def requestAccessSync(
+        self,
+        stream_name: str,
+        producer_pubkey: str,
+        message: str = '',
+    ) -> None:
+        """Request access to an approval-gated stream (subscriber, sync context)."""
+        if not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        async def _request():
+            for client in self._networkClients.values():
+                try:
+                    await client.request_access(
+                        stream_name=stream_name,
+                        producer_pubkey=producer_pubkey,
+                        message=message,
+                    )
+                except Exception as e:
+                    logging.warning(f'AccessGate: request failed: {e}')
+        asyncio.run_coroutine_threadsafe(_request(), loop)
     def triggerNetworkDiscover(self):
         """Trigger on-demand discovery from a sync context (e.g. Flask route).
 
@@ -3362,9 +3954,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
 
         # Get relay list from central, fall back to known relays from DB
+        import random
         try:
             relays = await asyncio.to_thread(self.server.getRelays)
             relay_urls = [r['relay_url'] for r in relays]
+            random.shuffle(relay_urls)
         except Exception as e:
             logging.warning(f'Could not fetch relay list from central: {e}')
             relay_urls = list({sub['relay_url'] for sub in desired})
