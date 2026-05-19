@@ -243,6 +243,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             pass
 
         fetch_task = None
+        next_relay_publish_at = 0.0
         try:
             while True:
                 try:
@@ -271,10 +272,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._channelResendStaleCommitments()
                 except Exception as e:
                     logging.error(f'Channel stale resend error: {e}')
-                try:
-                    await self._networkPublishRelayList()
-                except Exception as e:
-                    logging.error(f'NIP-65 relay list publish error: {e}')
+                if time.monotonic() >= next_relay_publish_at:
+                    try:
+                        await self._networkPublishRelayList()
+                    except Exception as e:
+                        logging.error(f'NIP-65 relay list publish error: {e}')
+                    next_relay_publish_at = time.monotonic() + 86400
                 await asyncio.sleep(3600)
         finally:
             if fetch_task is not None and not fetch_task.done():
