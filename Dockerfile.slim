@@ -64,7 +64,7 @@ COPY --from=builder /usr/local /usr/local
 
 RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web
 
-COPY --from=satorilib satorilib /Satori/Lib/satorilib
+COPY --from=satorilib src/satorilib /Satori/Lib/satorilib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
 COPY web /Satori/web

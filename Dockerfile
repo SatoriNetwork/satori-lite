@@ -23,7 +23,7 @@ RUN git clone --depth 1 https://github.com/hoytech/strfry.git /tmp/strfry && \
     cd /tmp/strfry && \
     git submodule update --init && \
     make setup-golpe && \
-    make -j"$(nproc)" && \
+    make -j2 && \
     cp /tmp/strfry/strfry /usr/local/bin/strfry && \
     rm -rf /tmp/strfry
 
@@ -34,7 +34,7 @@ RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineur
 # The package lives under src/satorilib in the repo, and /Satori/Lib must contain
 # the package root directly for `import satorilib...` to resolve in prod the same
 # way it does in dev mounts.
-COPY --from=satorilib satorilib/src/satorilib /Satori/Lib/satorilib
+COPY --from=satorilib src/satorilib /Satori/Lib/satorilib
 # Copy neuron code
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine

@@ -74,17 +74,22 @@ fi
 echo -e "${GREEN}[INFO]${NC} Tags: $TAG_LIST"
 
 # Build (satorilib is provided as a named build context so the Dockerfile can COPY --from=satorilib)
+CACHE_ARG=""
+[ "${NO_CACHE:-0}" = "1" ] && CACHE_ARG="--no-cache"
+
 if [ "$PUSH_MODE" = true ]; then
     docker buildx build \
         --platform "$PLATFORMS" \
-        --build-context satorilib=../satorilib/src \
+        --build-context satorilib=../satorilib \
+        $CACHE_ARG \
         $TAGS \
         --push \
         .
 else
     echo -e "${YELLOW}[INFO]${NC} Loading into local Docker (current platform only)..."
     docker buildx build \
-        --build-context satorilib=../satorilib/src \
+        --build-context satorilib=../satorilib \
+        $CACHE_ARG \
         $TAGS \
         --load \
         .
@@ -105,7 +110,8 @@ if [ "$PUSH_ALL" = true ]; then
 
     docker buildx build \
         --platform "$PLATFORMS" \
-        --build-context satorilib=../satorilib/src \
+        --build-context satorilib=../satorilib \
+        $CACHE_ARG \
         -f Dockerfile.slim \
         -t "${IMAGE_NAME}:slim" \
         --push \
