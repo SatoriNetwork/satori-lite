@@ -19,7 +19,8 @@ class WalletManager:
         cachePath: Optional[str] = None,
         peersCache: Optional[str] = None,
         updateConnectionStatus: Optional[Callable] = None,
-        useConfigPassword: bool = True
+        useConfigPassword: bool = True,
+        persistent: bool = False,
     ) -> 'WalletManager':
         """
         Create a new WalletManager instance with wallet and vault.
@@ -31,6 +32,9 @@ class WalletManager:
             cachePath: Path to cache directory
             peersCache: Path to peers cache file
             useConfigPassword: If True, read vault password from config if not provided
+            persistent: If True, hold the Electrumx socket open across calls (for
+                the long-lived wallet-service). Default False preserves the
+                legacy per-request reconnect behavior used by the web UI/CLI.
         """
         walletPath = walletPath or config.walletPath('wallet.yaml')
         vaultPath = vaultPath or config.walletPath('vault.yaml')
@@ -43,7 +47,7 @@ class WalletManager:
         WalletManager.performMigrationBackup("wallet")
         WalletManager.performMigrationBackup("vault")
         manager = WalletManager()
-        manager.setup(walletPath, vaultPath, vaultPassword, createVault, cachePath, peersCache, updateConnectionStatus)
+        manager.setup(walletPath, vaultPath, vaultPassword, createVault, cachePath, peersCache, updateConnectionStatus, persistent)
         return manager
 
     @staticmethod
@@ -64,6 +68,7 @@ class WalletManager:
         self._vaultPath: Optional[str] = None
         self._cachePath: Optional[str] = None
         self._peersCache: Optional[str] = None
+        self._persistent: bool = False
 
     def setup(
         self,
@@ -74,12 +79,14 @@ class WalletManager:
         cachePath: Optional[str] = None,
         peersCache: Optional[str] = None,
         updateConnectionStatus: Optional[Callable] = None,
+        persistent: bool = False,
     ):
         # Store paths for later use
         self._vaultPath = vaultPath
         self._cachePath = cachePath
         self._peersCache = peersCache
         self._updateConnectionStatus = updateConnectionStatus
+        self._persistent = persistent
 
         self._initializeWallet(walletPath, cachePath, peersCache)
         self._initializeVault(vaultPath, cachePath, peersCache, vaultPassword, createVault)
@@ -169,7 +176,7 @@ class WalletManager:
             if not self._electrumx:
                 self._electrumx = Electrumx.create(
                 hostPorts=config.get().get('electrumx servers'),
-                persistent=False)
+                persistent=self._persistent)
 
             if self.isConnected():
                 # Update wallet and vault with current electrumx instance

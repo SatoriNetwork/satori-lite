@@ -10,7 +10,7 @@
 #   ./build.sh push             # Push :latest to Docker Hub
 #   ./build.sh push dev         # Push :dev to Docker Hub
 #   ./build.sh push latest dev  # Push multiple tags
-#   ./build.sh push all         # Push :latest + satorineuron:p2p & :latest
+#   ./build.sh push all         # Push :latest + :slim + satorineuron:p2p & :latest
 #
 
 set -e
@@ -74,17 +74,22 @@ fi
 echo -e "${GREEN}[INFO]${NC} Tags: $TAG_LIST"
 
 # Build (satorilib is provided as a named build context so the Dockerfile can COPY --from=satorilib)
+CACHE_ARG=""
+[ "${NO_CACHE:-0}" = "1" ] && CACHE_ARG="--no-cache"
+
 if [ "$PUSH_MODE" = true ]; then
     docker buildx build \
         --platform "$PLATFORMS" \
-        --build-context satorilib=../satorilib/src \
+        --build-context satorilib=../satorilib \
+        $CACHE_ARG \
         $TAGS \
         --push \
         .
 else
     echo -e "${YELLOW}[INFO]${NC} Loading into local Docker (current platform only)..."
     docker buildx build \
-        --build-context satorilib=../satorilib/src \
+        --build-context satorilib=../satorilib \
+        $CACHE_ARG \
         $TAGS \
         --load \
         .
@@ -96,8 +101,23 @@ echo -e "${GREEN}  Build Complete!${NC}"
 echo -e "${GREEN}======================================${NC}"
 echo ""
 
-# Handle "push all" - create satorineuron tags
+# Handle "push all" - build slim variant + create satorineuron tags
 if [ "$PUSH_ALL" = true ]; then
+    echo -e "${BLUE}======================================${NC}"
+    echo -e "${BLUE}  Building and pushing slim variant${NC}"
+    echo -e "${BLUE}======================================${NC}"
+    echo ""
+
+    docker buildx build \
+        --platform "$PLATFORMS" \
+        --build-context satorilib=../satorilib \
+        $CACHE_ARG \
+        -f Dockerfile.slim \
+        -t "${IMAGE_NAME}:slim" \
+        --push \
+        .
+
+    echo ""
     echo -e "${BLUE}======================================${NC}"
     echo -e "${BLUE}  Creating satorineuron tags${NC}"
     echo -e "${BLUE}======================================${NC}"
@@ -119,6 +139,7 @@ if [ "$PUSH_ALL" = true ]; then
     echo ""
     echo "Pushed to Docker Hub:"
     echo "  - ${IMAGE_NAME}:latest"
+    echo "  - ${IMAGE_NAME}:slim"
     echo "  - ${NEURON_IMAGE}:p2p"
     echo "  - ${NEURON_IMAGE}:latest"
     echo ""

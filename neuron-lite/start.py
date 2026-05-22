@@ -79,9 +79,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
+        self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
+        self._accessRequestListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
+        self._channelPayLocks: dict = {}   # p2sh_address -> asyncio.Lock (Fix H)
+        self._mundoCache: dict = {}        # p2sh_address -> {signed_hex, incomplete_hex, ...} (Fix J)
+        self._dataSourceTasks: dict = {}  # stream_name -> (asyncio.Task, cadence)
         self._networkFirstRun: bool = True
         self.networkStreams: list = []  # All discovered streams across relays
         self.networkDB = self._initNetworkDB()
@@ -190,13 +195,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 time.sleep(delay)
 
     async def _networkReconcileLoop(self):
-        """Reconciliation loop: ensures we are subscribed to all desired streams
-        and fetches data sources on their cadence.
+        """Reconciliation loop: ensures we are subscribed to all desired streams.
 
-        Every 5 minutes:
+        Every hour:
         1. Reconcile subscriptions (connect, discover, subscribe)
         2. Ensure relay connections exist for active publications
-        3. Fetch any data sources that are due
+        3. Restore subscriber access
+        4. Check channel expiries
+
+        Each data source gets its own asyncio task (managed by
+        _networkDataSourceManager) that fires at exactly its cadence.
         """
         from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
 
@@ -213,28 +221,74 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelOpenListeners.clear()
         self._channelSettlementListeners.clear()
         self._channelTombstoneListeners.clear()
+        self._predictionListeners.clear()
+        self._accessRequestListeners.clear()
         self._settledChannels.clear()
         self._networkSubscribed.clear()
+        for _sn, (task, _cad) in list(self._dataSourceTasks.items()):
+            task.cancel()
+        self._dataSourceTasks.clear()
         self._networkFirstRun = True
 
-        while True:
-            try:
-                await self._networkReconcile(SatoriNostrConfig)
-            except Exception as e:
-                logging.error(f'Network reconcile error: {e}')
-            try:
-                await self._networkEnsurePublisherConnections(SatoriNostrConfig)
-            except Exception as e:
-                logging.error(f'Network publisher connect error: {e}')
-            try:
-                await self._networkFetchDataSources()
-            except Exception as e:
-                logging.error(f'Network data source fetch error: {e}')
-            try:
-                await self._channelExpiryCheck()
-            except Exception as e:
-                logging.error(f'Channel expiry check error: {e}')
-            await asyncio.sleep(300)
+        # One-shot fetch of server-driven relay config (e.g. max_streams) at
+        # neuron startup. The cap rarely changes; refetching every reconcile
+        # cycle would be wasteful. Best-effort — failures leave the local
+        # fallback in place.
+        try:
+            from satorineuron import network_db as _ndb
+            cfg = await asyncio.to_thread(self.server.getRelayConfig)
+            if isinstance(cfg, dict) and 'max_streams' in cfg:
+                _ndb.setMaxTotalStreams(cfg['max_streams'])
+        except Exception:
+            pass
+
+        fetch_task = None
+        next_relay_publish_at = 0.0
+        try:
+            while True:
+                try:
+                    await self._networkReconcile(SatoriNostrConfig)
+                except Exception as e:
+                    logging.error(f'Network reconcile error: {e}')
+                try:
+                    await self._networkEnsurePublisherConnections(SatoriNostrConfig)
+                except Exception as e:
+                    logging.error(f'Network publisher connect error: {e}')
+                try:
+                    await self._networkRestoreSubscriberAccess()
+                except Exception as e:
+                    logging.error(f'Network subscriber access restore error: {e}')
+                # Start the data source manager after the first reconcile
+                # cycle so publisher relay connections exist before the
+                # first fetch attempts to publish.
+                if fetch_task is None or fetch_task.done():
+                    fetch_task = asyncio.create_task(
+                        self._networkDataSourceManager())
+                try:
+                    await self._channelExpiryCheck()
+                except Exception as e:
+                    logging.error(f'Channel expiry check error: {e}')
+                try:
+                    await self._channelResendStaleCommitments()
+                except Exception as e:
+                    logging.error(f'Channel stale resend error: {e}')
+                if time.monotonic() >= next_relay_publish_at:
+                    try:
+                        await self._networkPublishRelayList()
+                    except Exception as e:
+                        logging.error(f'NIP-65 relay list publish error: {e}')
+                    next_relay_publish_at = time.monotonic() + 86400
+                await asyncio.sleep(3600)
+        finally:
+            if fetch_task is not None and not fetch_task.done():
+                fetch_task.cancel()
+                try:
+                    await fetch_task
+                except BaseException:
+                    pass
+            for _sn, (task, _cad) in list(self._dataSourceTasks.items()):
+                task.cancel()
+            self._dataSourceTasks.clear()
 
     async def _networkEnsurePublisherConnections(self, ConfigClass):
         """Connect to all known relays if we have active publications.
@@ -261,6 +315,67 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 client = await self._networkConnect(relay_url, ConfigClass)
                 if client:
                     await self._networkAnnouncePublications(relay_url)
+            # Hosts need prediction + access-request listeners on every
+            # relay where they publish, even when the reconcile loop
+            # (subscription path) never touches that relay.
+            if relay_url in self._networkClients:
+                self._networkEnsurePredictionListener(relay_url)
+                self._networkEnsureAccessRequestListener(relay_url)
+
+    async def _networkRestoreSubscriberAccess(self):
+        """Restore persisted subscriber access into connected clients.
+
+        On provider restart, _subscribers in each SatoriNostr client is empty.
+        This reloads the subscriber_access table and populates every connected
+        client so that subscribers who already paid don't lose their access
+        rights while waiting for a new subscription announcement.
+
+        Called every reconcile cycle but is idempotent — record_payment only
+        advances last_paid_seq, never regresses it.
+        """
+        records = await asyncio.to_thread(
+            self.networkDB.load_subscriber_access)
+        if not records:
+            return
+        restored = 0
+        for rec in records:
+            stream_name = rec['stream_name']
+            nostr_pubkey = rec['nostr_pubkey']
+            last_paid_seq = rec['last_paid_seq']
+            if not nostr_pubkey or last_paid_seq <= 0:
+                continue
+            for client in self._networkClients.values():
+                if nostr_pubkey not in client._subscribers.get(
+                        stream_name, {}):
+                    client.record_subscription(stream_name, nostr_pubkey)
+                client.record_payment(stream_name, nostr_pubkey, last_paid_seq)
+            restored += 1
+        if restored:
+            logging.info(
+                f'Channel: restored {restored} subscriber access records '
+                f'from DB',
+                color='cyan')
+
+    async def _networkPublishRelayList(self):
+        """Publish a NIP-65 relay list (kind 10002) to all connected relays.
+
+        Advertises every relay URL this node is currently connected to.
+        The central server subscribes to these events from known neuron
+        pubkeys to build its relay directory — replacing the old
+        neuron-claims-relay model.
+        """
+        relay_urls = list(self._networkClients.keys())
+        if not relay_urls:
+            return
+        for client in list(self._networkClients.values()):
+            try:
+                await client.publish_relay_list(relay_urls)
+            except Exception as e:
+                logging.warning(f'Network: NIP-65 publish failed: {e}')
+                continue
+        logging.info(
+            f'Network: published NIP-65 relay list '
+            f'({len(relay_urls)} relays)', color='cyan')
 
     async def _networkConnect(self, relay_url: str, ConfigClass):
         """Connect to a relay if not already connected. Returns client or None."""
@@ -284,10 +399,56 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkEnsureChannelOpenListener(relay_url)
             self._networkEnsureSettlementListener(relay_url)
             self._networkEnsureTombstoneListener(relay_url)
+            asyncio.ensure_future(
+                self._channelPublishStaleTombstones(relay_url))
             return client
         except Exception as e:
             logging.warning(f'Network: failed to connect to {relay_url}: {e}')
             return None
+
+    async def _channelPublishStaleTombstones(self, relay_url: str) -> None:
+        """On reconnect, tombstone relay commitments whose UTXO is outdated.
+
+        If a prior session claimed a channel but was killed before publishing
+        the tombstone, the relay retains the stale commitment event. We detect
+        this by comparing each stored pending_commitment's UTXO against the
+        channel's current funding_txid (which was updated by the claim). A
+        mismatch means the commitment is stale: clear it from the DB and publish
+        a tombstone so the relay drops it and won't replay it again.
+        """
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            channels = await asyncio.to_thread(
+                self.networkDB.get_channels_as_receiver)
+            for channel in channels:
+                prior_json = channel.get('pending_commitment')
+                if not prior_json:
+                    continue
+                try:
+                    from satorilib.satori_nostr.models import ChannelCommitment
+                    prior = ChannelCommitment.from_json(prior_json)
+                    raw = bytes.fromhex(prior.partial_tx_hex)
+                    commitment_txid = raw[5:37][::-1].hex()
+                    if commitment_txid == channel['funding_txid']:
+                        continue
+                    p2sh = channel['p2sh_address']
+                    logging.warning(
+                        f'Channel: stale commitment detected for {p2sh} on '
+                        f'reconnect — clearing DB and tombstoning relay '
+                        f'({commitment_txid[:12]}… != {channel["funding_txid"][:12]}…)',
+                        color='yellow')
+                    await asyncio.to_thread(
+                        self.networkDB.clear_pending_commitment, p2sh)
+                    await client.remove_commitment(p2sh)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: stale tombstone check failed for '
+                        f'{channel.get("p2sh_address", "?")}: {e}')
+        except Exception as e:
+            logging.warning(
+                f'Channel: stale tombstone scan failed on {relay_url}: {e}')
 
     async def _networkDisconnect(self, relay_url: str):
         """Disconnect from a relay and cancel its listeners."""
@@ -306,6 +467,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         ttask = self._channelTombstoneListeners.pop(relay_url, None)
         if ttask and not ttask.done():
             ttask.cancel()
+        ptask = self._predictionListeners.pop(relay_url, None)
+        if ptask and not ptask.done():
+            ptask.cancel()
+        artask = self._accessRequestListeners.pop(relay_url, None)
+        if artask and not artask.done():
+            artask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -345,6 +512,229 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # an open channel to this provider
             await self._channelPayForObservation(
                 obs.stream_name, obs.nostr_pubkey, obs.observation.seq_num)
+            # Score bounty predictions and pay predictors if we host one
+            await self._bountyScoreAndPay(
+                stream_name=obs.stream_name,
+                provider_pubkey=obs.nostr_pubkey,
+                seq_num=obs.observation.seq_num,
+                raw_value=obs.observation.value,
+            )
+
+    async def _bountyScoreAndPay(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+        raw_value,
+    ) -> None:
+        """Score predictions and pay winners when an observation arrives (host side).
+
+        Only runs if this node is the host of an active bounty for the stream.
+        Delegates scoring logic to bounty_scoring.compute_payouts(), then
+        calls _bountyPayPredictor for each non-zero payout.
+
+        raw_value is the observation value as-is; the cast to float happens
+        only after the bounty-host gate, so non-numeric streams do not
+        crash the observation pipeline.
+        """
+        try:
+            bounty = await asyncio.to_thread(
+                self.networkDB.get_bounty,
+                stream_name, provider_pubkey, self.nostrPubkey)
+            if not bounty or not bounty.get('active'):
+                return
+
+            # Dedup: skip if we've already scored this seq_num
+            already_scored = await asyncio.to_thread(
+                self.networkDB.is_seq_already_scored,
+                stream_name, provider_pubkey, seq_num)
+            if already_scored:
+                return
+
+            try:
+                observed_value = float(raw_value)
+            except (TypeError, ValueError):
+                logging.warning(
+                    f'Bounty: skipping score for {stream_name} seq={seq_num} '
+                    f'— non-numeric observation value')
+                return
+
+            predictions = await asyncio.to_thread(
+                self.networkDB.get_bounty_predictions,
+                stream_name, provider_pubkey, seq_num)
+            if not predictions:
+                return
+
+            # Fetch observation timestamps so scoring modules can enforce
+            # timing windows (e.g. disqualify predictions submitted too
+            # close to the observation they're predicting).
+            #
+            # For horizon > 1 (step-ahead predictions), the relevant
+            # submission window starts at the trigger observation
+            # (seq_num - horizon), not the immediately preceding one.
+            # The window runs from the trigger to the target observation,
+            # so the 90% late-cutoff scales naturally with horizon.
+            horizon = bounty.get('horizon', 1)
+            cur_obs = await asyncio.to_thread(
+                self.networkDB.get_observation_by_seq,
+                stream_name, provider_pubkey, seq_num)
+            observed_at = (cur_obs or {}).get('observed_at', 0)
+            trigger_seq = seq_num - horizon
+            trigger_obs = None
+            if trigger_seq >= 1:
+                trigger_obs = await asyncio.to_thread(
+                    self.networkDB.get_observation_by_seq,
+                    stream_name, provider_pubkey, trigger_seq)
+            prev_observed_at = (trigger_obs or {}).get('observed_at', 0)
+
+            from satorineuron.bounty_scoring import compute_payouts
+            payouts = await asyncio.to_thread(
+                compute_payouts, bounty, predictions, observed_value,
+                observed_at, prev_observed_at)
+
+            # Index predictions by pubkey so we can look up wallet pubkey
+            preds_by_pubkey = {
+                row['predictor_pubkey']: row for row in predictions}
+
+            for pubkey, sats in payouts.items():
+                row = preds_by_pubkey.get(pubkey)
+                wallet_pubkey = (row or {}).get('predictor_wallet_pubkey')
+                await self._bountyPayPredictor(
+                    pubkey, wallet_pubkey, sats,
+                    stream_name, provider_pubkey, seq_num)
+        except Exception as e:
+            logging.warning(f'Bounty: score-and-pay failed: {e}')
+
+    async def _bountyScoreLateArrival(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+    ) -> None:
+        """Re-run scoring when a prediction arrives after its observation.
+
+        No-op if the observation hasn't been received yet (the normal
+        _networkProcessObservation path will score once it arrives) or
+        if this node isn't hosting the bounty.
+        """
+        try:
+            observation = await asyncio.to_thread(
+                self.networkDB.get_observation_by_seq,
+                stream_name, provider_pubkey, seq_num)
+        except Exception:
+            return
+        if not observation:
+            return
+        raw = observation.get('value')
+        if raw is None:
+            return
+        # Observations are stored as the JSON-serialised payload; try to
+        # extract the numeric value whether the row was saved as raw or JSON.
+        candidate = raw
+        try:
+            import json as _json
+            parsed = _json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict) and 'value' in parsed:
+                candidate = parsed['value']
+            else:
+                candidate = parsed
+        except (ValueError, TypeError):
+            pass
+        await self._bountyScoreAndPay(
+            stream_name=stream_name,
+            provider_pubkey=provider_pubkey,
+            seq_num=seq_num,
+            raw_value=candidate,
+        )
+
+    async def _bountyPayPredictor(
+        self,
+        predictor_nostr_pubkey: str,
+        predictor_wallet_pubkey: Optional[str],
+        sats: int,
+        stream_name: str,
+        provider_pubkey: str,
+        seq_num: int,
+    ) -> None:
+        """Score and pay a predictor for a bounty (host side).
+
+        Always records the payment obligation in the DB (for leaderboard /
+        accountability) even if the actual channel payment fails.  The channel
+        payment is best-effort — wallet balance or network issues should not
+        prevent scoring results from being persisted.
+        """
+        import time as _time
+        # Always record the scoring result first
+        try:
+            await asyncio.to_thread(
+                self.networkDB.record_bounty_payment,
+                stream_name,
+                provider_pubkey,
+                predictor_nostr_pubkey,
+                seq_num,
+                sats,
+                int(_time.time()),
+            )
+            logging.info(
+                f'Bounty: scored {sats} sats for '
+                f'{predictor_nostr_pubkey[:12]}… seq={seq_num}',
+                color='green')
+        except Exception as e:
+            logging.warning(
+                f'Bounty: failed to record payment for '
+                f'{predictor_nostr_pubkey[:12]}…: {e}')
+            return
+
+        # Now attempt the actual channel payment (best-effort)
+        if not predictor_wallet_pubkey:
+            logging.warning(
+                f'Bounty: no wallet pubkey for predictor '
+                f'{predictor_nostr_pubkey[:12]}…, payment recorded but '
+                f'channel transfer skipped')
+            return
+        try:
+            # Find an open sender channel with enough remainder
+            channels = await asyncio.to_thread(
+                self.networkDB.get_channels_as_sender)
+            channel = next(
+                (c for c in channels
+                 if c['receiver_pubkey'] == predictor_wallet_pubkey
+                 and c['remainder_sats'] >= sats),
+                None)
+            if not channel:
+                fund_sats = self._channelFundSats()
+                timeout_minutes = self._channelTimeoutMinutes()
+                logging.info(
+                    f'Bounty: opening channel to predictor '
+                    f'{predictor_wallet_pubkey[:16]}… '
+                    f'fund={fund_sats} sats',
+                    color='cyan')
+                p2sh = await self.openChannel(
+                    receiver_pubkey=predictor_wallet_pubkey,
+                    amount_sats=fund_sats,
+                    minutes=timeout_minutes,
+                    receiver_nostr_pubkey=predictor_nostr_pubkey,
+                )
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, p2sh)
+                if not channel or channel['remainder_sats'] < sats:
+                    logging.warning(
+                        f'Bounty: channel insufficient for '
+                        f'{sats} sats to {predictor_wallet_pubkey[:16]}… '
+                        f'(payment recorded, transfer pending)')
+                    return
+
+            await self.sendChannelPayment(
+                channel['p2sh_address'], sats, stream_name)
+            logging.info(
+                f'Bounty: channel payment sent — {sats} sats to '
+                f'{predictor_nostr_pubkey[:12]}… for seq={seq_num}',
+                color='green')
+        except Exception as e:
+            logging.warning(
+                f'Bounty: channel transfer failed for '
+                f'{predictor_nostr_pubkey[:12]}… (payment recorded, '
+                f'transfer pending): {e}')
 
     async def _channelPayForObservation(
         self,
@@ -354,17 +744,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Pay for an observation via a channel (sender/buyer side).
 
-        Rate-limited: never pays more than once per cadence/2 seconds.
-        If an observation arrives during the cooldown, schedules exactly one
-        deferred payment at cooldown end. The deferred payment signals the
-        seller that the buyer is still subscribed. Streams with no cadence
-        (null/0) are not rate-limited.
+        Fix F — state-based trigger: fires a payment iff the subscriber's
+        persisted last_paid_seq is behind the incoming seq_num. This avoids
+        both over-paying on bursts and under-paying on replays/stale data.
+        The cooldown stays as a rate-limiter inside, not the entrance gate.
         """
         try:
-            sub = await asyncio.to_thread(
-                self.networkDB.is_subscribed, stream_name, provider_pubkey)
-            if not sub:
-                return
             conn_rows = await asyncio.to_thread(self.networkDB.get_active)
             subscription = next(
                 (s for s in conn_rows
@@ -373,16 +758,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 None)
             if not subscription or subscription.get('price_per_obs', 0) == 0:
                 return  # free stream
+            # State gate: only pay if we're behind
+            last_paid = subscription.get('last_paid_seq', 0) or 0
+            if seq_num <= last_paid:
+                return
             price_sats = subscription['price_per_obs']
             cadence = subscription.get('cadence_seconds') or 0
             cooldown = cadence / 2 if cadence > 0 else 0
             key = (stream_name, provider_pubkey)
             now = time.time()
-            last_paid = self._paymentCooldowns.get(key, 0)
-            if cooldown > 0 and (now - last_paid) < cooldown:
+            last_paid_time = self._paymentCooldowns.get(key, 0)
+            if cooldown > 0 and (now - last_paid_time) < cooldown:
                 # Inside cooldown — schedule one deferred payment at cooldown end
                 if key not in self._paymentDeferred:
-                    delay = cooldown - (now - last_paid)
+                    delay = cooldown - (now - last_paid_time)
                     loop = asyncio.get_event_loop()
                     self._paymentDeferred[key] = loop.call_later(
                         delay,
@@ -394,6 +783,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         f'in {delay:.1f}s (cooldown)')
                 return
             await self._channelPayNow(stream_name, provider_pubkey, price_sats)
+            # Advance last_paid_seq so we don't double-pay
+            await asyncio.to_thread(
+                self.networkDB.update_last_paid_seq,
+                stream_name, provider_pubkey, seq_num)
         except Exception as e:
             logging.warning(f'Channel: pay-for-observation failed: {e}')
 
@@ -416,6 +809,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 return
             price_sats = subscription['price_per_obs']
             await self._channelPayNow(stream_name, provider_pubkey, price_sats)
+            # Advance last_paid_seq to the highest observation we've received
+            max_seq = await asyncio.to_thread(
+                self.networkDB.max_observation_seq,
+                stream_name, provider_pubkey)
+            if max_seq > 0:
+                await asyncio.to_thread(
+                    self.networkDB.update_last_paid_seq,
+                    stream_name, provider_pubkey, max_seq)
         except Exception as e:
             logging.warning(f'Channel: deferred payment failed: {e}')
 
@@ -428,7 +829,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """Send a channel payment immediately and reset the cooldown timer.
 
         Handles channel lookup, refund if exhausted, and open if none exists.
+        Fix H: the read-build-write is serialized per channel with an
+        asyncio.Lock so two concurrent observations don't produce duplicate
+        commitments referencing the same prior state.
         """
+        await self._channelEnsureWallet()
         conn_rows = await asyncio.to_thread(self.networkDB.get_active)
         subscription = next(
             (s for s in conn_rows
@@ -445,54 +850,86 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             (c for c in channels
              if c['receiver_pubkey'] == provider_wallet_pubkey),
             None)
-        if channel and channel['remainder_sats'] < price_sats:
-            fund_sats = self._channelFundSats()
-            logging.info(
-                f'Channel: refunding {channel["p2sh_address"]} '
-                f'(remainder={channel["remainder_sats"]}) '
-                f'with {fund_sats} sats',
-                color='cyan')
-            await self.refundChannel(channel['p2sh_address'], fund_sats)
-            channel = await asyncio.to_thread(
-                self.networkDB.get_channel, channel['p2sh_address'])
-            if not channel or channel['remainder_sats'] < price_sats:
-                return
-        elif not channel:
-            fund_sats = self._channelFundSats()
-            timeout_minutes = self._channelTimeoutMinutes()
-            logging.info(
-                f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
-                f'fund={fund_sats} sats timeout={timeout_minutes} min',
-                color='cyan')
-            p2sh = await self.openChannel(
-                receiver_pubkey=provider_wallet_pubkey,
-                amount_sats=fund_sats,
-                minutes=timeout_minutes,
-                receiver_nostr_pubkey=provider_pubkey,
-            )
-            channel = await asyncio.to_thread(
-                self.networkDB.get_channel, p2sh)
-            if not channel or channel['remainder_sats'] < price_sats:
-                return
-        await self.sendChannelPayment(
-            channel['p2sh_address'], price_sats, stream_name)
-        key = (stream_name, provider_pubkey)
-        self._paymentCooldowns[key] = time.time()
+        # Acquire a per-channel lock for the remainder read → build → write
+        p2sh = channel['p2sh_address'] if channel else None
+        if p2sh and p2sh not in self._channelPayLocks:
+            self._channelPayLocks[p2sh] = asyncio.Lock()
+        lock = self._channelPayLocks.get(p2sh) if p2sh else None
+        if lock:
+            await lock.acquire()
+        try:
+            # Re-read channel inside the lock so we see the latest remainder
+            if channel:
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, channel['p2sh_address'])
+            if channel and channel['remainder_sats'] < price_sats:
+                fund_sats = self._channelFundSats(price_sats)
+                logging.info(
+                    f'Channel: refunding {channel["p2sh_address"]} '
+                    f'(remainder={channel["remainder_sats"]}) '
+                    f'with {fund_sats} sats',
+                    color='cyan')
+                await self.refundChannel(channel['p2sh_address'], fund_sats)
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, channel['p2sh_address'])
+                if not channel or channel['remainder_sats'] < price_sats:
+                    return
+            elif not channel:
+                fund_sats = self._channelFundSats(price_sats)
+                timeout_minutes = self._channelTimeoutMinutes()
+                logging.info(
+                    f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
+                    f'fund={fund_sats} sats timeout={timeout_minutes} min',
+                    color='cyan')
+                new_p2sh = await self.openChannel(
+                    receiver_pubkey=provider_wallet_pubkey,
+                    amount_sats=fund_sats,
+                    minutes=timeout_minutes,
+                    receiver_nostr_pubkey=provider_pubkey,
+                )
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, new_p2sh)
+                if not channel or channel['remainder_sats'] < price_sats:
+                    return
+            await self.sendChannelPayment(
+                channel['p2sh_address'], price_sats, stream_name)
+            key = (stream_name, provider_pubkey)
+            self._paymentCooldowns[key] = time.time()
+        finally:
+            if lock:
+                lock.release()
 
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
 
-        Also saves the latest observation to the DB if it's new.
+        Also saves the latest observation to the DB if it's new (only when
+        the observation content can be decrypted, i.e. for free streams or
+        paid streams to which we are a paying subscriber).
+
+        For paid streams we are NOT a subscriber to, decryption fails — but
+        we can still infer freshness from the public event header timestamp.
         """
+        # First try a full parse. Successful for free streams; also gives us
+        # the observation to cache for streams we're a subscriber to.
         try:
             obs = await client.get_last_observation(stream_name)
             if obs and obs.observation:
                 last_obs = obs.observation.timestamp
                 await self._networkProcessObservation(obs)
                 return last_obs, metadata.is_likely_active(last_obs)
-            return None, False
         except Exception:
-            return None, False
+            pass
+        # Fallback: read just the event header timestamp. Works for paid
+        # streams as long as the publisher has at least one paying subscriber
+        # — the relay still holds the (encrypted) event whose created_at we
+        # can read without any key.
+        try:
+            ts = await client.get_last_observation_event_time(stream_name)
+            if ts:
+                return ts, metadata.is_likely_active(ts)
+        except Exception:
+            pass
+        return None, False
 
     async def _networkListen(self, relay_url: str):
         """Listen for observations on a relay and save them to the DB.
@@ -566,6 +1003,41 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Network: prediction failed: {e}')
 
+        # Submit this prediction privately (encrypted DM) to every bounty
+        # host we've joined for this stream. The engine's prediction is public
+        # via {stream}_pred above; bounty DMs are in addition to that,
+        # private to each host.
+        try:
+            joined = await asyncio.to_thread(
+                self.networkDB.get_joined_bounties_for_stream,
+                stream_name, provider_pubkey)
+            if joined:
+                try:
+                    predicted_float = float(value_str)
+                except (TypeError, ValueError):
+                    predicted_float = None
+                if predicted_float is not None:
+                    for j in joined:
+                        # Look up bounty horizon so we target the right
+                        # future observation.  horizon=1 (default) means
+                        # "predict the next value"; horizon=2 means "predict
+                        # two steps ahead", etc.
+                        comp = await asyncio.to_thread(
+                            self.networkDB.get_bounty,
+                            stream_name, provider_pubkey,
+                            j['host_pubkey'])
+                        horizon = (comp or {}).get('horizon', 1)
+                        await self.submitPrediction(
+                            stream_name=stream_name,
+                            stream_provider_pubkey=provider_pubkey,
+                            host_pubkey=j['host_pubkey'],
+                            seq_num=observation.seq_num + horizon,
+                            predicted_value=predicted_float,
+                        )
+        except Exception as e:
+            logging.warning(
+                f'Network: bounty DM submit failed for {stream_name}: {e}')
+
     def _networkEnsureListener(self, relay_url: str):
         """Start an observation listener for a relay if one isn't running."""
         task = self._networkListeners.get(relay_url)
@@ -577,6 +1049,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsureChannelOpenListener(relay_url)
         self._networkEnsureSettlementListener(relay_url)
         self._networkEnsureTombstoneListener(relay_url)
+        self._networkEnsurePredictionListener(relay_url)
+        self._networkEnsureAccessRequestListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -665,6 +1139,28 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelTombstoneListeners[relay_url] = asyncio.ensure_future(
             self._channelTombstoneListen(relay_url))
 
+    def _networkEnsurePredictionListener(self, relay_url: str):
+        """Start an incoming-predictions listener for a relay if one isn't running."""
+        task = self._predictionListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._predictionListeners[relay_url] = asyncio.ensure_future(
+            self._incomingPredictionsLoop(client, relay_url))
+
+    def _networkEnsureAccessRequestListener(self, relay_url: str):
+        """Start an incoming-access-requests listener for a relay if one isn't running."""
+        task = self._accessRequestListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._accessRequestListeners[relay_url] = asyncio.ensure_future(
+            self._incomingAccessRequestsLoop(client, relay_url))
+
     async def _channelTombstoneListen(self, relay_url: str):
         """Listen for commitment tombstones as a fallback reset (sender side).
 
@@ -742,19 +1238,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         existing = await asyncio.to_thread(
             self.networkDB.get_channel, co.p2sh_address)
         # Ignore replays: same P2SH + same funding_txid means we already have it.
-        # A new funding_txid means the sender refunded/reopened — accept the
-        # update ONLY if the announcement's timestamp is newer than what we
-        # already have. This prevents Nostr history replays from overwriting
-        # a newer on-chain state (e.g. a UTXO created by our own claim).
+        # A different funding_txid is the authoritative reset signal (Fix D) —
+        # the sender refunded/reopened with a new UTXO. Accept unconditionally;
+        # the on-chain UTXO change is proof that this is a real state transition
+        # regardless of timestamp ordering (clock skew, relay delivery latency,
+        # or missing timestamps can all make the old timestamp check unreliable).
         if existing:
             if existing.get('funding_txid') == co.funding_txid:
-                return
-            announce_ts = int(getattr(co, 'timestamp', 0))
-            if announce_ts and announce_ts <= int(existing.get('created_at') or 0):
-                logging.info(
-                    f'Channel: ignoring stale channel_open for {co.p2sh_address} '
-                    f'(announce_ts={announce_ts} <= local={existing.get("created_at")})',
-                    color='yellow')
                 return
         await asyncio.to_thread(
             self.networkDB.save_channel,
@@ -773,6 +1263,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             receiver_nostr_pubkey=self.nostrPubkey or '',
             created_at=int(getattr(co, 'timestamp', 0)) or None,
         )
+        # If the funding UTXO changed (refund/reopen), clear the stale
+        # pending commitment from the previous funding round — otherwise the
+        # next legitimate commitment looks like a remainder-rollback attack.
+        if existing and existing.get('funding_txid') != co.funding_txid:
+            await asyncio.to_thread(
+                self.networkDB.clear_pending_commitment, co.p2sh_address)
         logging.info(
             f'Channel: {"updated" if existing else "registered inbound"} '
             f'channel {co.p2sh_address} from {co.sender_pubkey[:16]}… '
@@ -812,9 +1308,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, commitment.p2sh_address)
         if not channel:
+            # Channel open event may still be in-flight — retry once after a
+            # short delay before dropping (open and commit arrive simultaneously)
+            await asyncio.sleep(3)
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, commitment.p2sh_address)
+        if not channel:
             logging.warning(
                 f'Channel: commitment for unknown channel '
                 f'{commitment.p2sh_address} — ignoring')
+            return
+        # Only the receiver should process inbound commitments.
+        # The sender also knows about the channel (it opened it) and sees the
+        # same commitment events on the relay — skip if we're the sender.
+        if channel.get('receiver_pubkey') != self.wallet.pubkey:
+            return
+        # Fix I: require stream_name to prevent cross-stream over-granting
+        if not commitment.stream_name:
+            logging.warning(
+                f'Channel: rejecting commitment for {commitment.p2sh_address} — '
+                f'missing stream_name',
+                color='yellow')
             return
         # Bind the commitment envelope to the channel's known pubkeys. Nostr
         # kind 34604 is parameterized-replaceable by (kind, author, d_tag), so
@@ -834,6 +1348,30 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'receiver_pubkey mismatch',
                 color='yellow')
             return
+        # Verify the commitment references the current funding UTXO. After a
+        # successful claim the DB funding_txid advances to the claim tx output;
+        # a relay-replayed commitment still pointing at the old UTXO is stale.
+        try:
+            raw = bytes.fromhex(commitment.partial_tx_hex)
+            # version (4 bytes) + input count varint (1 byte) + txid LE (32 bytes)
+            commitment_txid = raw[5:37][::-1].hex()
+            if commitment_txid != channel['funding_txid']:
+                logging.warning(
+                    f'Channel: rejecting stale commitment for '
+                    f'{commitment.p2sh_address} — references old UTXO '
+                    f'{commitment_txid[:12]}… (current: '
+                    f'{channel["funding_txid"][:12]}…); tombstoning relay',
+                    color='yellow')
+                for client in self._networkClients.values():
+                    try:
+                        await client.remove_commitment(commitment.p2sh_address)
+                    except Exception:
+                        pass
+                return
+        except Exception as e:
+            logging.warning(
+                f'Channel: could not verify commitment UTXO for '
+                f'{commitment.p2sh_address}: {e} — accepting')
         # Bounds + monotonicity. remainder_sats tracks what's still locked in
         # the channel; each new commitment must not exceed what was originally
         # locked, and must not *increase* vs the prior pending commitment (that
@@ -848,11 +1386,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'remainder={commitment.remainder_sats}, locked={locked})',
                 color='yellow')
             return
+        is_resend = False
         prior_json = channel.get('pending_commitment')
         if prior_json:
             try:
                 from satorilib.satori_nostr.models import ChannelCommitment
                 prior = ChannelCommitment.from_json(prior_json)
+                is_resend = (commitment.remainder_sats
+                             == prior.remainder_sats)
                 if commitment.remainder_sats > prior.remainder_sats:
                     logging.warning(
                         f'Channel: rejecting commitment for '
@@ -891,6 +1432,40 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.error(
                 f'Channel: failed to store commitment '
                 f'{commitment.p2sh_address}: {e}')
+        # Grant provisional access immediately on commitment receipt so the
+        # subscriber can receive observations without waiting for an on-chain
+        # claim. The claim just settles funds; access is based on committed amt.
+        sender_nostr_pubkey = channel.get('sender_nostr_pubkey', '')
+        if sender_nostr_pubkey and commitment.pay_amount_sats > 0:
+            await self._grantChannelAccess(
+                sender_nostr_pubkey=sender_nostr_pubkey,
+                total_paid_sats=commitment.pay_amount_sats,
+                stream_name=commitment.stream_name,
+                p2sh_address=commitment.p2sh_address)
+            # Gap recovery (seller side): only when the commitment is a
+            # re-send (same remainder as prior — the buyer is reminding us
+            # they're online, not making a fresh payment).  In the normal
+            # case the buyer just received the observation and paid, so
+            # resending would be redundant.
+            if is_resend and commitment.stream_name:
+                try:
+                    pub = await asyncio.to_thread(
+                        lambda: next(
+                            (p for p in
+                             self.networkDB.get_active_publications()
+                             if p['stream_name'] == commitment.stream_name),
+                            None))
+                    if pub:
+                        current_seq = pub.get('last_seq_num', 0)
+                        if current_seq > 0:
+                            await self._networkResendObservation(
+                                commitment.stream_name,
+                                current_seq,
+                                sender_nostr_pubkey)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: gap recovery send failed for '
+                        f'{commitment.stream_name}: {e}')
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -910,6 +1485,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             The broadcast txid
         """
         from satorilib.satori_nostr.models import ChannelCommitment, ChannelSettlement
+        await self._channelEnsureWallet()
         # Refresh UTXOs so PATH B can see our EVR for the mining fee
         await asyncio.to_thread(self.wallet.getUnspents)
         channel = await asyncio.to_thread(
@@ -944,6 +1520,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     for v in tx.vout]
         redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
         sender_sigs = [bytes.fromhex(s) for s in commitment.sender_sigs]
+        # ── Pre-compute change_vout from partial_tx (independent of claim path) ──
+        # Done here so DB can be updated immediately after broadcast, before any
+        # Nostr ops — minimises the crash window between broadcast and DB update.
+        redeem_bytes = bytes.fromhex(channel['redeem_script'])
+        script_hash = hashlib.new(
+            'ripemd160', hashlib.sha256(redeem_bytes).digest()).digest()
+        p2sh_script = bytes([0xa9, 0x14]) + script_hash + bytes([0x87])
+        change_vout = -1
+        change_sats = commitment.remainder_sats
+        for i, out in enumerate(tx.vout):
+            spk = bytes(out.scriptPubKey)
+            if spk == p2sh_script or spk.startswith(p2sh_script):
+                change_vout = i
+                break
         # ── Fee estimation ──────────────────────────────────────────────────
         # Size of the serialised partial tx (P2SH vin has empty scriptSig yet)
         # plus the space the completed 2-of-2+CSV scriptSig will occupy.
@@ -1058,38 +1648,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     f'Channel: PATH C claimed {p2sh_address} via Mundo '
                     f'({commitment.pay_amount_sats} sats) — txid={txid}',
                     color='green')
-        # ── Grant access for exactly this payment, not cumulative total ───────
-        await self._grantChannelAccess(
-            sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
-            total_paid_sats=commitment.pay_amount_sats,
-            stream_name=commitment.stream_name)
-        # ── Post-broadcast: update DB ───────────────────────────────────────
-        logging.info(
-            f'Channel: claimed {commitment.pay_amount_sats} sats '
-            f'from {p2sh_address} — txid={txid}',
-            color='green')
-        # Find the P2SH change output (change goes back to P2SH for next round)
-        redeem_bytes = bytes.fromhex(channel['redeem_script'])
-        script_hash = hashlib.new(
-            'ripemd160', hashlib.sha256(redeem_bytes).digest()).digest()
-        p2sh_script = bytes([0xa9, 0x14]) + script_hash + bytes([0x87])
-        change_vout = -1
-        # SATORI outputs have nValue=0 in the Python Evrmore library;
-        # use commitment.remainder_sats for the canonical SATORI amount.
-        change_sats = commitment.remainder_sats
-        # Determine which vout carries the P2SH change. SATORI asset outputs
-        # are `<p2sh_script><asset_data>` — i.e. the scriptPubKey STARTS with
-        # the P2SH locking bytes. Exact equality would miss those, so we
-        # check the prefix.
-        check_tx = CMutableTransaction.deserialize(
-            bytes.fromhex(commitment.partial_tx_hex))
-        for i, out in enumerate(check_tx.vout):
-            spk = bytes(out.scriptPubKey)
-            if spk == p2sh_script or spk.startswith(p2sh_script):
-                change_vout = i
-                break
-        # Single timestamp shared between local DB update and settlement publish
-        # so sender and receiver agree on when the CSV timer reset.
+        # ── DB update: must happen before Nostr ops to survive a crash ─────────
+        # If the process is killed after broadcast but before this block, the
+        # relay still has the old commitment. On restart, Part 1/2 of the stale
+        # tombstone fix will detect the UTXO mismatch and clean it up. By doing
+        # DB writes here (before Nostr), we minimise that window.
         settlement_ts = int(time.time())
         if change_vout >= 0 and change_sats > 0:
             await asyncio.to_thread(
@@ -1101,13 +1664,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{txid[:12]}…:{change_vout} ({change_sats} sats)',
                 color='cyan')
         else:
-            # No change output — channel fully drained on receiver side
             logging.info(
                 f'Channel: {p2sh_address} fully drained, awaiting refund',
                 color='yellow')
-        await asyncio.to_thread(
-            self.networkDB.clear_pending_commitment, p2sh_address)
-        # Notify sender so they can update their funding UTXO
+        # ── Grant access for exactly this payment, not cumulative total ───────
+        await self._grantChannelAccess(
+            sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
+            total_paid_sats=commitment.pay_amount_sats,
+            stream_name=commitment.stream_name,
+            p2sh_address=p2sh_address)
+        logging.info(
+            f'Channel: claimed {commitment.pay_amount_sats} sats '
+            f'from {p2sh_address} — txid={txid}',
+            color='green')
+        # Notify sender so they can update their funding UTXO.
         sender_nostr_pubkey = channel.get('sender_nostr_pubkey')
         if sender_nostr_pubkey:
             from satorilib.satori_nostr.models import ChannelSettlement
@@ -1118,30 +1688,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 new_locked_sats=change_sats,
                 timestamp=settlement_ts,
             )
-            published_count = 0
             for relay_url, client in self._networkClients.items():
                 try:
                     await client.publish_settlement(settlement, sender_nostr_pubkey)
-                    published_count += 1
                     logging.info(
                         f'Channel: published settlement on {relay_url} '
                         f'to sender {sender_nostr_pubkey[:16]}…', color='cyan')
                 except Exception as e:
                     logging.warning(
                         f'Channel: failed to publish settlement on {relay_url}: {e}')
-            if published_count == 0:
-                logging.error(
-                    f'Channel: settlement for {p2sh_address} published to 0 relays')
         else:
             logging.warning(
                 f'Channel: {p2sh_address} has no sender_nostr_pubkey — '
                 f'cannot notify sender of settlement')
-        # Tombstone the commitment on all relays
+        # Tombstone the old commitment on all relays
         for client in self._networkClients.values():
             try:
                 await client.remove_commitment(p2sh_address)
             except Exception:
                 pass
+        await asyncio.to_thread(
+            self.networkDB.clear_pending_commitment, p2sh_address)
         return txid
 
     async def _claimChannelViaMundo(
@@ -1154,15 +1721,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> str:
         """PATH C claim: receiver has no EVR — pay SATORI fee to Mundo.
 
-        Flow:
-          1. Find receiver's SATORI UTXO.
-          2. Compute final tx shape and request Mundo fee params.
-          3. Rebuild tx: P2SH inputs + SATORI input + existing outputs
-             + SATORI fee output + SATORI change output + EVR change output.
-          4. Sign P2SH vin[0] and SATORI input with SIGHASH_ALL|ANYONECANPAY (0x81).
-          5. POST to Mundo (signOnly=true) — Mundo adds EVR input and returns
-             the fully signed tx hex.
-          6. Broadcast the returned tx and return the txid.
+        Fix J — idempotent retry: the built tx and Mundo params are cached in
+        _mundoCache[p2sh] so a retry after a mid-flow failure reuses the same
+        tx rather than rebuilding with potentially different UTXOs/params.
+
+        Three retry tiers:
+          a) signed_hex cached → skip to broadcast (Step 6).
+          b) incomplete_hex cached → skip to Mundo POST (Step 5).
+          c) nothing cached → full build (Steps 1-6).
         """
         import requests as _requests
         from evrmore.core import (
@@ -1176,6 +1742,53 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from functools import partial as funcpartial
 
         MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
+        p2sh = channel['p2sh_address']
+        cached = self._mundoCache.get(p2sh, {})
+
+        # ── Tier A: fully-signed tx from Mundo already cached ───────────
+        if cached.get('signed_hex'):
+            logging.info(
+                f'Channel: Mundo retry tier A — broadcasting cached tx '
+                f'for {p2sh}', color='cyan')
+            try:
+                txid = await asyncio.to_thread(
+                    self.wallet.broadcast, cached['signed_hex'])
+                self._mundoCache.pop(p2sh, None)
+                return txid
+            except Exception as e:
+                logging.warning(
+                    f'Channel: cached signed tx failed: {e} — rebuilding')
+                self._mundoCache.pop(p2sh, None)
+
+        # ── Tier B: signed incomplete tx cached, re-post to Mundo ───────
+        if cached.get('incomplete_hex') and cached.get('fee_sats_reserved'):
+            logging.info(
+                f'Channel: Mundo retry tier B — re-posting to Mundo '
+                f'for {p2sh}', color='cyan')
+            try:
+                def _mundo_post_cached():
+                    resp = _requests.post(
+                        f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
+                        f'/{cached["fee_sats_reserved"]}/{cached["fee_sats"]}/0',
+                        params={'signOnly': 'true'},
+                        data=cached['incomplete_hex'],
+                        headers={'Content-Type': 'text/plain'},
+                        timeout=30)
+                    resp.raise_for_status()
+                    return resp.text
+                signed_hex = await asyncio.to_thread(_mundo_post_cached)
+                self._mundoCache[p2sh] = {
+                    **cached, 'signed_hex': signed_hex}
+                txid = await asyncio.to_thread(
+                    self.wallet.broadcast, signed_hex)
+                self._mundoCache.pop(p2sh, None)
+                return txid
+            except Exception as e:
+                logging.warning(
+                    f'Channel: Mundo tier B failed: {e} — full rebuild')
+                self._mundoCache.pop(p2sh, None)
+
+        # ── Tier C: full build ──────────────────────────────────────────
 
         # Step 1: find receiver's SATORI UTXO
         satori_utxo = None
@@ -1292,9 +1905,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.wallet._signInput,
             new_tx, satori_vin_idx, satori_txin, satori_script, mundo_sighash)
 
-        # Step 5: serialize and POST to Mundo (signOnly=true)
+        # Cache the signed incomplete tx (tier B on retry)
         incomplete_hex = new_tx.serialize().hex()
+        self._mundoCache[p2sh] = {
+            'incomplete_hex': incomplete_hex,
+            'fee_sats_reserved': fee_sats_reserved,
+            'fee_sats': fee_sats,
+        }
 
+        # Step 5: POST to Mundo (signOnly=true)
         def _broadcast_via_mundo():
             resp = _requests.post(
                 f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
@@ -1307,9 +1926,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return resp.text
 
         signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
+        # Cache the fully-signed tx (tier A on retry)
+        self._mundoCache[p2sh] = {
+            **self._mundoCache.get(p2sh, {}), 'signed_hex': signed_hex}
 
         # Step 6: broadcast the fully-signed tx and return txid
         txid = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
+        self._mundoCache.pop(p2sh, None)
         return txid
 
     async def _grantChannelAccess(
@@ -1317,6 +1940,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         sender_nostr_pubkey: str,
         total_paid_sats: int,
         stream_name: str = '',
+        p2sh_address: str = '',
     ) -> None:
         """Update subscriber access rights after a successful channel claim.
 
@@ -1332,19 +1956,23 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         The provider's publish_observation() only sends encrypted data to
         subscribers whose last_paid_seq >= current seq_num, so this is what
         unlocks the next batch of observations for the paying subscriber.
+
+        When p2sh_address is supplied, the granted last_paid_seq is persisted
+        to the subscriber_access table so it survives provider restarts and
+        Nostr key rotations (Fix C).
         """
         if not sender_nostr_pubkey or total_paid_sats <= 0:
             return
         pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
         for pub in pubs:
-            price_per_obs = pub.get('price_per_obs', 0)
-            if price_per_obs <= 0:
+            effective_price = pub.get('price_per_obs', 0)
+            if effective_price <= 0:
                 continue
             pub_stream = pub['stream_name']
             # If the commitment names a specific stream, skip all others
             if stream_name and pub_stream != stream_name:
                 continue
-            paid_count = total_paid_sats // price_per_obs
+            paid_count = total_paid_sats // effective_price
             if paid_count <= 0:
                 continue
             current_seq = pub.get('last_seq_num', 0)
@@ -1357,28 +1985,97 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if sender_nostr_pubkey not in client._subscribers.get(
                         pub_stream, {}):
                     client.record_subscription(pub_stream, sender_nostr_pubkey)
+                # Advance from the subscriber's existing last_paid_seq when
+                # higher than current_seq — handles multiple commits arriving
+                # between publishes, where last_seq_num hasn't moved but each
+                # incremental payment should still grant one more observation.
+                existing = client._subscribers[pub_stream].get(sender_nostr_pubkey)
+                base_seq = current_seq
+                if existing and existing.last_paid_seq is not None:
+                    base_seq = max(base_seq, existing.last_paid_seq)
+                grant_to_seq = base_seq + paid_count
                 client.record_payment(pub_stream, sender_nostr_pubkey, grant_to_seq)
+            # Persist to DB so access survives provider restarts (Fix C).
+            if p2sh_address:
+                try:
+                    await asyncio.to_thread(
+                        self.networkDB.save_subscriber_access,
+                        pub_stream, p2sh_address,
+                        sender_nostr_pubkey, grant_to_seq)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: failed to persist subscriber access: {e}')
             logging.info(
                 f'Channel: granted {sender_nostr_pubkey[:16]}… access to '
                 f'{pub_stream} up to seq={grant_to_seq} '
                 f'({paid_count} obs)',
                 color='cyan')
 
+    async def _channelResendStaleCommitments(self):
+        """Re-publish the last commitment for stale paid subscriptions.
+
+        Gap recovery (buyer side): if we haven't received an observation
+        for longer than the cadence (or 24 h when cadence is unknown),
+        re-send our last commitment as a reminder to the seller so they
+        know we are online and where we left off.
+        """
+        from satorilib.satori_nostr.models import ChannelCommitment
+        channels = await asyncio.to_thread(
+            self.networkDB.get_channels_as_sender)
+        subs = await asyncio.to_thread(self.networkDB.get_active)
+        sub_map = {(s['stream_name'], s['provider_pubkey']): s for s in subs}
+        for channel in channels:
+            commitment_json = channel.get('pending_commitment')
+            if not commitment_json:
+                continue
+            try:
+                commitment = ChannelCommitment.from_json(commitment_json)
+            except Exception:
+                continue
+            stream_name = commitment.stream_name
+            if not stream_name:
+                continue
+            receiver_nostr = channel.get('receiver_nostr_pubkey') or ''
+            # Find the matching subscription
+            sub = sub_map.get((stream_name, receiver_nostr))
+            if not sub or (sub.get('price_per_obs', 0) or 0) == 0:
+                continue
+            cadence = sub.get('cadence_seconds') or 0
+            stale = await asyncio.to_thread(
+                self.networkDB.is_locally_stale,
+                stream_name, sub['provider_pubkey'],
+                cadence if cadence > 0 else 86400,
+                multiplier=2.0)
+            if not stale:
+                continue
+            # Re-publish the last commitment as a reminder
+            for client in self._networkClients.values():
+                try:
+                    await client.publish_commitment(
+                        commitment, receiver_nostr)
+                except Exception as e:
+                    logging.warning(
+                        f'Channel: stale resend failed: {e}')
+            logging.info(
+                f'Channel: re-sent stale commitment for {stream_name} '
+                f'to {receiver_nostr[:16]}…',
+                color='yellow')
+
     async def _channelExpiryCheck(self):
-        """Auto-claim receiver channels that expire within 24 hours.
+        """Auto-claim receiver channels every 15 days.
 
         Called from the reconcile loop but throttled to run at most every
-        12 hours. Protects the receiver from losing accrued micropayments
-        when a channel times out.
+        15 days. Ensures the provider collects accrued micropayments well
+        before the 31-day CSV timeout.
         """
         now = time.time()
         last = getattr(self, '_lastChannelExpiryCheck', 0)
-        if now - last < 43200:  # 12 hours
+        if now - last < 1296000:  # 15 days
             return
         self._lastChannelExpiryCheck = now
         try:
             near_expiry = await asyncio.to_thread(
-                self.networkDB.get_channels_near_expiry, 86400)
+                self.networkDB.get_channels_near_expiry, 1296000)
             for channel in near_expiry:
                 p2sh = channel['p2sh_address']
                 logging.info(
@@ -1392,9 +2089,20 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Channel: expiry check failed: {e}')
 
-    def _channelFundSats(self) -> int:
-        """Return the configured channel funding amount in sats (default 1 SATORI)."""
-        return int(config.get().get('channel_fund_sats', 100_000_000))
+    def _channelFundSats(self, price_per_obs: int = 0) -> int:
+        """Return channel funding amount in sats, scaled by observation economics.
+
+        Fix K: instead of a hardcoded 1M sats, compute from price_per_obs *
+        observations_per_refill (configurable, default 500). Clamped between
+        100k (min) and 1M (max) sats. Falls back to the static config value
+        or 1M when price_per_obs is not supplied.
+        """
+        static = int(config.get().get('channel_fund_sats', 1_000_000))
+        if price_per_obs <= 0:
+            return static
+        obs_per_refill = int(config.get().get('observations_per_refill', 500))
+        computed = price_per_obs * obs_per_refill
+        return max(100_000, min(computed, 1_000_000))
 
     def _channelFetchUtxoSatori(
         self,
@@ -1434,9 +2142,74 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(f'Channel: could not parse UTXO amount for {txid[:12]}: {e}')
             return fallback_sats
 
+    async def _channelVerifyUtxo(self, channel: dict) -> dict:
+        """Check on-chain that the channel's funding UTXO still exists.
+
+        Queries electrum for unspent outputs at the P2SH address. If the
+        recorded funding_txid:funding_vout is missing, looks for the newest
+        SATORI UTXO at that address and updates the DB to point at it.
+        Always stamps utxo_checked_at so we don't re-check for 24 hours.
+
+        Returns the (possibly updated) channel dict.
+        """
+        p2sh = channel['p2sh_address']
+        funding_txid = channel['funding_txid']
+        funding_vout = channel['funding_vout']
+        try:
+            scripthash = EvrmoreWallet.p2shScripthash(p2sh)
+            unspents = await asyncio.to_thread(
+                self.wallet.electrumx.api.getUnspentAssets,
+                scripthash, 'SATORI')
+            unspents = unspents or []
+            found = any(
+                u.get('tx_hash') == funding_txid
+                and u.get('tx_pos') == funding_vout
+                for u in unspents)
+            if found:
+                await asyncio.to_thread(
+                    self.networkDB.update_utxo_checked_at, p2sh)
+                channel = await asyncio.to_thread(
+                    self.networkDB.get_channel, p2sh)
+                return channel
+            # UTXO is gone — find the replacement (newest by block height)
+            if unspents:
+                best = max(unspents, key=lambda u: u.get('height', 0))
+                new_txid = best['tx_hash']
+                new_vout = best['tx_pos']
+                new_sats = self._channelFetchUtxoSatori(
+                    new_txid, new_vout, best.get('value', 0))
+                await asyncio.to_thread(
+                    self.networkDB.update_channel_funding,
+                    p2sh, new_txid, new_vout, new_sats)
+                logging.info(
+                    f'Channel: UTXO liveness check — {p2sh} funding moved '
+                    f'from {funding_txid[:12]}…:{funding_vout} to '
+                    f'{new_txid[:12]}…:{new_vout} ({new_sats} sats)',
+                    color='yellow')
+            else:
+                # No SATORI UTXOs at this address at all — channel is drained
+                await asyncio.to_thread(
+                    self.networkDB.update_channel_remainder, p2sh, 0)
+                logging.info(
+                    f'Channel: UTXO liveness check — {p2sh} has no '
+                    f'unspent SATORI, zeroing remainder',
+                    color='yellow')
+            await asyncio.to_thread(
+                self.networkDB.update_utxo_checked_at, p2sh)
+            channel = await asyncio.to_thread(
+                self.networkDB.get_channel, p2sh)
+        except Exception as e:
+            logging.warning(
+                f'Channel: UTXO liveness check failed for {p2sh}: {e}')
+        return channel
+
     def _channelTimeoutMinutes(self) -> int:
-        """Return the configured channel lifetime in minutes (default 90 days)."""
-        return int(config.get().get('channel_timeout_minutes', 129600))
+        """Return the configured channel lifetime in minutes (default 7 days).
+
+        Fix L: lowered from 90 days (129,600 min) to 7 days (10,080 min) so
+        subscriber funds aren't idle for a quarter year in the failure case.
+        """
+        return int(config.get().get('channel_timeout_minutes', 44640))
 
     @staticmethod
     def _channelVerifySenderSig(commitment, channel: dict) -> bool:
@@ -1495,6 +2268,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return created_at + int(blocks) * 60
         return 0
 
+    async def _channelEnsureWallet(self) -> None:
+        """Ensure the wallet has a live Electrumx connection (Fix E).
+
+        Channel operations (open, refund, claim, pay) need the wallet online.
+        On startup the connection may not be ready yet; this retries once after
+        a short delay. Raises RuntimeError if the wallet is still unreachable
+        so the caller gets a clear error instead of a swallowed warning.
+        """
+        if self.walletManager.isConnected():
+            return
+        if await asyncio.to_thread(self.walletManager.connect):
+            return
+        # Retry once after a short wait — the wallet often recovers quickly
+        await asyncio.sleep(3)
+        if await asyncio.to_thread(self.walletManager.connect):
+            logging.info('Channel: wallet connected on retry', color='green')
+            return
+        raise RuntimeError(
+            'Wallet is not connected — channel operation aborted. '
+            'The Electrumx connection will be retried on the next cycle.')
+
     async def openChannel(
         self,
         receiver_pubkey: str,
@@ -1520,6 +2314,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The P2SH address of the new channel
         """
+        await self._channelEnsureWallet()
         await asyncio.to_thread(self.wallet.getUnspents)
         amount_satori = amount_sats / 1e8
         txid, script_payload = await asyncio.to_thread(
@@ -1609,6 +2404,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             p2sh_address: The channel to refund
             amount_sats: Amount to send (defaults to _channelFundSats())
         """
+        await self._channelEnsureWallet()
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
@@ -1703,6 +2499,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Channel {p2sh_address} has expired — the sender can now '
                 f'reclaim, so new commitments would race that reclaim and '
                 f'are not safe to send')
+        # UTXO liveness check: if we haven't verified the funding UTXO
+        # on-chain in the last 24 hours, query electrum to make sure it's
+        # still unspent. If the receiver claimed and we missed the Nostr
+        # settlement, this catches it from the source of truth.
+        UTXO_CHECK_INTERVAL = 86400  # 24 hours
+        utxo_checked_at = channel.get('utxo_checked_at', 0) or 0
+        if int(time.time()) - utxo_checked_at > UTXO_CHECK_INTERVAL:
+            channel = await self._channelVerifyUtxo(channel)
         if pay_amount_sats > channel['remainder_sats']:
             raise ValueError(
                 f'Pay amount {pay_amount_sats} exceeds channel remainder '
@@ -1776,6 +2580,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self.networkDB.update_channel_remainder,
             p2sh_address,
             remainder)
+        # Store the sent commitment so we can re-send it if the receiver
+        # never responds (gap recovery: buyer re-publishes as a reminder).
+        await asyncio.to_thread(
+            self.networkDB.store_pending_commitment,
+            p2sh_address, commitment.to_json())
         logging.info(
             f'Channel: published commitment {p2sh_address} '
             f'pay={pay_amount_sats} sats remainder={remainder} sats',
@@ -1910,16 +2719,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> str:
         """PATH B reclaim: sender has no EVR — pay SATORI fee to Mundo.
 
-        Flow:
-          1. Find sender's SATORI UTXO for the fee.
-          2. Request Mundo fee params for final tx shape.
-          3. Build tx: [P2SH vin, SATORI vin] +
-             [SATORI→sender, SATORI fee→Mundo, SATORI change, EVR change].
-          4. Set nVersion=2, nSequence=csv_value on the tx (CSV requirement).
-          5. Sign P2SH vin[0] with 0x81 (SIGHASH_ALL|ANYONECANPAY, CSV branch).
-          6. Sign SATORI vin[1] with 0x81.
-          7. POST to Mundo (signOnly=true) — Mundo adds its EVR input.
-          8. Broadcast the returned fully-signed hex and return the txid.
+        Fix J — idempotent retry: same tier A/B/C cache pattern as
+        _claimChannelViaMundo. Uses 'reclaim_' prefix in _mundoCache key.
         """
         import requests as _requests
         from evrmore.core import (
@@ -1932,6 +2733,59 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from satorilib.wallet.utils.transaction import TxUtils
 
         MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
+        cache_key = f'reclaim_{channel["p2sh_address"]}'
+        cached = self._mundoCache.get(cache_key, {})
+
+        # ── Tier A: fully-signed tx cached ──────────────────────────────
+        if cached.get('signed_hex'):
+            logging.info(
+                f'Channel: Mundo reclaim retry tier A for '
+                f'{channel["p2sh_address"]}', color='cyan')
+            try:
+                result = await asyncio.to_thread(
+                    self.wallet.broadcast, cached['signed_hex'])
+                if isinstance(result, dict) and result.get('code') is not None:
+                    raise TransactionFailure(
+                        f'broadcast rejected: {result.get("message", result)}')
+                self._mundoCache.pop(cache_key, None)
+                return result
+            except Exception as e:
+                logging.warning(
+                    f'Channel: cached reclaim tx failed: {e} — rebuilding')
+                self._mundoCache.pop(cache_key, None)
+
+        # ── Tier B: incomplete tx cached, re-post to Mundo ──────────────
+        if cached.get('incomplete_hex') and cached.get('fee_sats_reserved'):
+            logging.info(
+                f'Channel: Mundo reclaim retry tier B for '
+                f'{channel["p2sh_address"]}', color='cyan')
+            try:
+                def _mundo_post_cached():
+                    resp = _requests.post(
+                        f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
+                        f'/{cached["fee_sats_reserved"]}/{cached["fee_sats"]}/0',
+                        params={'signOnly': 'true'},
+                        data=cached['incomplete_hex'],
+                        headers={'Content-Type': 'text/plain'},
+                        timeout=30)
+                    resp.raise_for_status()
+                    return resp.text
+                signed_hex = await asyncio.to_thread(_mundo_post_cached)
+                self._mundoCache[cache_key] = {
+                    **cached, 'signed_hex': signed_hex}
+                result = await asyncio.to_thread(
+                    self.wallet.broadcast, signed_hex)
+                if isinstance(result, dict) and result.get('code') is not None:
+                    raise TransactionFailure(
+                        f'broadcast rejected: {result.get("message", result)}')
+                self._mundoCache.pop(cache_key, None)
+                return result
+            except Exception as e:
+                logging.warning(
+                    f'Channel: Mundo reclaim tier B failed: {e} — full rebuild')
+                self._mundoCache.pop(cache_key, None)
+
+        # ── Tier C: full build ──────────────────────────────────────────
 
         # Step 1: find sender's SATORI UTXO
         satori_utxo = None
@@ -2034,9 +2888,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             new_tx, satori_vin_idx, satori_txin,
             satori_scripts[0], mundo_sighash)
 
-        # Step 7: serialize and POST to Mundo (signOnly=true)
+        # Cache the signed incomplete tx (tier B on retry)
         incomplete_hex = new_tx.serialize().hex()
+        self._mundoCache[cache_key] = {
+            'incomplete_hex': incomplete_hex,
+            'fee_sats_reserved': fee_sats_reserved,
+            'fee_sats': fee_sats,
+        }
 
+        # Step 7: POST to Mundo (signOnly=true)
         def _broadcast_via_mundo():
             resp = _requests.post(
                 f'{MUNDO_URL}/simple_partial/broadcast/evrmore'
@@ -2049,12 +2909,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return resp.text
 
         signed_hex = await asyncio.to_thread(_broadcast_via_mundo)
+        # Cache the fully-signed tx (tier A on retry)
+        self._mundoCache[cache_key] = {
+            **self._mundoCache.get(cache_key, {}), 'signed_hex': signed_hex}
 
         # Step 8: broadcast the fully-signed tx
         result = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
         if isinstance(result, dict) and result.get('code') is not None:
             raise TransactionFailure(
                 f'broadcast rejected: {result.get("message", result)}')
+        self._mundoCache.pop(cache_key, None)
         return result
 
     # ── End channel support ───────────────────────────────────────────────────
@@ -2101,8 +2965,78 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 logging.warning(
                     f'Network: announce failed {pub["stream_name"]}: {e}')
 
-    async def _networkPublishObservation(self, stream_name: str, value):
-        """Publish an observation to all connected relays."""
+    async def _networkResendObservation(
+        self,
+        stream_name: str,
+        seq_num: int,
+        subscriber_nostr_pubkey: str,
+    ) -> int:
+        """Re-send a previously published observation to a specific subscriber.
+
+        Used for gap recovery (seller side): after receiving a payment
+        commitment, check if the observation the subscriber needs already
+        exists in our local DB and send it immediately — no seq_num
+        increment, no mark_published, no save_observation.
+
+        Returns the number of relays that delivered the observation.
+        """
+        from satorilib.satori_nostr.models import (
+            DatastreamObservation, DatastreamMetadata)
+        pub = await asyncio.to_thread(
+            lambda: next(
+                (p for p in self.networkDB.get_active_publications()
+                 if p['stream_name'] == stream_name), None))
+        if not pub:
+            return 0
+        obs_row = await asyncio.to_thread(
+            self.networkDB.get_observation_by_seq,
+            stream_name, self.nostrPubkey, seq_num)
+        if not obs_row:
+            return 0
+        observation = DatastreamObservation(
+            stream_name=stream_name,
+            timestamp=obs_row.get('timestamp') or int(time.time()),
+            value=obs_row.get('value', ''),
+            seq_num=seq_num)
+        source = {}
+        if pub.get('source_stream_name'):
+            source['source_stream_name'] = pub['source_stream_name']
+            source['source_provider_pubkey'] = pub.get(
+                'source_provider_pubkey', '')
+        metadata = DatastreamMetadata(
+            stream_name=stream_name,
+            nostr_pubkey=self.nostrPubkey,
+            name=pub.get('name', ''),
+            description=pub.get('description', ''),
+            encrypted=bool(pub.get('encrypted', 0)),
+            price_per_obs=pub.get('price_per_obs', 0),
+            created_at=pub['created_at'],
+            cadence_seconds=pub.get('cadence_seconds'),
+            tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
+            metadata=source or None)
+        delivered = 0
+        for relay_url, client in list(self._networkClients.items()):
+            try:
+                event_id = await client.send_observation_to_subscriber(
+                    observation, metadata, subscriber_nostr_pubkey)
+                if event_id:
+                    delivered += 1
+                    logging.info(
+                        f'Network: resent {stream_name} seq={seq_num} '
+                        f'to {subscriber_nostr_pubkey[:16]}… '
+                        f'via {relay_url}', color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: resend failed on {relay_url}: {e}')
+        return delivered
+
+    async def _networkPublishObservation(self, stream_name: str, value) -> int:
+        """Publish an observation to all connected relays.
+
+        Returns the number of relays that accepted the publish. Zero means
+        the seq_num advanced locally but nothing reached the network — the
+        caller should surface that as a warning rather than a success.
+        """
         from satorilib.satori_nostr.models import (
             DatastreamObservation, DatastreamMetadata)
         pub = await asyncio.to_thread(
@@ -2112,7 +3046,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not pub:
             logging.warning(
                 f'Network: cannot publish {stream_name}: not registered')
-            return
+            return 0
         seq_num = await asyncio.to_thread(
             self.networkDB.mark_published, stream_name)
         ts = int(time.time())
@@ -2140,15 +3074,31 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             cadence_seconds=pub.get('cadence_seconds'),
             tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
             metadata=source or None)
+        delivered = 0
         for relay_url, client in list(self._networkClients.items()):
             try:
                 await client.publish_observation(observation, metadata)
+                delivered += 1
                 logging.info(
                     f'Network: published {stream_name} seq={seq_num} '
                     f'value={value} to {relay_url}', color='green')
             except Exception as e:
                 logging.warning(
                     f'Network: publish failed on {relay_url}: {e}')
+        # Score bounty predictions for this observation (host side).
+        # The host publishes observations but doesn't subscribe to its own
+        # stream, so _networkProcessObservation never fires for its own data.
+        await self._bountyScoreAndPay(
+            stream_name=stream_name,
+            provider_pubkey=self.nostrPubkey,
+            seq_num=seq_num,
+            raw_value=value,
+        )
+        if delivered == 0:
+            logging.warning(
+                f'Network: {stream_name} seq={seq_num} not delivered '
+                f'(no connected relays) — seq advanced locally only')
+        return delivered
 
     def publishObservation(self, stream_name: str, value):
         """Publish an observation from a sync context (e.g. Flask route, engine).
@@ -2164,6 +3114,37 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         asyncio.run_coroutine_threadsafe(
             self._networkPublishObservation(stream_name, value),
             loop)
+
+    def publishUnsubscribeSync(
+        self, stream_name: str, provider_pubkey: str
+    ) -> None:
+        """Publish an unsubscribe announcement to all connected relays (Fix G).
+
+        Non-blocking — submits to the network event loop.
+        """
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            logging.warning(
+                'Network: cannot publish unsubscribe — loop not running')
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._publishUnsubscribeNow(stream_name, provider_pubkey),
+            loop)
+
+    async def _publishUnsubscribeNow(
+        self, stream_name: str, provider_pubkey: str
+    ) -> None:
+        """Publish unsubscribe to all connected relays."""
+        for relay_url, client in self._networkClients.items():
+            try:
+                await client.unsubscribe_datastream(
+                    stream_name, provider_pubkey)
+                logging.info(
+                    f'Network: published unsubscribe for {stream_name} '
+                    f'on {relay_url}', color='green')
+            except Exception as e:
+                logging.warning(
+                    f'Network: unsubscribe publish failed on {relay_url}: {e}')
 
     def tombstonePublicationSync(self, stream_name: str):
         """Publish a tombstone (deleted) Kind 34600 announcement for a removed
@@ -2249,8 +3230,33 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 new_loop.close()
         threading.Thread(target=run, daemon=True).start()
 
-    async def _publishNow(self, stream_name: str, value: str, ConfigClass):
-        """Connect to all known relays, announce publications, publish observation."""
+    def announceNowSync(self):
+        """Connect to all known relays and re-announce active publications.
+
+        Used after a publication is created or edited so the relay-side
+        announce reflects the new metadata (price, tags, name) without
+        waiting for the next observation. Non-blocking — runs in a
+        background thread when no event loop is available.
+        """
+        from satorilib.satori_nostr import SatoriNostrConfig
+        if not hasattr(self, '_networkSecretHex'):
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop and not loop.is_closed():
+            asyncio.run_coroutine_threadsafe(
+                self._announceNow(SatoriNostrConfig), loop)
+            return
+        def run():
+            new_loop = asyncio.new_event_loop()
+            try:
+                new_loop.run_until_complete(
+                    self._announceNow(SatoriNostrConfig))
+            finally:
+                new_loop.close()
+        threading.Thread(target=run, daemon=True).start()
+
+    async def _announceNow(self, ConfigClass):
+        """Connect to all known relays and re-announce active publications."""
         relay_urls = []
         try:
             server_relays = await asyncio.to_thread(self.server.getRelays)
@@ -2267,129 +3273,231 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if not client:
                     continue
                 await self._networkAnnouncePublications(relay_url)
-                await self._networkPublishObservation(stream_name, value)
-                await asyncio.sleep(2)  # allow relay to acknowledge before loop closes
-                logging.info(
-                    f'Network: publish-now {stream_name} to {relay_url}',
-                    color='green')
+                await asyncio.sleep(2)
             except Exception as e:
                 logging.warning(
-                    f'Network: publish-now failed on {relay_url}: {e}')
+                    f'Network: announce-now failed on {relay_url}: {e}')
             finally:
                 if relay_url not in self._neededRelays():
                     await self._networkDisconnect(relay_url)
 
-    async def _networkFetchDataSources(self):
-        """Poll active data sources and publish values that are due.
+    async def _publishNow(self, stream_name: str, value: str, ConfigClass):
+        """Connect to all known relays, announce publications, publish observation."""
+        relay_urls = []
+        try:
+            server_relays = await asyncio.to_thread(self.server.getRelays)
+            relay_urls = [r['relay_url'] for r in server_relays]
+        except Exception:
+            pass
+        db_relays = await asyncio.to_thread(self.networkDB.get_relays)
+        for r in db_relays:
+            if r['relay_url'] not in relay_urls:
+                relay_urls.append(r['relay_url'])
+        # Connect + announce per relay first. Publish exactly once after
+        # all connections are up: _networkPublishObservation advances the
+        # seq via mark_published and itself broadcasts to every connected
+        # relay, so calling it inside the per-relay loop produced N
+        # distinct seq numbers for a single edit.
+        connected = []
+        for relay_url in relay_urls:
+            try:
+                client = await self._networkConnect(relay_url, ConfigClass)
+                if not client:
+                    continue
+                await self._networkAnnouncePublications(relay_url)
+                connected.append(relay_url)
+            except Exception as e:
+                logging.warning(
+                    f'Network: publish-now connect/announce failed on '
+                    f'{relay_url}: {e}')
+        try:
+            await self._networkPublishObservation(stream_name, value)
+            await asyncio.sleep(2)  # allow relays to acknowledge before disconnect
+            logging.info(
+                f'Network: publish-now {stream_name} to '
+                f'{len(connected)} relay(s)', color='green')
+        except Exception as e:
+            logging.warning(f'Network: publish-now failed: {e}')
+        finally:
+            for relay_url in connected:
+                if relay_url not in self._neededRelays():
+                    await self._networkDisconnect(relay_url)
 
-        For each active data source, checks whether enough time has passed
-        since the last publish (based on cadence_seconds). If due, fetches the
-        URL, runs the parser, and publishes the extracted value.
+    async def _networkDataSourceManager(self):
+        """Reconcile per-source fetch tasks with the DB every 60s.
+
+        Each active data source gets its own asyncio.Task that fires at
+        exactly its cadence.  This manager spawns new tasks, cancels tasks
+        for removed/deactivated sources, and respawns crashed workers.
+        """
+        while True:
+            try:
+                sources = await asyncio.to_thread(
+                    self.networkDB.get_active_data_sources)
+                pubs = await asyncio.to_thread(
+                    self.networkDB.get_active_publications)
+                pub_map = {p['stream_name']: p for p in pubs}
+
+                desired = {}  # stream_name -> (source_row, pub_row)
+                for src in sources:
+                    sn = src['stream_name']
+                    if not src.get('url') or not src.get('cadence_seconds'):
+                        continue
+                    pub = pub_map.get(sn)
+                    if not pub:
+                        continue
+                    desired[sn] = (src, pub)
+
+                # Cancel tasks for sources no longer desired
+                for sn in list(self._dataSourceTasks):
+                    if sn not in desired:
+                        task, _ = self._dataSourceTasks.pop(sn)
+                        task.cancel()
+
+                # Spawn or respawn tasks
+                for sn, (src, pub) in desired.items():
+                    cadence = src['cadence_seconds']
+                    existing = self._dataSourceTasks.get(sn)
+                    if existing is not None:
+                        task, prev_cadence = existing
+                        if not task.done() and prev_cadence == cadence:
+                            continue  # healthy, no change
+                        task.cancel()  # crashed or cadence changed
+                    new_task = asyncio.create_task(
+                        self._networkDataSourceWorker(src, pub))
+                    self._dataSourceTasks[sn] = (new_task, cadence)
+
+            except Exception as e:
+                logging.error(f'Network data source manager error: {e}')
+            await asyncio.sleep(60)
+
+    async def _networkDataSourceWorker(self, src: dict, pub: dict):
+        """Fetch a single data source at its exact cadence.
+
+        Scheduling is clock-anchored to UTC: the fire-time grid is
+        defined by offset_seconds (position within each cadence cycle
+        relative to UTC epoch 0).  Drift never accumulates regardless
+        of fetch duration or sleep overshoot.
         """
         import json as json_mod
         import requests as http_requests
 
-        sources = await asyncio.to_thread(
-            self.networkDB.get_active_data_sources)
-        if not sources:
-            return
+        stream_name = src['stream_name']
+        cadence = src['cadence_seconds']
+        offset = src.get('offset_seconds') or 0
 
-        # Build a lookup of publications by stream_name for last_published_at
-        pubs = await asyncio.to_thread(
-            self.networkDB.get_active_publications)
-        pub_map = {p['stream_name']: p for p in pubs}
+        # Build the UTC-anchored fire grid:
+        # fire at every T where T % cadence == offset % cadence
+        now = time.time()
+        remainder = offset % cadence
+        next_fire = now - (now % cadence) + remainder
+        if next_fire <= now:
+            next_fire += cadence
+        # Don't re-fire a cycle we already published in
+        last = pub.get('last_published_at') or 0
+        while next_fire <= last:
+            next_fire += cadence
 
-        now = int(time.time())
+        while True:
+            delay = max(0, next_fire - time.time())
+            await asyncio.sleep(delay)
+            await self._networkFetchOneDataSource(src)
+            next_fire += cadence
 
-        for src in sources:
-            stream_name = src['stream_name']
-            cadence = src['cadence_seconds']
-            # Skip externally-fed sources (no URL or no cadence)
-            if not src.get('url') or not cadence:
-                continue
-            pub = pub_map.get(stream_name)
-            if not pub:
-                continue
+    async def _networkFetchOneDataSource(self, src: dict):
+        """Fetch, parse, and publish a single data source once.
 
-            last = pub.get('last_published_at') or 0
-            if now - last < cadence:
-                continue  # not due yet
+        Returns True on successful publish, False otherwise.
+        """
+        import json as json_mod
+        import requests as http_requests
 
-            # Fetch
-            try:
-                url = src['url']
-                method = src.get('method', 'GET').upper()
-                headers = None
-                if src.get('headers'):
-                    try:
-                        headers = json_mod.loads(src['headers'])
-                    except Exception:
-                        headers = None
+        stream_name = src['stream_name']
 
-                if method == 'POST':
-                    resp = await asyncio.to_thread(
-                        lambda: http_requests.post(
-                            url, headers=headers, timeout=15))
-                else:
-                    resp = await asyncio.to_thread(
-                        lambda: http_requests.get(
-                            url, headers=headers, timeout=15))
-                resp.raise_for_status()
-                raw = resp.text
-            except Exception as e:
-                logging.warning(
-                    f'Network: fetch failed for {stream_name}: {e}')
-                continue
+        # -- Fetch --
+        try:
+            url = src['url']
+            method = src.get('method', 'GET').upper()
+            headers = None
+            if src.get('headers'):
+                try:
+                    headers = json_mod.loads(src['headers'])
+                except Exception:
+                    headers = None
 
-            # Parse
-            try:
-                parser_type = src.get('parser_type', 'json_path')
-                parser_config = src.get('parser_config', '')
+            if method == 'POST':
+                resp = await asyncio.to_thread(
+                    lambda: http_requests.post(
+                        url, headers=headers, timeout=15))
+            else:
+                resp = await asyncio.to_thread(
+                    lambda: http_requests.get(
+                        url, headers=headers, timeout=15))
+            resp.raise_for_status()
+            raw = resp.text
+        except Exception as e:
+            logging.warning(
+                f'Network: fetch failed for {stream_name}: {e}')
+            return False
 
-                if parser_type == 'json_path':
-                    obj = json_mod.loads(raw)
-                    for key in parser_config.split('.'):
-                        if key.isdigit():
-                            obj = obj[int(key)]
-                        else:
-                            obj = obj[key]
-                    value = str(obj)
-                elif parser_type == 'python':
-                    local_vars = {'text': raw}
-                    exec_code = parser_config.strip()
-                    if ('return ' in exec_code
-                            and not exec_code.startswith('def ')):
-                        exec_code = (
-                            'def _parse(text):\n' +
-                            '\n'.join(
-                                '    ' + l
-                                for l in exec_code.split('\n')) +
-                            '\n_result = _parse(text)')
-                        exec(exec_code, {}, local_vars)
-                        value = str(local_vars.get('_result', ''))
+        # -- Parse --
+        try:
+            parser_type = src.get('parser_type', 'json_path')
+            parser_config = src.get('parser_config', '')
+
+            if parser_type == 'json_path':
+                obj = json_mod.loads(raw)
+                for key in parser_config.split('.'):
+                    if key.isdigit():
+                        obj = obj[int(key)]
                     else:
-                        exec(exec_code, {}, local_vars)
-                        value = str(local_vars.get(
-                            'result', local_vars.get('_result', '')))
+                        obj = obj[key]
+                value = str(obj)
+            elif parser_type == 'python':
+                local_vars = {'text': raw}
+                exec_code = parser_config.strip()
+                if ('return ' in exec_code
+                        and not exec_code.startswith('def ')):
+                    exec_code = (
+                        'def _parse(text):\n' +
+                        '\n'.join(
+                            '    ' + l
+                            for l in exec_code.split('\n')) +
+                        '\n_result = _parse(text)')
+                    exec(exec_code, {}, local_vars)
+                    value = str(local_vars.get('_result', ''))
                 else:
-                    logging.warning(
-                        f'Network: unknown parser type '
-                        f'{parser_type} for {stream_name}')
-                    continue
-            except Exception as e:
+                    exec(exec_code, {}, local_vars)
+                    value = str(local_vars.get(
+                        'result', local_vars.get('_result', '')))
+            else:
                 logging.warning(
-                    f'Network: parse failed for {stream_name}: {e}')
-                continue
+                    f'Network: unknown parser type '
+                    f'{parser_type} for {stream_name}')
+                return False
+        except Exception as e:
+            logging.warning(
+                f'Network: parse failed for {stream_name}: {e}')
+            return False
 
-            # Publish
-            try:
-                await self._networkPublishObservation(stream_name, value)
+        # -- Publish --
+        try:
+            delivered = await self._networkPublishObservation(
+                stream_name, value)
+            if delivered > 0:
                 logging.info(
-                    f'Network: data source {stream_name} published',
+                    f'Network: data source {stream_name} published '
+                    f'to {delivered} relay(s)',
                     color='green')
-            except Exception as e:
+            else:
                 logging.warning(
-                    f'Network: publish failed for {stream_name}: {e}')
+                    f'Network: data source {stream_name} parsed but not '
+                    f'delivered — no connected relays')
+            return delivered > 0
+        except Exception as e:
+            logging.warning(
+                f'Network: publish failed for {stream_name}: {e}')
+            return False
 
     async def _networkDiscover(self, ConfigClass):
         """On-demand discovery: connect to all relays, find all streams.
@@ -2415,15 +3523,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not client:
                 continue
             try:
-                streams = await client.discover_datastreams()
-                for s in streams:
+                streams = await client.discover_datastreams(limit=1000)
+                # Run freshness checks concurrently — each is a network RTT.
+                results = await asyncio.gather(
+                    *[self._networkCheckFreshness(client, s.stream_name, s)
+                      for s in streams],
+                    return_exceptions=True)
+                for s, res in zip(streams, results):
                     d = s.to_dict()
                     d['relay_url'] = relay_url
-                    last_obs, is_active = await self._networkCheckFreshness(
-                        client, s.stream_name, s)
-                    d['last_observation_at'] = last_obs
-                    d['active'] = is_active
+                    if isinstance(res, Exception):
+                        d['last_observation_at'] = None
+                        d['active'] = False
+                    else:
+                        d['last_observation_at'], d['active'] = res
                     all_streams.append(d)
+                logging.info(
+                    f'Network discover: {len(streams)} streams from '
+                    f'{relay_url}', color='green')
             except Exception as e:
                 logging.warning(
                     f'Network discover: failed on {relay_url}: {e}')
@@ -2440,14 +3557,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return []
         result = []
         try:
-            streams = await client.discover_datastreams()
-            for s in streams:
+            streams = await client.discover_datastreams(limit=1000)
+            results = await asyncio.gather(
+                *[self._networkCheckFreshness(client, s.stream_name, s)
+                  for s in streams],
+                return_exceptions=True)
+            for s, res in zip(streams, results):
                 d = s.to_dict()
                 d['relay_url'] = relay_url
-                last_obs, is_active = await self._networkCheckFreshness(
-                    client, s.stream_name, s)
-                d['last_observation_at'] = last_obs
-                d['active'] = is_active
+                if isinstance(res, Exception):
+                    d['last_observation_at'] = None
+                    d['active'] = False
+                else:
+                    d['last_observation_at'], d['active'] = res
                 result.append(d)
         except Exception as e:
             logging.warning(
@@ -2472,23 +3594,311 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return future.result(timeout=30)
 
     def _neededRelays(self) -> set:
-        """Return set of relay URLs that have active subscriptions."""
-        subs = self.networkDB.get_active()
-        return {s['relay_url'] for s in subs}
+        """Relays we want persistent connections to.
 
+        Active subscriptions pin their specific relay. Active publications
+        pin every known relay — the publisher broadcasts to all of them and
+        needs the connection alive between publishes to keep settlement /
+        tombstone listeners running and to stay discoverable.
+        """
+        subs = self.networkDB.get_active()
+        needed = {s['relay_url'] for s in subs}
+        if self.networkDB.get_active_publications():
+            for r in self.networkDB.get_relays():
+                needed.add(r['relay_url'])
+        return needed
+
+    # ── Bounty sync wrappers ──────────────────────────────────
+
+    def announceBountySync(self, bounty_data: dict) -> None:
+        """Announce a bounty on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import BountyAnnouncement
+        if not hasattr(self, '_networkSecretHex') or not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        import json as _json
+        bounty = BountyAnnouncement(
+            stream_name=bounty_data['stream_name'],
+            stream_provider_pubkey=bounty_data['stream_provider_pubkey'],
+            host_pubkey=self.nostrPubkey,
+            pay_per_obs_sats=int(bounty_data['pay_per_obs_sats']),
+            paid_predictors=int(bounty_data['paid_predictors']),
+            competing_predictors=int(bounty_data['competing_predictors']),
+            scoring_metric=bounty_data['scoring_metric'],
+            scoring_params=bounty_data.get('scoring_params', {}),
+            horizon=int(bounty_data.get('horizon', 1)),
+            active=True,
+            timestamp=int(time.time()),
+        )
+        async def _announce():
+            for client in self._networkClients.values():
+                try:
+                    await client.announce_bounty(bounty)
+                except Exception as e:
+                    logging.warning(f'Bounty: announce failed: {e}')
+        asyncio.run_coroutine_threadsafe(_announce(), loop)
+
+    def closeBountySync(
+        self, stream_name: str, stream_provider_pubkey: str
+    ) -> None:
+        """Close a bounty on all connected relays (sync context)."""
+        from satorilib.satori_nostr.models import BountyAnnouncement
+        if not hasattr(self, '_networkSecretHex') or not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        row = self.networkDB.get_bounty(
+            stream_name, stream_provider_pubkey, self.nostrPubkey)
+        if not row:
+            return
+        import json as _json
+        bounty = BountyAnnouncement(
+            stream_name=row['stream_name'],
+            stream_provider_pubkey=row['stream_provider_pubkey'],
+            host_pubkey=row['host_pubkey'],
+            pay_per_obs_sats=row['pay_per_obs_sats'],
+            paid_predictors=row['paid_predictors'],
+            competing_predictors=row['competing_predictors'],
+            scoring_metric=row['scoring_metric'],
+            scoring_params=_json.loads(row.get('scoring_params', '{}')),
+            horizon=row.get('horizon', 1),
+            active=False,
+            timestamp=int(time.time()),
+        )
+        async def _close():
+            for client in self._networkClients.values():
+                try:
+                    await client.close_bounty(bounty)
+                except Exception as e:
+                    logging.warning(f'Bounty: close failed: {e}')
+        asyncio.run_coroutine_threadsafe(_close(), loop)
+
+    def discoverBountiesSync(self, active_only: bool = True) -> list:
+        """Discover bounties from connected relays (sync context)."""
+        if not self._networkClients:
+            return self.networkDB.get_all_bounties(active_only=active_only)
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return self.networkDB.get_all_bounties(active_only=active_only)
+        async def _discover():
+            seen: dict[str, tuple[int, dict]] = {}
+            for client in self._networkClients.values():
+                try:
+                    comps = await client.discover_bounties(
+                        active_only=active_only)
+                    for c in comps:
+                        d = c.d_tag()
+                        if d not in seen or c.timestamp > seen[d][0]:
+                            seen[d] = (c.timestamp, c.to_dict())
+                except Exception as e:
+                    logging.warning(f'Bounty: discover failed: {e}')
+            return [v for _, v in seen.values()]
+        future = asyncio.run_coroutine_threadsafe(_discover(), loop)
+        try:
+            return future.result(timeout=15)
+        except Exception:
+            return self.networkDB.get_all_bounties(active_only=active_only)
+
+    async def _incomingPredictionsLoop(self, client, relay_url: str):
+        """Consume incoming prediction submissions from a relay client (host side).
+
+        Runs as a background async task. Stores each received prediction in the
+        DB keyed by (stream_name, stream_provider_pubkey, predictor_pubkey, seq_num).
+        The scoring pipeline reads from the DB when an observation arrives.
+
+        When a prediction arrives after its target observation is already
+        in hand, it is scored immediately (late-arrival recovery).
+        """
+        logging.info(f'Bounty: listening for predictions on {relay_url}')
+        try:
+            async for inbound in client.incoming_predictions():
+                try:
+                    p = inbound.prediction
+                    await asyncio.to_thread(
+                        self.networkDB.save_bounty_prediction,
+                        stream_name=p.stream_name,
+                        stream_provider_pubkey=p.stream_provider_pubkey,
+                        predictor_pubkey=p.predictor_pubkey,
+                        host_pubkey=self.nostrPubkey,
+                        seq_num=p.seq_num,
+                        predicted_value=str(p.predicted_value),
+                        received_at=p.timestamp,
+                        predictor_wallet_pubkey=getattr(
+                            p, 'predictor_wallet_pubkey', None),
+                    )
+                    logging.info(
+                        f'Bounty: received prediction from '
+                        f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
+                        f'seq={p.seq_num}')
+                    # Late-arrival: if we already have the observation this
+                    # prediction was meant to predict, score it now.
+                    await self._bountyScoreLateArrival(
+                        stream_name=p.stream_name,
+                        provider_pubkey=p.stream_provider_pubkey,
+                        seq_num=p.seq_num,
+                    )
+                except Exception as e:
+                    logging.warning(f'Bounty: failed to save prediction: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'Bounty: prediction listener stopped on {relay_url}: {e}')
+
+    async def submitPrediction(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: float,
+    ) -> None:
+        """Submit a prediction to a bounty host on all connected relays (predictor side).
+
+        The predictor's own wallet pubkey is attached so the host can open a
+        payment channel back without needing a separate directory lookup.
+        """
+        wallet_pubkey = getattr(
+            getattr(self, 'wallet', None), 'pubkey', None) or ''
+        for client in self._networkClients.values():
+            try:
+                await client.submit_prediction(
+                    stream_name=stream_name,
+                    stream_provider_pubkey=stream_provider_pubkey,
+                    host_pubkey=host_pubkey,
+                    seq_num=seq_num,
+                    predicted_value=predicted_value,
+                    predictor_wallet_pubkey=wallet_pubkey,
+                )
+            except Exception as e:
+                logging.warning(f'Bounty: submit prediction failed: {e}')
+
+    def submitPredictionSync(
+        self,
+        stream_name: str,
+        stream_provider_pubkey: str,
+        host_pubkey: str,
+        seq_num: int,
+        predicted_value: float,
+    ) -> None:
+        """Submit a prediction from a sync context (e.g. prediction engine callback)."""
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed() or not self._networkClients:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self.submitPrediction(
+                stream_name, stream_provider_pubkey,
+                host_pubkey, seq_num, predicted_value),
+            loop)
+
+    # ── Access Request handling (producer side) ─────────────────────────────
+
+    async def _incomingAccessRequestsLoop(self, client, relay_url: str):
+        """Consume incoming access requests from a relay client (producer side).
+
+        Runs as a background async task. Stores each request in the DB as
+        pending. The producer approves or rejects via the UI/API.
+        """
+        logging.info(f'AccessGate: listening for access requests on {relay_url}')
+        try:
+            async for inbound in client.incoming_access_requests():
+                try:
+                    req = inbound.access_request
+                    await asyncio.to_thread(
+                        self.networkDB.add_access_request,
+                        stream_name=req.stream_name,
+                        requester_pubkey=req.requester_pubkey,
+                        message=req.message,
+                        requested_at=req.timestamp,
+                    )
+                    logging.info(
+                        f'AccessGate: received request from '
+                        f'{req.requester_pubkey[:12]}… for {req.stream_name}')
+                except Exception as e:
+                    logging.warning(f'AccessGate: failed to save request: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(
+                f'AccessGate: request listener stopped on {relay_url}: {e}')
+
+    def approveAccessRequestSync(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Approve an access request (sync context, e.g. Flask route).
+
+        Adds the requester to the approved_subscribers table and records
+        them in the in-memory subscriber list so they start receiving
+        encrypted observations immediately.
+        """
+        self.networkDB.approve_access_request(stream_name, requester_pubkey)
+        # Also register in the in-memory subscriber list on all clients
+        for client in self._networkClients.values():
+            client.record_subscription(stream_name, requester_pubkey)
+
+    def rejectAccessRequestSync(
+        self,
+        stream_name: str,
+        requester_pubkey: str,
+    ) -> None:
+        """Reject an access request (sync context)."""
+        self.networkDB.reject_access_request(stream_name, requester_pubkey)
+
+    def revokeSubscriberSync(
+        self,
+        stream_name: str,
+        subscriber_pubkey: str,
+    ) -> None:
+        """Revoke a previously approved subscriber (sync context).
+
+        Removes from the approved_subscribers table. The producer simply
+        stops encrypting for them on the next observation — no key
+        rotation needed since NIP-04 encrypts individually per subscriber.
+        """
+        self.networkDB.revoke_subscriber(stream_name, subscriber_pubkey)
+
+    def requestAccessSync(
+        self,
+        stream_name: str,
+        producer_pubkey: str,
+        message: str = '',
+    ) -> None:
+        """Request access to an approval-gated stream (subscriber, sync context)."""
+        if not self._networkClients:
+            return
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        async def _request():
+            for client in self._networkClients.values():
+                try:
+                    await client.request_access(
+                        stream_name=stream_name,
+                        producer_pubkey=producer_pubkey,
+                        message=message,
+                    )
+                except Exception as e:
+                    logging.warning(f'AccessGate: request failed: {e}')
+        asyncio.run_coroutine_threadsafe(_request(), loop)
     def triggerNetworkDiscover(self):
-        """Trigger on-demand discovery from a sync context (e.g. Flask route)."""
+        """Trigger on-demand discovery from a sync context (e.g. Flask route).
+
+        Schedules the coroutine on the live network event loop so it shares
+        the existing WS clients. Fire-and-forget.
+        """
         from satorilib.satori_nostr import SatoriNostrConfig
         if not hasattr(self, '_networkSecretHex'):
             return
-        loop = asyncio.new_event_loop()
-        def run():
-            try:
-                loop.run_until_complete(
-                    self._networkDiscover(SatoriNostrConfig))
-            finally:
-                loop.close()
-        threading.Thread(target=run, daemon=True).start()
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._networkDiscover(SatoriNostrConfig), loop)
 
     async def _networkReconcile(self, ConfigClass):
         """Single reconciliation pass.
@@ -2530,12 +3940,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not inactive:
             return
 
-        # 3. Build hunt list: inactive subs not recently marked stale
+        # 3. Build hunt list: inactive subs not recently marked stale.
+        # Paid subs bypass the cooldown — an open channel is an authoritative
+        # declaration of intent, and relay freshness for a paid stream is a
+        # chicken-and-egg signal (see Fix M).
         hunting = {}  # stream_name -> sub dict
         for sub in inactive:
             stale_since = sub.get('stale_since')
-            if stale_since and not self.networkDB.should_recheck_stale(
-                    stale_since):
+            is_paid = int(sub.get('price_per_obs', 0) or 0) > 0
+            if (stale_since and not is_paid
+                    and not self.networkDB.should_recheck_stale(stale_since)):
                 continue
             hunting[sub['stream_name']] = sub
 
@@ -2543,9 +3957,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
 
         # Get relay list from central, fall back to known relays from DB
+        import random
         try:
             relays = await asyncio.to_thread(self.server.getRelays)
             relay_urls = [r['relay_url'] for r in relays]
+            random.shuffle(relay_urls)
         except Exception as e:
             logging.warning(f'Could not fetch relay list from central: {e}')
             relay_urls = list({sub['relay_url'] for sub in desired})
@@ -2563,7 +3979,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not client:
                 continue
             try:
-                streams = await client.discover_datastreams()
+                streams = await client.discover_datastreams(limit=1000)
             except Exception:
                 await self._networkDisconnect(relay_url)
                 continue
@@ -2577,16 +3993,30 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 metadata = relay_index.get(stream_name)
                 if not metadata:
                     continue
-                _, is_active = await self._networkCheckFreshness(
-                    client, stream_name, metadata)
-                if not is_active:
-                    continue
+                # Paid subscriptions: skip freshness — the provider only
+                # publishes to known subscribers, so the relay may have no
+                # recent events even though the provider is alive. Connect
+                # and announce so the provider learns about us again.
+                sub_info = hunting.get(stream_name, {})
+                is_paid = int(sub_info.get('price_per_obs', 0) or 0) > 0
+                if not is_paid:
+                    _, is_active = await self._networkCheckFreshness(
+                        client, stream_name, metadata)
+                    if not is_active:
+                        continue
                 # Found active — update DB, subscribe
                 sub = hunting.pop(stream_name)
                 found_any = True
                 await asyncio.to_thread(
                     self.networkDB.update_relay,
                     stream_name, sub['provider_pubkey'], relay_url)
+                # Refresh price from the provider's metadata
+                discovered_price = getattr(metadata, 'price_per_obs', None)
+                if discovered_price is not None:
+                    await asyncio.to_thread(
+                        self.networkDB.update_subscription_price,
+                        stream_name, sub['provider_pubkey'],
+                        discovered_price)
                 try:
                     await client.subscribe_datastream(
                         stream_name, sub['provider_pubkey'])

@@ -24,6 +24,8 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
+from web.balance_cache import get_balance_snapshot, get_wallet_balance
+
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
     """Call Mundo's request endpoint to get fee data for a partial transaction."""
@@ -302,7 +304,28 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
                     logger.info(f"Peer registered: peer_id={data.get('peer_id')}")
                     return data
 
-            logger.warning(f"Peer registration attempt {attempt + 1} failed: {resp.text}")
+            # 4xx responses are caused by the request itself — retrying with
+            # the same wallet/vault pubkeys won't change the outcome, so stop
+            # immediately and surface a clear message.
+            if 400 <= resp.status_code < 500:
+                detail = _extract_error_detail(resp)
+                if resp.status_code == 409:
+                    logger.error(
+                        f"Peer registration rejected by server (409 Conflict): {detail}. "
+                        "This wallet pubkey is already registered to a different peer "
+                        "and cannot be re-used as an identity."
+                    )
+                else:
+                    logger.error(
+                        f"Peer registration rejected by server "
+                        f"({resp.status_code}): {detail}"
+                    )
+                return None
+
+            logger.warning(
+                f"Peer registration attempt {attempt + 1} failed "
+                f"({resp.status_code}): {resp.text}"
+            )
 
         except requests.RequestException as e:
             logger.warning(f"Peer registration attempt {attempt + 1} error: {e}")
@@ -313,6 +336,19 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
 
     logger.error("Failed to register peer after all retries")
     return None
+
+
+def _extract_error_detail(resp):
+    """Pull a human-readable message out of a FastAPI error response."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return resp.text or f"HTTP {resp.status_code}"
+    if isinstance(body, dict):
+        detail = body.get('detail') or body.get('message')
+        if detail:
+            return detail if isinstance(detail, str) else str(detail)
+    return str(body)
 
 
 def login_required(f):
@@ -588,24 +624,20 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"Could not derive eth_wallet_address: {e}")
 
-        # Get nostr pubkey and relay URL from startup instance
+        # Get nostr pubkey from startup instance
         nostr_pubkey = None
-        relay_url = None
         try:
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 nostr_pubkey = startup.nostrPubkey
-            if startup and hasattr(startup, 'server') and startup.server:
-                relay_url = getattr(startup.server, 'relayUrl', None)
         except Exception as e:
-            logger.warning(f"Could not get nostr/relay info: {e}")
+            logger.warning(f"Could not get nostr info: {e}")
 
         return render_template(
             'dashboard.html',
             version=VERSION,
             eth_wallet_address=eth_wallet_address,
             nostr_pubkey=nostr_pubkey,
-            relay_url=relay_url,
             page_mode='dashboard')
 
     @app.route('/p2p')
@@ -615,6 +647,43 @@ def register_routes(app):
         from satorineuron import VERSION
 
         nostr_pubkey = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+        except Exception as e:
+            logger.warning(f"Could not get nostr info: {e}")
+
+        return render_template(
+            'dashboard.html',
+            version=VERSION,
+            eth_wallet_address=None,
+            nostr_pubkey=nostr_pubkey,
+            page_mode='p2p')
+
+    @app.route('/marketplace')
+    @login_required
+    def marketplace_page():
+        """Marketplace: browse all streams discovered across relays."""
+        from satorineuron import VERSION
+        nostr_pubkey = None
+        try:
+            startup = get_startup()
+            if startup and hasattr(startup, 'nostrPubkey'):
+                nostr_pubkey = startup.nostrPubkey
+        except Exception:
+            pass
+        return render_template(
+            'marketplace.html',
+            version=VERSION,
+            nostr_pubkey=nostr_pubkey)
+
+    @app.route('/settings')
+    @login_required
+    def relay_settings():
+        """Settings page for local relay management."""
+        from satorineuron import VERSION
+        nostr_pubkey = None
         relay_url = None
         try:
             startup = get_startup()
@@ -622,25 +691,13 @@ def register_routes(app):
                 nostr_pubkey = startup.nostrPubkey
             if startup and hasattr(startup, 'server') and startup.server:
                 relay_url = getattr(startup.server, 'relayUrl', None)
-        except Exception as e:
-            logger.warning(f"Could not get nostr/relay info: {e}")
-
-        return render_template(
-            'dashboard.html',
-            version=VERSION,
-            eth_wallet_address=None,
-            nostr_pubkey=nostr_pubkey,
-            relay_url=relay_url,
-            page_mode='p2p')
-
-    @app.route('/settings')
-    @login_required
-    def relay_settings():
-        """Settings page for local relay management."""
-        from satorineuron import VERSION
+        except Exception:
+            pass
         return render_template(
             'settings.html',
             version=VERSION,
+            nostr_pubkey=nostr_pubkey,
+            relay_url=relay_url,
             relay_status=build_local_relay_status_payload())
 
     @app.route('/stake')
@@ -1396,94 +1453,29 @@ def register_routes(app):
     @app.route('/api/wallet/balance/direct')
     @login_required
     def api_wallet_balance_direct():
-        """Get combined wallet and vault balance directly from electrumx.
+        """Combined wallet+vault balance, backed by an in-process TTL cache.
 
-        This bypasses the Satori API server and queries the blockchain directly
-        via the electromax server using the wallet objects.
+        A process-global WalletManager holds a persistent ElectrumX socket,
+        and the snapshot is cached for 30 s. Pass ?refresh=1 (wired to the
+        dashboard Refresh button and to post-send refreshes) to bypass cache.
         """
-        wallet_manager = get_or_create_session_vault()
-        if not wallet_manager:
-            return jsonify({'error': 'Wallet manager not initialized'}), 500
-
         try:
-            # Ensure electrumx connection with retry
-            logger.info("Attempting to connect to ElectrumX...")
-            connected = False
-            if hasattr(wallet_manager, 'connect'):
-                for attempt in range(5):
-                    connected = wallet_manager.connect()
-                    logger.info(f"ElectrumX connection attempt {attempt + 1}: {connected}")
-                    if connected:
-                        break
-                    time.sleep(2)  # Give more time for connection to establish
-                if not connected:
-                    logger.warning("Failed to connect to ElectrumX after retries")
-                    return jsonify({'error': 'Could not connect to electrumx'}), 500
-            else:
-                logger.warning("WalletManager has no connect method")
-
-            total_satori = 0.0
-            wallet_balance = 0.0
-            vault_balance = 0.0
-            total_evr = 0.0
-            wallet_evr = 0.0
-            vault_evr = 0.0
-
-            def _fetch_balances(wallet_obj, label):
-                """Fetch balances for a wallet/vault object.
-                Falls back to reconnecting if the server returns an empty response
-                (some servers don't support multi-asset balance queries).
-                """
-                satori = 0.0
-                evr = 0.0
-                if not wallet_obj or not hasattr(wallet_obj, 'getBalances'):
-                    return satori, evr
-                # Wait for electrumx connection
-                for _ in range(3):
-                    if wallet_obj.electrumx and wallet_obj.electrumx.connected():
-                        wallet_obj.getBalances()
-                        break
-                    time.sleep(1)
-                else:
-                    wallet_obj.getBalances()
-                # If the server returned an empty dict, it doesn't support multi-asset
-                # queries — force a reconnect and retry once
-                raw = getattr(wallet_obj, 'balances', None)
-                if not raw:
-                    logger.warning(f"{label}: empty balance response, reconnecting...")
-                    wallet_manager._electrumx = None  # force new server on next connect
-                    wallet_manager.connect()
-                    wallet_obj.getBalances()
-                    raw = getattr(wallet_obj, 'balances', None)
-                    logger.info(f"{label}: retry raw balances: {raw}")
-                satori = wallet_obj.balance.amount if hasattr(wallet_obj, 'balance') and wallet_obj.balance else 0.0
-                evr = wallet_obj.currency.amount if hasattr(wallet_obj, 'currency') and wallet_obj.currency else 0.0
-                logger.info(f"{label} balance: SATORI={satori}, EVR={evr}")
-                return satori, evr
-
-            # Get wallet (identity) balance
-            if wallet_manager.wallet:
-                wallet_balance, wallet_evr = _fetch_balances(wallet_manager.wallet, 'Wallet')
-
-            # Get vault balance
-            if wallet_manager.vault:
-                vault_balance, vault_evr = _fetch_balances(wallet_manager.vault, 'Vault')
-
-            total_satori = wallet_balance + vault_balance
-            total_evr = wallet_evr + vault_evr
-
-            return jsonify({
-                'total': total_satori,
-                'wallet_balance': wallet_balance,
-                'vault_balance': vault_balance,
-                'total_evr': total_evr,
-                'wallet_evr': wallet_evr,
-                'vault_evr': vault_evr
-            })
+            force = request.args.get('refresh', '0').lower() in ('1', 'true', 'yes')
+            return jsonify(get_balance_snapshot(force=force))
         except Exception as e:
             import traceback
-            logger.error(f"Failed to get direct balance: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"balance fetch failed: {e}")
+            logger.error(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/balance/wallet-only')
+    @login_required
+    def api_wallet_balance_wallet_only():
+        """Wallet-only SATORI balance (skips vault). Cheap to call; used by marketplace."""
+        try:
+            balance = get_wallet_balance()
+            return jsonify({'wallet_balance': balance})
+        except Exception as e:
             return jsonify({'error': str(e)}), 500
 
     # AI Engine Training Delay Control
@@ -1598,10 +1590,19 @@ def register_routes(app):
                 except Exception:
                     pred_to_obs_meta = {}
 
+            # Track which storage instance holds predictions for each stream.
+            # Active models write to their own model.storage; stored prediction
+            # tables live on the global engine storage. Using the wrong one
+            # yields empty results and undercounts 24h predictions.
+            storage_by_pred_uuid = {}
+
             for obs_uuid, model in stream_models.items():
                 pred_uuid = getattr(model, 'predictionStreamUuid', None)
                 if pred_uuid:
                     known_prediction_ids.add(pred_uuid)
+                    model_storage = getattr(model, 'storage', None)
+                    if model_storage is not None:
+                        storage_by_pred_uuid[pred_uuid] = model_storage
 
                 sub_stream = getattr(model, 'subscriptionStream', None)
                 stream_id = getattr(sub_stream, 'streamId', None) if sub_stream else None
@@ -1657,27 +1658,98 @@ def register_routes(app):
                         'stream_type': 'stored_prediction',
                     })
 
-                # Compute 24h prediction count.
+                # Compute 24h prediction count. Active-model predictions live
+                # on the per-model storage; stored-prediction tables live on
+                # the global engine storage. Timestamps may be stored as
+                # epoch seconds; auto-detect unit to avoid ns-misparsing.
+                def _parse_ts_series_24h(ts_series):
+                    parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                    numeric = pd.to_numeric(ts_series, errors='coerce')
+                    numeric_mask = numeric.notna()
+                    if numeric_mask.any():
+                        median_abs = float(numeric[numeric_mask].abs().median())
+                        if median_abs < 1e11:
+                            unit = 's'
+                        elif median_abs < 1e14:
+                            unit = 'ms'
+                        else:
+                            unit = 'ns'
+                        parsed.loc[numeric_mask] = pd.to_datetime(
+                            numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                        )
+                    return parsed
+
+                cutoff_24h = now_utc - pd.Timedelta(hours=24)
                 for item in streams:
                     pred_uuid = item.get('prediction_stream_uuid') or item.get('stream_uuid')
                     if not pred_uuid:
                         continue
-                    pdf = storage.getPredictions(pred_uuid)
-                    if pdf.empty:
+                    pred_storage = storage_by_pred_uuid.get(pred_uuid, storage)
+                    try:
+                        pdf = pred_storage.getPredictions(pred_uuid)
+                    except Exception:
+                        pdf = None
+                    if pdf is None or pdf.empty:
                         continue
-                    for ts in pdf.index:
-                        try:
-                            ts_dt = pd.to_datetime(ts, utc=True)
-                        except Exception:
-                            continue
-                        if ts_dt >= now_utc - pd.Timedelta(hours=24):
-                            predictions_24h_total += 1
+                    try:
+                        ts_series = pdf['ts'] if 'ts' in pdf.columns else pdf.index.to_series()
+                        parsed = _parse_ts_series_24h(ts_series)
+                        predictions_24h_total += int((parsed >= cutoff_24h).sum())
+                    except Exception:
+                        continue
+
+            # Find most recent observation across all active models so the UI
+            # can distinguish "engine idle waiting for data" from "engine
+            # actively receiving observations".
+            def _parse_ts_series(ts_series):
+                """Parse a ts column/index, auto-detecting s/ms/ns from magnitude.
+                Mirrors the normalize_ts_column logic in the performance endpoint."""
+                parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
+                numeric = pd.to_numeric(ts_series, errors='coerce')
+                numeric_mask = numeric.notna()
+                if numeric_mask.any():
+                    median_abs = float(numeric[numeric_mask].abs().median())
+                    if median_abs < 1e11:
+                        unit = 's'
+                    elif median_abs < 1e14:
+                        unit = 'ms'
+                    else:
+                        unit = 'ns'
+                    parsed.loc[numeric_mask] = pd.to_datetime(
+                        numeric[numeric_mask], errors='coerce', utc=True, unit=unit
+                    )
+                return parsed
+
+            last_obs_ts = None
+            try:
+                import pandas as pd  # ensure available even if storage is None
+                for obs_uuid, model in stream_models.items():
+                    model_storage = getattr(model, 'storage', None)
+                    if model_storage is None:
+                        continue
+                    try:
+                        df = model_storage.getStreamData(obs_uuid)
+                    except Exception:
+                        df = None
+                    if df is None or df.empty:
+                        continue
+                    try:
+                        ts_series = df['ts'] if 'ts' in df.columns else df.index.to_series()
+                        parsed = _parse_ts_series(ts_series)
+                        max_ts = parsed.max()
+                        if pd.notna(max_ts) and (last_obs_ts is None or max_ts > last_obs_ts):
+                            last_obs_ts = max_ts
+                    except Exception:
+                        continue
+            except Exception:
+                last_obs_ts = None
 
             return jsonify({
                 'streams': sorted(streams, key=lambda x: (x.get('stream_name') or '').lower()),
                 'count': len(streams),
                 'active_model_count': len(stream_models),
                 'predictions_24h_total': predictions_24h_total,
+                'last_observation_ts': last_obs_ts.isoformat() if last_obs_ts is not None else None,
             })
         except Exception as e:
             logger.error(f"Error getting engine streams: {e}")
@@ -2142,34 +2214,6 @@ def register_routes(app):
             logger.error(traceback.format_exc())
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/relay', methods=['POST'])
-    @login_required
-    def api_relay_register():
-        """Register relay URL with central server for NIP-11 verification."""
-        startup = get_startup()
-        if not startup or not hasattr(startup, 'server') or not startup.server:
-            return jsonify({'error': 'Server connection not initialized'}), 503
-
-        data = request.get_json()
-        if not data or 'relay_url' not in data:
-            return jsonify({'error': 'Missing relay_url'}), 400
-
-        relay_url = data['relay_url'].strip()
-        if not relay_url.startswith(('wss://', 'ws://')):
-            return jsonify({'error': 'Relay URL must start with wss:// or ws://'}), 400
-
-        try:
-            result = startup.server.registerRelay(relay_url)
-            if isinstance(result, requests.Response):
-                if result.status_code == 200:
-                    return jsonify(result.json())
-                else:
-                    return jsonify({'error': result.text}), result.status_code
-            return jsonify({'success': True, 'relay_url': relay_url})
-        except Exception as e:
-            logger.error(f"Relay registration error: {e}")
-            return jsonify({'error': str(e)}), 500
-
     @app.route('/api/settings/relay/status', methods=['GET'])
     @login_required
     def api_settings_relay_status():
@@ -2206,6 +2250,23 @@ def register_routes(app):
             status = build_local_relay_status_payload()
             return jsonify({'error': str(e), 'status': status}), 500
 
+    @app.route('/api/network/discover', methods=['POST'])
+    @login_required
+    def api_network_discover():
+        """Kick off global stream discovery in the background.
+
+        Returns 202 immediately. Clients should poll /api/network/streams
+        afterwards to see the cache populate.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        try:
+            startup.triggerNetworkDiscover()
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+        return jsonify({'success': True, 'pending': True}), 202
+
     @app.route('/api/network/streams', methods=['GET'])
     @login_required
     def api_network_streams():
@@ -2214,11 +2275,16 @@ def register_routes(app):
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
         connected = len(startup._networkClients) > 0
+        my_pub_names = {
+            p['stream_name']
+            for p in startup.networkDB.get_active_publications()
+        }
         streams = []
         for s in startup.networkStreams:
             s_copy = dict(s)
             s_copy['subscribed'] = startup.networkDB.is_subscribed(
                 s['stream_name'], s['nostr_pubkey'])
+            s_copy['is_mine'] = s['stream_name'] in my_pub_names
             streams.append(s_copy)
         return jsonify({
             'connected': connected,
@@ -2249,15 +2315,79 @@ def register_routes(app):
     @app.route('/api/network/subscribe', methods=['POST'])
     @login_required
     def api_network_subscribe():
-        """Subscribe to a datastream."""
+        """Subscribe to a datastream.
+
+        When a `bounty_host_pubkey` field is present, this is also a
+        "join bounty" action — we persist the join, register the
+        corresponding prediction publication, and the engine starts DM'ing
+        predictions to that host on each observation.
+        """
+        from satorineuron.network_db import getMaxTotalStreams
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
         data = request.get_json()
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        stream_name = data['stream_name']
+        nostr_pubkey = data['nostr_pubkey']
+        # Combined per-neuron cap on active publications + subscriptions.
+        # Re-subscribing to an already active subscription is a no-op.
+        if not startup.networkDB.is_subscribed(stream_name, nostr_pubkey):
+            total = (startup.networkDB.count_active_user_publications()
+                     + startup.networkDB.count_active_subscriptions())
+            cap = getMaxTotalStreams()
+            if total >= cap:
+                return jsonify({
+                    'error': f'Combined publication+subscription limit reached '
+                             f'({cap}). Remove an existing publication '
+                             f'or subscription before adding a new one.'
+                }), 400
+        # Look up price server-side from discovered streams — don't trust the client value
+        server_stream = next(
+            (s for s in startup.networkStreams
+             if s.get('stream_name') == stream_name and s.get('nostr_pubkey') == nostr_pubkey),
+            None)
+        price_per_obs = int((server_stream or {}).get('price_per_obs') or 0)
+        if price_per_obs > 0:
+            obs_per_refill = 500
+            fund_sats = max(100_000, min(price_per_obs * obs_per_refill, 1_000_000))
+            required_satori = fund_sats / 1e8
+            try:
+                available = get_wallet_balance(force=True)
+            except Exception:
+                available = 0
+            if available < required_satori:
+                return jsonify({
+                    'error': f'Insufficient wallet balance. This stream costs {price_per_obs} sats/obs and requires a minimum channel deposit of {required_satori:.4f} SATORI. You have {available:.4f} SATORI in your wallet.'
+                }), 400
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
+
+        bounty_host_pubkey = data.get('bounty_host_pubkey')
+        if bounty_host_pubkey:
+            stream_name = data['stream_name']
+            provider_pubkey = data['nostr_pubkey']
+            # Persist the (stream, host) join so the engine knows where to
+            # DM predictions when it predicts this stream.
+            startup.networkDB.join_bounty(
+                stream_name=stream_name,
+                stream_provider_pubkey=provider_pubkey,
+                host_pubkey=bounty_host_pubkey)
+            # Mirror the /api/network/predict behaviour: register a _pred
+            # publication so the prediction engine fires on new observations.
+            pred_name = stream_name + '_pred'
+            subs = startup.networkDB.get_active()
+            sub = next((s for s in subs
+                         if s['stream_name'] == stream_name
+                         and s['provider_pubkey'] == provider_pubkey), None)
+            startup.networkDB.add_publication(
+                stream_name=pred_name,
+                name=(f"Predictions for {sub.get('name') or stream_name}"
+                      if sub else f"Predictions for {stream_name}"),
+                cadence_seconds=sub.get('cadence_seconds') if sub else None,
+                source_stream_name=stream_name,
+                source_provider_pubkey=provider_pubkey)
         return jsonify({'success': True})
 
     @app.route('/api/network/unsubscribe', methods=['POST'])
@@ -2271,6 +2401,8 @@ def register_routes(app):
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
         startup.networkDB.unsubscribe(data['stream_name'], data['nostr_pubkey'])
+        # Notify the provider so they stop encrypting for us (Fix G)
+        startup.publishUnsubscribeSync(data['stream_name'], data['nostr_pubkey'])
         pred_name = data['stream_name'] + '_pred'
         startup.networkDB.remove_publication(pred_name)
         startup.tombstonePublicationSync(pred_name)
@@ -2318,6 +2450,94 @@ def register_routes(app):
         startup.networkDB.remove_publication(pred_name)
         startup.tombstonePublicationSync(pred_name)
         return jsonify({'success': True})
+
+    @app.route('/api/bounty/submit-prediction', methods=['POST'])
+    @login_required
+    def api_bounty_submit_prediction():
+        """Submit a prediction to a bounty host via Nostr DM (predictor side).
+
+        Required fields: stream_name, stream_provider_pubkey, host_pubkey,
+        seq_num, predicted_value.
+        """
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json() or {}
+        required = ['stream_name', 'stream_provider_pubkey', 'host_pubkey',
+                     'seq_num', 'predicted_value']
+        missing = [f for f in required if f not in data]
+        if missing:
+            return jsonify({'error': f'Missing: {", ".join(missing)}'}), 400
+        import math
+        try:
+            predicted_value = float(data['predicted_value'])
+        except (ValueError, TypeError):
+            return jsonify({'error': 'predicted_value must be numeric'}), 400
+        if not math.isfinite(predicted_value):
+            return jsonify({'error': 'predicted_value must be finite'}), 400
+        startup.submitPredictionSync(
+            stream_name=data['stream_name'],
+            stream_provider_pubkey=data['stream_provider_pubkey'],
+            host_pubkey=data['host_pubkey'],
+            seq_num=int(data['seq_num']),
+            predicted_value=predicted_value,
+        )
+        return jsonify({'success': True, 'seq_num': data['seq_num']})
+
+    @app.route('/api/bounty/simulate-observation', methods=['POST'])
+    @login_required
+    def api_bounty_simulate_observation():
+        """Simulate receiving an observation and trigger engine + DM prediction.
+
+        For testing: injects an observation into the DB and runs the engine
+        path (predict → DM to bounty host) without relying on relay
+        delivery. Required: stream_name, provider_pubkey, seq_num, value.
+        """
+        import asyncio as _asyncio
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Startup not initialized'}), 503
+        data = request.get_json() or {}
+        required = ['stream_name', 'provider_pubkey', 'seq_num', 'value']
+        missing = [f for f in required if f not in data]
+        if missing:
+            return jsonify({'error': f'Missing: {", ".join(missing)}'}), 400
+        stream_name = data['stream_name']
+        provider_pubkey = data['provider_pubkey']
+        seq_num = int(data['seq_num'])
+        value = data['value']
+        import time as _time
+        ts = int(_time.time())
+        # Save observation to DB
+        is_new = startup.networkDB.save_observation(
+            stream_name, provider_pubkey, str(value), None, seq_num, ts)
+        if not is_new:
+            return jsonify({'error': 'Observation already exists', 'seq_num': seq_num}), 409
+        # Check if predicting and run engine + DM submission
+        predicting = startup.networkDB.is_predicting(stream_name, provider_pubkey)
+        if not predicting:
+            return jsonify({'success': True, 'seq_num': seq_num,
+                            'predicted': False, 'reason': 'not predicting this stream'})
+        # Create a mock observation object for the engine
+        from satorilib.satori_nostr.models import DatastreamObservation
+        obs = DatastreamObservation(
+            stream_name=stream_name,
+            timestamp=ts,
+            value=value,
+            seq_num=seq_num,
+        )
+        # Run engine on the network loop
+        loop = getattr(startup, '_networkLoop', None)
+        if loop and not loop.is_closed():
+            future = _asyncio.run_coroutine_threadsafe(
+                startup._networkRunEngine(stream_name, provider_pubkey, obs),
+                loop)
+            try:
+                future.result(timeout=10)
+            except Exception as e:
+                return jsonify({'success': True, 'seq_num': seq_num,
+                                'predicted': True, 'engine_error': str(e)})
+        return jsonify({'success': True, 'seq_num': seq_num, 'predicted': True})
 
     @app.route('/api/network/publication/remove', methods=['POST'])
     @login_required
@@ -2446,6 +2666,17 @@ def register_routes(app):
             return jsonify({'error': f'Parse failed: {e}', 'raw': raw})
         return jsonify({'value': value, 'raw': raw})
 
+    @app.route('/api/network/classifications', methods=['GET'])
+    @login_required
+    def api_network_classifications():
+        """Return the canonical list of publication classifications."""
+        from satorineuron.classifications import CLASSIFICATIONS
+        return jsonify({
+            'classifications': [
+                {'value': v, 'label': l} for v, l in CLASSIFICATIONS
+            ]
+        })
+
     @app.route('/api/network/data-source', methods=['GET'])
     @login_required
     def api_network_data_source_get():
@@ -2459,22 +2690,49 @@ def register_routes(app):
         ds = startup.networkDB.get_data_source(stream_name)
         if not ds:
             return jsonify({'error': 'Not found'}), 404
-        # Merge price_per_obs from corresponding publication
+        # Merge price_per_obs and tags from corresponding publication
         pubs = startup.networkDB.get_all_publications()
         pub = next((p for p in pubs if p['stream_name'] == stream_name), None)
         ds['price_per_obs'] = pub['price_per_obs'] if pub else 0
+        tag_str = (pub or {}).get('tags') or ''
+        ds['tags'] = [t for t in tag_str.split(',') if t]
         return jsonify({'data_source': ds})
 
     @app.route('/api/network/data-source', methods=['POST'])
     @login_required
     def api_network_data_source_create():
         """Create a new data source and its corresponding publication."""
+        from satorineuron.classifications import (
+            CLASSIFICATIONS, CLASSIFICATION_VALUES)
+        from satorineuron.network_db import getMaxTotalStreams
         startup = get_startup()
         if not startup:
             return jsonify({'error': 'Startup not initialized'}), 503
         data = request.get_json()
         if not data or not data.get('stream_name'):
             return jsonify({'error': 'Missing stream_name'}), 400
+        stream_name = data['stream_name']
+        # Combined per-neuron cap on active publications + subscriptions.
+        # Editing an already-active publication is allowed; net-new or
+        # reactivated publications count toward the cap.
+        # `_pred` streams are auto-generated by predictions and exempt.
+        if not stream_name.endswith('_pred'):
+            existing = next(
+                (p for p in startup.networkDB.get_all_publications()
+                 if p['stream_name'] == stream_name),
+                None)
+            is_new_or_reactivated = (
+                existing is None or not existing.get('active'))
+            if is_new_or_reactivated:
+                total = (startup.networkDB.count_active_user_publications()
+                         + startup.networkDB.count_active_subscriptions())
+                cap = getMaxTotalStreams()
+                if total >= cap:
+                    return jsonify({
+                        'error': f'Combined publication+subscription limit reached '
+                                 f'({cap}). Remove an existing publication '
+                                 f'or subscription before adding a new one.'
+                    }), 400
         url = data.get('url', '').strip()
         cadence = data.get('cadence_seconds') or 0
         parser_type = data.get('parser_type', '') if url else ''
@@ -2482,7 +2740,24 @@ def register_routes(app):
         # If URL is provided, parser config is required
         if url and not parser_config:
             return jsonify({'error': 'Parser config required when URL is set'}), 400
+        classification = (data.get('classification') or '').strip().lower()
+        raw_tags = data.get('tags') or []
+        if isinstance(raw_tags, str):
+            raw_tags = raw_tags.split(',')
+        tag_list = [
+            t.strip().lower() for t in raw_tags
+            if isinstance(t, str) and t.strip()
+        ]
+        if classification and classification not in CLASSIFICATION_VALUES:
+            # Unknown classification — demote to a tag instead of rejecting
+            if classification not in tag_list:
+                tag_list.insert(0, classification)
+            classification = ''
+        extra_tags = [t for t in tag_list if t != classification]
+        all_tags = ([classification] if classification else []) + extra_tags
         # Create the data source
+        raw_offset = data.get('offset_seconds')
+        offset = int(raw_offset) if raw_offset is not None else None
         startup.networkDB.add_data_source(
             stream_name=data['stream_name'],
             url=url,
@@ -2492,20 +2767,25 @@ def register_routes(app):
             name=data.get('name', ''),
             description=data.get('description', ''),
             method=data.get('method', 'GET'),
-            headers=data.get('headers'))
+            headers=data.get('headers'),
+            offset_seconds=offset)
         # Create corresponding publication
         try:
             price_per_obs = int(data.get('price_per_obs', 0) or 0)
         except (ValueError, TypeError):
             price_per_obs = 0
-        encrypted = bool(data.get('encrypted', False))
+        # Paid streams are always encrypted on the wire (publish path encrypts
+        # per-subscriber when price > 0, regardless of this flag), so persist
+        # the truth in the announce metadata to keep readers from being misled.
+        encrypted = bool(data.get('encrypted', False)) or price_per_obs > 0
         startup.networkDB.add_publication(
             stream_name=data['stream_name'],
             name=data.get('name', ''),
             description=data.get('description', ''),
             cadence_seconds=cadence or None,
             price_per_obs=price_per_obs,
-            encrypted=encrypted)
+            encrypted=encrypted,
+            tags=all_tags)
         # If a URL is configured, immediately fetch and publish so the stream
         # is visible on relays without waiting for the next cadence cycle
         if url and parser_config:
@@ -2525,12 +2805,40 @@ def register_routes(app):
                     resp = http_requests.get(url, headers=headers, timeout=15)
                 resp.raise_for_status()
                 raw = resp.text
-                obj = json_mod.loads(raw)
-                for key in parser_config.split('.'):
-                    obj = obj[int(key)] if key.isdigit() else obj[key]
-                startup.publishNowSync(data['stream_name'], str(obj))
+                if parser_type == 'python':
+                    local_vars = {'text': raw}
+                    exec_code = parser_config.strip()
+                    if 'return ' in exec_code and not exec_code.startswith('def '):
+                        exec_code = ('def _parse(text):\n' +
+                                     '\n'.join('    ' + l for l in exec_code.split('\n')) +
+                                     '\n_result = _parse(text)')
+                        exec(exec_code, {}, local_vars)
+                        value = str(local_vars.get('_result', ''))
+                    else:
+                        exec(exec_code, {}, local_vars)
+                        value = str(local_vars.get('result', local_vars.get('_result', '')))
+                else:
+                    obj = json_mod.loads(raw)
+                    for key in parser_config.split('.'):
+                        obj = obj[int(key)] if key.isdigit() else obj[key]
+                    value = str(obj)
+                startup.publishNowSync(data['stream_name'], value)
             except Exception as e:
                 logger.warning(f'publish-on-save failed for {data["stream_name"]}: {e}')
+        else:
+            # Push-only or metadata-only edit: re-announce so relays pick up
+            # the latest publication metadata (price, tags, name) without
+            # waiting for the next observation.
+            try:
+                startup.announceNowSync()
+            except Exception as e:
+                logger.warning(f'announce-on-save failed for {data["stream_name"]}: {e}')
+        # Refresh the local discovery cache so the publisher's own marketplace
+        # view reflects the edit on next render rather than next sweep.
+        try:
+            startup.triggerNetworkDiscover()
+        except Exception:
+            pass
         return jsonify({'success': True})
 
     @app.route('/api/network/publish', methods=['POST'])
@@ -2677,6 +2985,13 @@ def register_routes(app):
         from satorineuron import VERSION
         return render_template('channels.html', version=VERSION)
 
+    @app.route('/bounties')
+    @login_required
+    def bounties_page():
+        """Prediction bounties page."""
+        from satorineuron import VERSION
+        return render_template('bounties.html', version=VERSION)
+
     @app.route('/api/channels')
     @login_required
     def api_channels_list():
@@ -2821,3 +3136,367 @@ def register_routes(app):
             return jsonify({'txid': str(txid) if txid else ''})
         except Exception as e:
             return jsonify({'error': str(e)})
+
+    # ── Bounty routes ────────────────────────────────────────────────────
+
+    @app.route('/api/bounty/scoring-modules', methods=['GET'])
+    @login_required
+    def api_bounty_scoring_modules():
+        """Return list of available scoring module names from the scoring/ dir."""
+        import os as _os
+        from satorineuron.bounty_scoring import SCORING_DIR
+        try:
+            modules = sorted(
+                f[:-3] for f in _os.listdir(SCORING_DIR)
+                if f.endswith('.py') and not f.startswith('_'))
+        except FileNotFoundError:
+            modules = []
+        return jsonify({'modules': modules})
+
+    @app.route('/api/bounty', methods=['POST'])
+    @login_required
+    def api_bounty_create():
+        """Create and announce a prediction bounty."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        required = ['stream_name', 'stream_provider_pubkey',
+                    'pay_per_obs_sats', 'paid_predictors',
+                    'competing_predictors', 'scoring_metric']
+        for field in required:
+            if field not in data:
+                return jsonify({'error': f'missing {field}'}), 400
+        try:
+            pay = int(data['pay_per_obs_sats'])
+            paid = int(data['paid_predictors'])
+            competing = int(data['competing_predictors'])
+        except (ValueError, TypeError):
+            return jsonify({'error': 'invalid number fields'}), 400
+        if pay <= 0:
+            return jsonify({'error': 'pay_per_obs_sats must be positive'}), 400
+        import json as _json
+        startup.networkDB.add_bounty(
+            stream_name=data['stream_name'],
+            stream_provider_pubkey=data['stream_provider_pubkey'],
+            host_pubkey=startup.nostrPubkey,
+            pay_per_obs_sats=pay,
+            paid_predictors=paid,
+            competing_predictors=competing,
+            scoring_metric=data['scoring_metric'],
+            scoring_params=_json.dumps(data.get('scoring_params', {})),
+            horizon=int(data.get('horizon', 1)),
+            active=1,
+            timestamp=int(time.time()),
+        )
+        startup.announceBountySync(data)
+        return jsonify({'success': True})
+
+    @app.route('/api/bounty/close', methods=['POST'])
+    @login_required
+    def api_bounty_close():
+        """Close an active bounty."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        provider_pubkey = data.get('stream_provider_pubkey', '').strip()
+        if not stream_name or not provider_pubkey:
+            return jsonify({'error': 'missing fields'}), 400
+        startup.networkDB.close_bounty(
+            stream_name, provider_pubkey, startup.nostrPubkey)
+        startup.closeBountySync(stream_name, provider_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/bounty/leave', methods=['POST'])
+    @login_required
+    def api_bounty_leave():
+        """Leave a bounty the neuron has joined as a predictor."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        provider_pubkey = data.get('stream_provider_pubkey', '').strip()
+        host_pubkey = data.get('host_pubkey', '').strip()
+        if not stream_name or not provider_pubkey or not host_pubkey:
+            return jsonify({'error': 'missing fields'}), 400
+        startup.networkDB.leave_bounty(stream_name, provider_pubkey, host_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/bounties/mine', methods=['GET'])
+    @login_required
+    def api_bounties_mine():
+        """Return bounties hosted by this neuron."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        rows = startup.networkDB.get_bounties_hosted_by(startup.nostrPubkey)
+        return jsonify({'bounties': rows})
+
+    @app.route('/api/bounties', methods=['GET'])
+    @login_required
+    def api_bounties_all():
+        """Return all known bounties. Pass ?active=0 to include closed."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        active_only = request.args.get('active', '1') == '1'
+        rows = startup.networkDB.get_all_bounties(active_only=active_only)
+        return jsonify({'bounties': rows})
+
+    @app.route('/api/bounties/discover', methods=['GET'])
+    @login_required
+    def api_bounties_discover():
+        """Discover bounties from connected relays."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        my_pubkey = startup.nostrPubkey
+        joined = {
+            (r['stream_name'], r['stream_provider_pubkey'], r['host_pubkey'])
+            for r in startup.networkDB.get_all_joined_bounties()
+        }
+        bounties = startup.discoverBountiesSync()
+        for c in bounties:
+            key = (c['stream_name'], c['stream_provider_pubkey'], c['host_pubkey'])
+            c['is_mine'] = c['host_pubkey'] == my_pubkey
+            c['joined'] = key in joined
+        return jsonify({'bounties': bounties, 'my_pubkey': my_pubkey})
+
+    @app.route('/api/bounty/leaderboard', methods=['GET'])
+    @login_required
+    def api_bounty_leaderboard():
+        """Return per-predictor payment totals for a bounty."""
+        stream_name = request.args.get('stream_name')
+        provider_pubkey = request.args.get('provider_pubkey')
+        if not stream_name or not provider_pubkey:
+            return jsonify({'error': 'stream_name and provider_pubkey required'}), 400
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        board = startup.networkDB.get_bounty_leaderboard(
+            stream_name, provider_pubkey)
+        return jsonify(board)
+
+    @app.route('/api/bounty/stats', methods=['GET'])
+    @login_required
+    def api_bounty_stats():
+        """Return payment consistency stats for a hosted bounty."""
+        stream_name = request.args.get('stream_name')
+        provider_pubkey = request.args.get('provider_pubkey')
+        host_pubkey = request.args.get('host_pubkey')
+        if not stream_name or not provider_pubkey or not host_pubkey:
+            return jsonify(
+                {'error': 'stream_name, provider_pubkey and host_pubkey required'}), 400
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        if host_pubkey == 'self':
+            host_pubkey = startup.nostrPubkey
+        stats = startup.networkDB.get_host_payment_stats(
+            stream_name, provider_pubkey, host_pubkey)
+        if stats is None:
+            return jsonify({'error': 'Bounty not found'}), 404
+        return jsonify(stats)
+
+    # ── Access request routes (approval-gated streams) ───────────────────────
+
+    @app.route('/api/access/request', methods=['POST'])
+    @login_required
+    def api_access_request():
+        """Request access to an approval-gated stream (subscriber side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        producer_pubkey = data.get('producer_pubkey', '').strip()
+        message = data.get('message', '')
+        if not stream_name or not producer_pubkey:
+            return jsonify({'error': 'stream_name and producer_pubkey required'}), 400
+        startup.requestAccessSync(
+            stream_name=stream_name,
+            producer_pubkey=producer_pubkey,
+            message=message,
+        )
+        return jsonify({'success': True})
+
+    @app.route('/api/access/requests', methods=['GET'])
+    @login_required
+    def api_access_requests():
+        """Return access requests for a stream (producer side).
+
+        Query params: stream_name (required), status (optional: pending/approved/rejected/revoked)
+        """
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        stream_name = request.args.get('stream_name', '').strip()
+        if not stream_name:
+            return jsonify({'error': 'stream_name required'}), 400
+        status = request.args.get('status')
+        rows = startup.networkDB.get_access_requests(stream_name, status=status)
+        return jsonify({'requests': rows})
+
+    @app.route('/api/access/requests/pending', methods=['GET'])
+    @login_required
+    def api_access_requests_all_pending():
+        """Return all pending access requests across all streams (producer side)."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        rows = startup.networkDB.get_all_pending_access_requests()
+        return jsonify({'requests': rows})
+
+    @app.route('/api/access/approve', methods=['POST'])
+    @login_required
+    def api_access_approve():
+        """Approve an access request (producer side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        requester_pubkey = data.get('requester_pubkey', '').strip()
+        if not stream_name or not requester_pubkey:
+            return jsonify(
+                {'error': 'stream_name and requester_pubkey required'}), 400
+        startup.approveAccessRequestSync(stream_name, requester_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/access/reject', methods=['POST'])
+    @login_required
+    def api_access_reject():
+        """Reject an access request (producer side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        requester_pubkey = data.get('requester_pubkey', '').strip()
+        if not stream_name or not requester_pubkey:
+            return jsonify(
+                {'error': 'stream_name and requester_pubkey required'}), 400
+        startup.rejectAccessRequestSync(stream_name, requester_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/access/revoke', methods=['POST'])
+    @login_required
+    def api_access_revoke():
+        """Revoke a previously approved subscriber (producer side)."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        subscriber_pubkey = data.get('subscriber_pubkey', '').strip()
+        if not stream_name or not subscriber_pubkey:
+            return jsonify(
+                {'error': 'stream_name and subscriber_pubkey required'}), 400
+        startup.revokeSubscriberSync(stream_name, subscriber_pubkey)
+        return jsonify({'success': True})
+
+    @app.route('/api/access/approved', methods=['GET'])
+    @login_required
+    def api_access_approved():
+        """Return approved subscribers for a stream (producer side)."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        stream_name = request.args.get('stream_name', '').strip()
+        if not stream_name:
+            return jsonify({'error': 'stream_name required'}), 400
+        rows = startup.networkDB.get_approved_subscribers(stream_name)
+        return jsonify({'subscribers': rows})
+
+    # ── Custom Relay Management ──────────────────────────────────
+
+    @app.route('/api/relays/custom', methods=['GET'])
+    @login_required
+    def api_custom_relays():
+        """Return user-added relay URLs."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        relays = startup.networkDB.get_user_added_relays()
+        return jsonify({'relays': relays})
+
+    @app.route('/api/relays/custom', methods=['POST'])
+    @login_required
+    def api_add_custom_relay():
+        """Add a custom relay URL."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json(force=True, silent=True) or {}
+        relay_url = (data.get('relay_url') or '').strip()
+        if not relay_url:
+            return jsonify({'error': 'relay_url required'}), 400
+        if not relay_url.startswith(('ws://', 'wss://')):
+            return jsonify({'error': 'relay_url must start with ws:// or wss://'}), 400
+        startup.networkDB.upsert_relay(relay_url, user_added=True)
+        return jsonify({'ok': True, 'relay_url': relay_url})
+
+    @app.route('/api/relays/custom', methods=['DELETE'])
+    @login_required
+    def api_delete_custom_relay():
+        """Remove a custom relay URL."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        data = request.get_json(force=True, silent=True) or {}
+        relay_url = (data.get('relay_url') or '').strip()
+        if not relay_url:
+            return jsonify({'error': 'relay_url required'}), 400
+        startup.networkDB.delete_relay(relay_url)
+        return jsonify({'ok': True})
+
+    # ── Nostr-Evrmore Address Derivation ─────────────────────────
+
+    @app.route('/api/nostr/evr-address', methods=['GET'])
+    @login_required
+    def api_nostr_evr_address():
+        """Derive the Evrmore address for this node's Nostr pubkey."""
+        startup = get_startup()
+        if not startup or not getattr(startup, 'nostrPubkey', None):
+            return jsonify({'error': 'Not ready'}), 503
+        from satorineuron.common.nostr_evrmore import (
+            nostr_pubkey_to_evr_address)
+        address = nostr_pubkey_to_evr_address(startup.nostrPubkey)
+        return jsonify({
+            'nostr_pubkey': startup.nostrPubkey,
+            'evr_address': address,
+        })
+
+    @app.route('/api/nostr/normalize-key', methods=['POST'])
+    @login_required
+    def api_nostr_normalize_key():
+        """Normalize a Nostr private key for even-y Evrmore address derivation.
+
+        Takes a Nostr secret (hex or nsec) and returns the normalized key
+        that produces the even-y (0x02) compressed public key, ensuring the
+        Evrmore address matches the one derived from the Nostr pubkey.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        secret = (data.get('secret') or '').strip()
+        if not secret:
+            return jsonify({'error': 'secret required'}), 400
+        # Convert nsec to hex if needed
+        if secret.startswith('nsec'):
+            try:
+                from nostr_sdk import SecretKey
+                sk = SecretKey.parse(secret)
+                secret = sk.to_hex()
+            except Exception as e:
+                return jsonify({'error': f'Invalid nsec: {e}'}), 400
+        if len(secret) != 64:
+            return jsonify({'error': 'secret must be 64-char hex or nsec'}), 400
+        try:
+            from satorineuron.common.nostr_evrmore import (
+                normalize_nostr_secret)
+            result = normalize_nostr_secret(secret)
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400

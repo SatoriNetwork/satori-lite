@@ -129,40 +129,37 @@ Known Nostr relays.
 | relay_url | TEXT UNIQUE | WebSocket URL |
 | first_seen | INTEGER | When we first learned of it |
 | last_active | INTEGER | Last successful interaction |
+| user_added | INTEGER | 1 if manually added by operator |
 
 ## Running a Relay
 
-Relay operators earn rewards for running reliable relays on the Satori network. To register your relay:
+Relay operators earn rewards for running reliable relays on the Satori
+network. Rewards are sent to an Evrmore address derived from the relay's
+Nostr public key — no neuron or wallet setup is required to start earning.
 
 1. **Clone and run the relay**
    ```bash
    git clone https://github.com/SatoriNetwork/satori-relay.git
    cd satori-relay
-   ```
-
-2. **Get your Nostr public key** from the **Relay Settings** card on the neuron dashboard. Copy it with the copy button.
-
-3. **Configure the relay** — paste your Nostr public key into the relay's `.env` file:
-   ```
-   NOSTR_PUBKEY=your_hex_pubkey_here
-   RELAY_DOMAIN=your-relay.example.com
-   ```
-   This sets up NIP-11 so the relay's information document includes a `self` field matching your pubkey, which proves you own the relay.
-
-4. **Start the relay**
-   ```bash
    docker compose up -d
    ```
-   The relay will be available at `wss://your-relay.example.com`. Make sure port 443 is open and your domain points to the server.
+   The relay will be available at `wss://your-relay.example.com`. Make sure
+   port 443 is open and your domain points to the server.
 
-5. **Register with the network** — back on the neuron dashboard, enter your relay URL (`wss://your-relay.example.com`) in the Relay Settings card and click **Register Relay**. The central server will:
-   - Fetch the relay's NIP-11 information document
-   - Verify the `self` field matches your neuron's Nostr pubkey
-   - Register the relay so other neurons can discover it
+2. **Discovery is automatic** — neurons publish NIP-65 relay list events
+   (kind 10002) advertising which relays they connect to. The central server
+   subscribes to these events and builds its relay directory. Once any neuron
+   connects to your relay, the server discovers it automatically.
 
-   The status indicator shows "Relay verified and registered" on success, or an error message if verification fails.
+3. **Add your relay to a neuron** (optional) — to speed up discovery, go to
+   **Settings > External Relay Connections** on any neuron and add your relay
+   URL. The neuron will connect and publish it in its NIP-65 relay list.
 
-Once registered, other neurons will discover your relay through the central server's relay list and connect to it for stream discovery and data exchange.
+4. **Claim your rewards** — the server derives your Evrmore reward address
+   from your relay's Nostr pubkey using the even-y (0x02) convention. Use the
+   **Key Normalization Tool** on the neuron Settings page to convert your
+   relay's Nostr private key into an Evrmore-compatible key, then import it
+   into any Evrmore wallet to spend your rewards.
 
 ## Features
 

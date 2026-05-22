@@ -2,12 +2,12 @@
 # Minimal dependencies for lightweight Satori neuron
 
 # Core dependencies
-setuptools>=65.0.0
+setuptools>=78.1.1
 
 # Data handling - pinned for compatibility
 numpy==1.24.0
 pandas==1.5.2
-pyarrow==10.0.1
+pyarrow>=14.0.1
 fastparquet==2022.12.0
 
 # Configuration
@@ -19,7 +19,7 @@ joblib==1.2.0
 
 # AI Engine - Machine Learning
 xgboost==1.7.2
-scikit-learn==1.2.0
+scikit-learn>=1.5.0
 lightgbm>=4.5.0
 catboost>=1.2.7
 statsmodels>=0.14.4
@@ -31,7 +31,7 @@ optuna>=4.0.0
 
 # AI Engine - Deep Learning (optional, for advanced models)
 # torch>=2.3.1  # typically installed in docker image
-transformers>=4.41.2
+transformers>=4.48.0
 # prophet>=1.1.6  # has complex dependencies
 # tbats>=1.1.3
 # neuralforecast>=1.7.5
@@ -58,7 +58,7 @@ coincurve>=20.0.0
 marshmallow>=3.22.0
 
 # Networking
-requests>=2.31.0
+requests>=2.32.0
 websockets>=15.0.0
 nostr-sdk>=0.44.0
 docker>=7.1.0

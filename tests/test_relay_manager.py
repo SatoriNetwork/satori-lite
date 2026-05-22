@@ -31,13 +31,13 @@ class DummyStartup:
         @staticmethod
         def status():
             return {
-                'docker_available': False,
-                'docker_error': 'not mounted in test',
-                'docker_endpoint': None,
+                'docker_available': True,
+                'docker_error': None,
+                'docker_endpoint': 'embedded strfry runtime',
                 'docker_help': {
-                    'cause': 'missing_socket_mount',
-                    'summary': 'No supported Docker socket is visible inside the neuron container.',
-                    'details': ['-v /var/run/docker.sock:/var/run/docker.sock'],
+                    'cause': 'embedded_runtime',
+                    'summary': 'Relay runs as an embedded strfry process inside the neuron container.',
+                    'details': ['Nginx sidecars are no longer required.'],
                 },
                 'desired_mode': 'off',
                 'running_mode': 'off',
@@ -48,7 +48,11 @@ class DummyStartup:
                 'private_host': 'relay.testnet.satorinet.io',
                 'last_event_at': '2026-03-24T11:00:00Z',
                 'last_health_check_at': '2026-03-24T11:01:00Z',
-                'containers': {},
+                'containers': {
+                    'public': {'strfry': {'status': 'stopped', 'ports': {}, 'health': None}},
+                    'private': {'strfry': {'status': 'stopped', 'ports': {}, 'health': None}},
+                },
+                'port_conflicts': {'public': None, 'private': None},
             }
 
     localRelay = RelayStub()
@@ -88,9 +92,9 @@ def test_names_are_deterministic_per_mode():
     manager = LocalRelayManager(DummyStartup())
     public = manager._names('public')
     private = manager._names('private')
-    assert public.nginx.endswith('-public-nginx')
-    assert private.strfry.endswith('-private-strfry')
-    assert public.network != private.network
+    assert public.process_name.endswith('-public-embedded-strfry')
+    assert private.legacy_strfry.endswith('-private-strfry')
+    assert public.legacy_network != private.legacy_network
 
 
 def test_docker_candidate_endpoints_respect_env_and_common_paths():
@@ -124,14 +128,13 @@ def test_settings_page_renders_for_logged_in_session():
     try:
         resp = client.get('/settings')
         assert resp.status_code == 200
-        assert b'Nostr Relay Settings' in resp.data
+        assert b'Network Settings' in resp.data
         assert b'Public Relay' in resp.data
         assert b'Private Relay' in resp.data
         assert b'Public Relay Port' in resp.data
         assert b'Private Relay Port' in resp.data
         assert b'Relay Off' in resp.data
-        assert b'Change before starting public relay' in resp.data
-        assert b'Change before starting private relay' in resp.data
+        assert b'changing this now requires recreating the neuron container' in resp.data
         assert b'Advertised Host / Domain' in resp.data
         assert b'Last Relay Event' in resp.data
         assert b'Last Health Check' in resp.data
