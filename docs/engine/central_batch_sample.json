@@ -1,0 +1,1408 @@
+[
+  {
+    "hash": "",
+    "id": 201570,
+    "observed_at": "1779426055.9544094",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 66,
+      "meta": null,
+      "name": "safetrade_xtm",
+      "secondary": null,
+      "target": null,
+      "uuid": "b4bf6ce9-64be-49b2-a17c-037cb4a40f9f"
+    },
+    "stream_id": 66,
+    "stream_uuid": "b4bf6ce9-64be-49b2-a17c-037cb4a40f9f",
+    "ts": "2026-05-22T05:00:55.955559",
+    "value": "0.00083"
+  },
+  {
+    "hash": "",
+    "id": 201572,
+    "observed_at": "1779426055.9547677",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 68,
+      "meta": null,
+      "name": "safetrade_zeph",
+      "secondary": null,
+      "target": null,
+      "uuid": "98d306e5-29e0-4de3-9ce0-0a0f3fe78724"
+    },
+    "stream_id": 68,
+    "stream_uuid": "98d306e5-29e0-4de3-9ce0-0a0f3fe78724",
+    "ts": "2026-05-22T05:00:55.955559",
+    "value": "0.275275"
+  },
+  {
+    "hash": "",
+    "id": 201571,
+    "observed_at": "1779426055.9545858",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 67,
+      "meta": null,
+      "name": "safetrade_yec",
+      "secondary": null,
+      "target": null,
+      "uuid": "e82a1d9e-b360-41e9-a613-31cae1e9cb42"
+    },
+    "stream_id": 67,
+    "stream_uuid": "e82a1d9e-b360-41e9-a613-31cae1e9cb42",
+    "ts": "2026-05-22T05:00:55.955559",
+    "value": "0.44395"
+  },
+  {
+    "hash": "",
+    "id": 201569,
+    "observed_at": "1779426055.954249",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 73,
+      "meta": null,
+      "name": "safetrade_xpm",
+      "secondary": null,
+      "target": null,
+      "uuid": "27b5d2d7-8ce1-4f17-beaf-5209646b815b"
+    },
+    "stream_id": 73,
+    "stream_uuid": "27b5d2d7-8ce1-4f17-beaf-5209646b815b",
+    "ts": "2026-05-22T05:00:55.955559",
+    "value": "0.0292"
+  },
+  {
+    "hash": "",
+    "id": 201563,
+    "observed_at": "1779426055.953114",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 72,
+      "meta": null,
+      "name": "safetrade_ve",
+      "secondary": null,
+      "target": null,
+      "uuid": "e6765422-ff41-4c52-9a04-a0e58c855e36"
+    },
+    "stream_id": 72,
+    "stream_uuid": "e6765422-ff41-4c52-9a04-a0e58c855e36",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "0.0002"
+  },
+  {
+    "hash": "",
+    "id": 201568,
+    "observed_at": "1779426055.9540877",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 65,
+      "meta": null,
+      "name": "safetrade_xnt",
+      "secondary": null,
+      "target": null,
+      "uuid": "7312a90f-a6a0-46ac-8a4f-45683ca2fbd1"
+    },
+    "stream_id": 65,
+    "stream_uuid": "7312a90f-a6a0-46ac-8a4f-45683ca2fbd1",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "0.5"
+  },
+  {
+    "hash": "",
+    "id": 201562,
+    "observed_at": "1779426055.9529529",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 60,
+      "meta": null,
+      "name": "safetrade_usdc",
+      "secondary": null,
+      "target": null,
+      "uuid": "7a5296b8-845a-47f6-9794-37525e2fa3b3"
+    },
+    "stream_id": 60,
+    "stream_uuid": "7a5296b8-845a-47f6-9794-37525e2fa3b3",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "0.9937"
+  },
+  {
+    "hash": "",
+    "id": 201561,
+    "observed_at": "1779426055.9527912",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 59,
+      "meta": null,
+      "name": "safetrade_trx",
+      "secondary": null,
+      "target": null,
+      "uuid": "090d4fa2-6f59-43c7-aaff-2ec77148105f"
+    },
+    "stream_id": 59,
+    "stream_uuid": "090d4fa2-6f59-43c7-aaff-2ec77148105f",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "0.48357"
+  },
+  {
+    "hash": "",
+    "id": 201566,
+    "observed_at": "1779426055.9537616",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 63,
+      "meta": null,
+      "name": "safetrade_xel",
+      "secondary": null,
+      "target": null,
+      "uuid": "3e4256e8-2499-4d1b-beeb-02acd0ee831f"
+    },
+    "stream_id": 63,
+    "stream_uuid": "3e4256e8-2499-4d1b-beeb-02acd0ee831f",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "0.27301"
+  },
+  {
+    "hash": "",
+    "id": 201564,
+    "observed_at": "1779426055.953275",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 62,
+      "meta": null,
+      "name": "safetrade_vrsc",
+      "secondary": null,
+      "target": null,
+      "uuid": "ae8889f1-499c-4d63-a03e-c0d64ce176a1"
+    },
+    "stream_id": 62,
+    "stream_uuid": "ae8889f1-499c-4d63-a03e-c0d64ce176a1",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "0.56"
+  },
+  {
+    "hash": "",
+    "id": 201567,
+    "observed_at": "1779426055.9539263",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 64,
+      "meta": null,
+      "name": "safetrade_xmr",
+      "secondary": null,
+      "target": null,
+      "uuid": "f40ec790-5593-46ac-a43e-9874c257b49f"
+    },
+    "stream_id": 64,
+    "stream_uuid": "f40ec790-5593-46ac-a43e-9874c257b49f",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "381.2319"
+  },
+  {
+    "hash": "",
+    "id": 201565,
+    "observed_at": "1779426055.9535851",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 74,
+      "meta": null,
+      "name": "safetrade_wart",
+      "secondary": null,
+      "target": null,
+      "uuid": "905467db-a654-4bca-b572-e65e35dd6aea"
+    },
+    "stream_id": 74,
+    "stream_uuid": "905467db-a654-4bca-b572-e65e35dd6aea",
+    "ts": "2026-05-22T05:00:55.955558",
+    "value": "0.0857"
+  },
+  {
+    "hash": "",
+    "id": 201560,
+    "observed_at": "1779426055.9526281",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 57,
+      "meta": null,
+      "name": "safetrade_sui",
+      "secondary": null,
+      "target": null,
+      "uuid": "c6ade58e-9d34-40f0-a986-75e867dd3f5a"
+    },
+    "stream_id": 57,
+    "stream_uuid": "c6ade58e-9d34-40f0-a986-75e867dd3f5a",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "1.944"
+  },
+  {
+    "hash": "",
+    "id": 201554,
+    "observed_at": "1779426055.9515815",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 51,
+      "meta": null,
+      "name": "safetrade_qmine",
+      "secondary": null,
+      "target": null,
+      "uuid": "30b03fa2-7d8d-4e96-a665-87ca8eded14a"
+    },
+    "stream_id": 51,
+    "stream_uuid": "30b03fa2-7d8d-4e96-a665-87ca8eded14a",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "0.0025"
+  },
+  {
+    "hash": "",
+    "id": 201557,
+    "observed_at": "1779426055.9521348",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 54,
+      "meta": null,
+      "name": "safetrade_safe",
+      "secondary": null,
+      "target": null,
+      "uuid": "795d9682-3cf4-4fb7-b385-ab418cf339a7"
+    },
+    "stream_id": 54,
+    "stream_uuid": "795d9682-3cf4-4fb7-b385-ab418cf339a7",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "0.05729"
+  },
+  {
+    "hash": "",
+    "id": 201555,
+    "observed_at": "1779426055.9517627",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 52,
+      "meta": null,
+      "name": "safetrade_qtc",
+      "secondary": null,
+      "target": null,
+      "uuid": "5f921ab5-7daf-4f6c-88b9-8134622ae647"
+    },
+    "stream_id": 52,
+    "stream_uuid": "5f921ab5-7daf-4f6c-88b9-8134622ae647",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "0.4447"
+  },
+  {
+    "hash": "",
+    "id": 201556,
+    "observed_at": "1779426055.9519634",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 53,
+      "meta": null,
+      "name": "safetrade_qubic",
+      "secondary": null,
+      "target": null,
+      "uuid": "ff483846-9588-4a84-b318-2330a177b97f"
+    },
+    "stream_id": 53,
+    "stream_uuid": "ff483846-9588-4a84-b318-2330a177b97f",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "5.41e-07"
+  },
+  {
+    "hash": "",
+    "id": 201558,
+    "observed_at": "1779426055.9522984",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 55,
+      "meta": null,
+      "name": "safetrade_satori",
+      "secondary": null,
+      "target": null,
+      "uuid": "af06e40d-e987-4d7c-b9f9-4f5407821c7d"
+    },
+    "stream_id": 55,
+    "stream_uuid": "af06e40d-e987-4d7c-b9f9-4f5407821c7d",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "0.26"
+  },
+  {
+    "hash": "",
+    "id": 201559,
+    "observed_at": "1779426055.9524603",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 56,
+      "meta": null,
+      "name": "safetrade_soh",
+      "secondary": null,
+      "target": null,
+      "uuid": "52299a29-c0c0-402f-8a4b-0cc829024c3e"
+    },
+    "stream_id": 56,
+    "stream_uuid": "52299a29-c0c0-402f-8a4b-0cc829024c3e",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "0.00550002"
+  },
+  {
+    "hash": "",
+    "id": 201553,
+    "observed_at": "1779426055.9514084",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 50,
+      "meta": null,
+      "name": "safetrade_pol",
+      "secondary": null,
+      "target": null,
+      "uuid": "0b85096a-b48d-4cd4-a75a-eed9f16148aa"
+    },
+    "stream_id": 50,
+    "stream_uuid": "0b85096a-b48d-4cd4-a75a-eed9f16148aa",
+    "ts": "2026-05-22T05:00:55.955557",
+    "value": "0.11087986"
+  },
+  {
+    "hash": "",
+    "id": 201548,
+    "observed_at": "1779426055.9504197",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 45,
+      "meta": null,
+      "name": "safetrade_nock",
+      "secondary": null,
+      "target": null,
+      "uuid": "d95e2633-b009-49e1-8e94-df83b50cd0c6"
+    },
+    "stream_id": 45,
+    "stream_uuid": "d95e2633-b009-49e1-8e94-df83b50cd0c6",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "0.024"
+  },
+  {
+    "hash": "",
+    "id": 201552,
+    "observed_at": "1779426055.9512403",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 49,
+      "meta": null,
+      "name": "safetrade_plsx",
+      "secondary": null,
+      "target": null,
+      "uuid": "72b5da80-6958-4e16-9d00-9030c996adea"
+    },
+    "stream_id": 49,
+    "stream_uuid": "72b5da80-6958-4e16-9d00-9030c996adea",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "5.01e-06"
+  },
+  {
+    "hash": "",
+    "id": 201547,
+    "observed_at": "1779426055.9502435",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 44,
+      "meta": null,
+      "name": "safetrade_nexa",
+      "secondary": null,
+      "target": null,
+      "uuid": "d7c0b693-6db0-4cd5-99f3-47650bfb8480"
+    },
+    "stream_id": 44,
+    "stream_uuid": "d7c0b693-6db0-4cd5-99f3-47650bfb8480",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "5.1e-07"
+  },
+  {
+    "hash": "",
+    "id": 201546,
+    "observed_at": "1779426055.9500659",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 43,
+      "meta": null,
+      "name": "safetrade_mmx",
+      "secondary": null,
+      "target": null,
+      "uuid": "da7f0910-352a-4330-a755-167d7ea7b9ba"
+    },
+    "stream_id": 43,
+    "stream_uuid": "da7f0910-352a-4330-a755-167d7ea7b9ba",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "0.026"
+  },
+  {
+    "hash": "",
+    "id": 201550,
+    "observed_at": "1779426055.9508777",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 47,
+      "meta": null,
+      "name": "safetrade_octa",
+      "secondary": null,
+      "target": null,
+      "uuid": "05be658e-b7d8-4caa-b066-da9a79c9c6ba"
+    },
+    "stream_id": 47,
+    "stream_uuid": "05be658e-b7d8-4caa-b066-da9a79c9c6ba",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "0.09362"
+  },
+  {
+    "hash": "",
+    "id": 201551,
+    "observed_at": "1779426055.9510586",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 48,
+      "meta": null,
+      "name": "safetrade_pls",
+      "secondary": null,
+      "target": null,
+      "uuid": "3d6b535c-1380-4576-8277-6913a6ed0b98"
+    },
+    "stream_id": 48,
+    "stream_uuid": "3d6b535c-1380-4576-8277-6913a6ed0b98",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "7.79e-06"
+  },
+  {
+    "hash": "",
+    "id": 201549,
+    "observed_at": "1779426055.9506862",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 46,
+      "meta": null,
+      "name": "safetrade_npt",
+      "secondary": null,
+      "target": null,
+      "uuid": "756c00b1-9c22-4ff6-a2e8-3bd12cd862d3"
+    },
+    "stream_id": 46,
+    "stream_uuid": "756c00b1-9c22-4ff6-a2e8-3bd12cd862d3",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "0.32"
+  },
+  {
+    "hash": "",
+    "id": 201545,
+    "observed_at": "1779426055.9498856",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 42,
+      "meta": null,
+      "name": "safetrade_mcl",
+      "secondary": null,
+      "target": null,
+      "uuid": "bd3413a1-4aee-4829-953e-86bcb88e6e20"
+    },
+    "stream_id": 42,
+    "stream_uuid": "bd3413a1-4aee-4829-953e-86bcb88e6e20",
+    "ts": "2026-05-22T05:00:55.955556",
+    "value": "0.00300001"
+  },
+  {
+    "hash": "",
+    "id": 201539,
+    "observed_at": "1779426055.948783",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 38,
+      "meta": null,
+      "name": "safetrade_kcn",
+      "secondary": null,
+      "target": null,
+      "uuid": "89f157a2-9d31-4e9f-b934-8befe169905d"
+    },
+    "stream_id": 38,
+    "stream_uuid": "89f157a2-9d31-4e9f-b934-8befe169905d",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "1.350002"
+  },
+  {
+    "hash": "",
+    "id": 201541,
+    "observed_at": "1779426055.9491699",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 39,
+      "meta": null,
+      "name": "safetrade_lax",
+      "secondary": null,
+      "target": null,
+      "uuid": "99b20bb3-7e17-413e-958c-bf2f1f8a0705"
+    },
+    "stream_id": 39,
+    "stream_uuid": "99b20bb3-7e17-413e-958c-bf2f1f8a0705",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "0.007"
+  },
+  {
+    "hash": "",
+    "id": 201537,
+    "observed_at": "1779426055.948406",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 36,
+      "meta": null,
+      "name": "safetrade_grc",
+      "secondary": null,
+      "target": null,
+      "uuid": "415203b1-76d7-41d8-a310-4f83db5a786a"
+    },
+    "stream_id": 36,
+    "stream_uuid": "415203b1-76d7-41d8-a310-4f83db5a786a",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "0.00600005"
+  },
+  {
+    "hash": "",
+    "id": 201542,
+    "observed_at": "1779426055.9493496",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 76,
+      "meta": null,
+      "name": "safetrade_ldg",
+      "secondary": null,
+      "target": null,
+      "uuid": "8ef2dd75-39fe-448e-9757-e3dc3625dc51"
+    },
+    "stream_id": 76,
+    "stream_uuid": "8ef2dd75-39fe-448e-9757-e3dc3625dc51",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "0.0003"
+  },
+  {
+    "hash": "",
+    "id": 201538,
+    "observed_at": "1779426055.948591",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 37,
+      "meta": null,
+      "name": "safetrade_hex",
+      "secondary": null,
+      "target": null,
+      "uuid": "4f847d5e-50a4-47b4-88b9-97fe9109e740"
+    },
+    "stream_id": 37,
+    "stream_uuid": "4f847d5e-50a4-47b4-88b9-97fe9109e740",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "0.00206023"
+  },
+  {
+    "hash": "",
+    "id": 201544,
+    "observed_at": "1779426055.9497035",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 41,
+      "meta": null,
+      "name": "safetrade_matilda",
+      "secondary": null,
+      "target": null,
+      "uuid": "a9d06c6c-20da-4a2b-9e95-a59c682f03ca"
+    },
+    "stream_id": 41,
+    "stream_uuid": "a9d06c6c-20da-4a2b-9e95-a59c682f03ca",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "7.82e-07"
+  },
+  {
+    "hash": "",
+    "id": 201543,
+    "observed_at": "1779426055.9495263",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 40,
+      "meta": null,
+      "name": "safetrade_ltc",
+      "secondary": null,
+      "target": null,
+      "uuid": "3289040c-92c3-4101-9061-b7854e6e1929"
+    },
+    "stream_id": 40,
+    "stream_uuid": "3289040c-92c3-4101-9061-b7854e6e1929",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "55.23257"
+  },
+  {
+    "hash": "",
+    "id": 201540,
+    "observed_at": "1779426055.9489746",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 77,
+      "meta": null,
+      "name": "safetrade_krgn",
+      "secondary": null,
+      "target": null,
+      "uuid": "894622a4-027a-4944-a7bf-59e4b5adb3da"
+    },
+    "stream_id": 77,
+    "stream_uuid": "894622a4-027a-4944-a7bf-59e4b5adb3da",
+    "ts": "2026-05-22T05:00:55.955555",
+    "value": "0.19"
+  },
+  {
+    "hash": "",
+    "id": 201530,
+    "observed_at": "1779426055.9470267",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 31,
+      "meta": null,
+      "name": "safetrade_btcz",
+      "secondary": null,
+      "target": null,
+      "uuid": "609ecad0-dda0-4493-8060-0e9e4e688e4e"
+    },
+    "stream_id": 31,
+    "stream_uuid": "609ecad0-dda0-4493-8060-0e9e4e688e4e",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "3.101e-05"
+  },
+  {
+    "hash": "",
+    "id": 201535,
+    "observed_at": "1779426055.9480252",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 34,
+      "meta": null,
+      "name": "safetrade_evr",
+      "secondary": null,
+      "target": null,
+      "uuid": "5935cadc-5fc1-4ffe-a05b-264e327ca764"
+    },
+    "stream_id": 34,
+    "stream_uuid": "5935cadc-5fc1-4ffe-a05b-264e327ca764",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "6.989e-05"
+  },
+  {
+    "hash": "",
+    "id": 201536,
+    "observed_at": "1779426055.9482172",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 35,
+      "meta": null,
+      "name": "safetrade_gnk",
+      "secondary": null,
+      "target": null,
+      "uuid": "a60772df-767d-40eb-ae54-b81d3fe90c7c"
+    },
+    "stream_id": 35,
+    "stream_uuid": "a60772df-767d-40eb-ae54-b81d3fe90c7c",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "0.28"
+  },
+  {
+    "hash": "",
+    "id": 201532,
+    "observed_at": "1779426055.9474056",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 70,
+      "meta": null,
+      "name": "safetrade_clore",
+      "secondary": null,
+      "target": null,
+      "uuid": "6d5393d8-8f03-42ed-bd37-9030c9e075ac"
+    },
+    "stream_id": 70,
+    "stream_uuid": "6d5393d8-8f03-42ed-bd37-9030c9e075ac",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "0.00392999"
+  },
+  {
+    "hash": "",
+    "id": 201531,
+    "observed_at": "1779426055.947223",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 32,
+      "meta": null,
+      "name": "safetrade_cfb",
+      "secondary": null,
+      "target": null,
+      "uuid": "d823debb-72c7-4309-bf5c-a8c73c51ac12"
+    },
+    "stream_id": 32,
+    "stream_uuid": "d823debb-72c7-4309-bf5c-a8c73c51ac12",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "8.28e-07"
+  },
+  {
+    "hash": "",
+    "id": 201529,
+    "observed_at": "1779426055.9467766",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 30,
+      "meta": null,
+      "name": "safetrade_btc",
+      "secondary": null,
+      "target": null,
+      "uuid": "404632b5-eda0-4a80-bd12-6d072a8517b8"
+    },
+    "stream_id": 30,
+    "stream_uuid": "404632b5-eda0-4a80-bd12-6d072a8517b8",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "78700.0"
+  },
+  {
+    "hash": "",
+    "id": 201534,
+    "observed_at": "1779426055.9478312",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 33,
+      "meta": null,
+      "name": "safetrade_dai",
+      "secondary": null,
+      "target": null,
+      "uuid": "55b63ae4-e3f9-4fa5-9933-92a66fd6a553"
+    },
+    "stream_id": 33,
+    "stream_uuid": "55b63ae4-e3f9-4fa5-9933-92a66fd6a553",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "0.95"
+  },
+  {
+    "hash": "",
+    "id": 201533,
+    "observed_at": "1779426055.9475853",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 71,
+      "meta": null,
+      "name": "safetrade_cpay",
+      "secondary": null,
+      "target": null,
+      "uuid": "b0b4e570-83d0-4bee-a97f-b9115a4a46c0"
+    },
+    "stream_id": 71,
+    "stream_uuid": "b0b4e570-83d0-4bee-a97f-b9115a4a46c0",
+    "ts": "2026-05-22T05:00:55.955554",
+    "value": "0.0005541"
+  },
+  {
+    "hash": "",
+    "id": 201525,
+    "observed_at": "1779426055.945314",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 26,
+      "meta": null,
+      "name": "safetrade_arb",
+      "secondary": null,
+      "target": null,
+      "uuid": "25f9ff55-e0e9-412d-9c76-62b4559d6bca"
+    },
+    "stream_id": 26,
+    "stream_uuid": "25f9ff55-e0e9-412d-9c76-62b4559d6bca",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "0.11500003"
+  },
+  {
+    "hash": "",
+    "id": 201528,
+    "observed_at": "1779426055.9463813",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 29,
+      "meta": null,
+      "name": "safetrade_bnb",
+      "secondary": null,
+      "target": null,
+      "uuid": "76a30c95-30f5-4b1a-9949-450a484326d0"
+    },
+    "stream_id": 29,
+    "stream_uuid": "76a30c95-30f5-4b1a-9949-450a484326d0",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "684.77"
+  },
+  {
+    "hash": "",
+    "id": 201521,
+    "observed_at": "1779426055.8466988",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 22,
+      "meta": null,
+      "name": "uni",
+      "secondary": null,
+      "target": null,
+      "uuid": "7048489d-e24c-467a-bf6a-05ba90ebd07b"
+    },
+    "stream_id": 22,
+    "stream_uuid": "7048489d-e24c-467a-bf6a-05ba90ebd07b",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "3.6203333333333334"
+  },
+  {
+    "hash": "",
+    "id": 201524,
+    "observed_at": "1779426055.8471906",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 24,
+      "meta": null,
+      "name": "avax",
+      "secondary": null,
+      "target": null,
+      "uuid": "43433f4f-1ebe-469e-a5ea-d48b67f289cb"
+    },
+    "stream_id": 24,
+    "stream_uuid": "43433f4f-1ebe-469e-a5ea-d48b67f289cb",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "9.507500000000002"
+  },
+  {
+    "hash": "",
+    "id": 201523,
+    "observed_at": "1779426055.8470294",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 25,
+      "meta": null,
+      "name": "matic",
+      "secondary": null,
+      "target": null,
+      "uuid": "72395724-b36d-443b-97c1-ae99a2ec328b"
+    },
+    "stream_id": 25,
+    "stream_uuid": "72395724-b36d-443b-97c1-ae99a2ec328b",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "0.23600000000000002"
+  },
+  {
+    "hash": "",
+    "id": 201527,
+    "observed_at": "1779426055.9460216",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 28,
+      "meta": null,
+      "name": "safetrade_b1t",
+      "secondary": null,
+      "target": null,
+      "uuid": "5d4441ca-d5cf-4dcb-8fc6-165173ecf663"
+    },
+    "stream_id": 28,
+    "stream_uuid": "5d4441ca-d5cf-4dcb-8fc6-165173ecf663",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "0.00250015"
+  },
+  {
+    "hash": "",
+    "id": 201526,
+    "observed_at": "1779426055.945722",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 27,
+      "meta": null,
+      "name": "safetrade_avax",
+      "secondary": null,
+      "target": null,
+      "uuid": "a9da9382-1df9-4a48-892f-5389db5683cc"
+    },
+    "stream_id": 27,
+    "stream_uuid": "a9da9382-1df9-4a48-892f-5389db5683cc",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "8.36000003"
+  },
+  {
+    "hash": "",
+    "id": 201522,
+    "observed_at": "1779426055.846867",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 23,
+      "meta": null,
+      "name": "vet",
+      "secondary": null,
+      "target": null,
+      "uuid": "7eabb9e3-2cc8-4dd4-afec-ececf6ae5ccb"
+    },
+    "stream_id": 23,
+    "stream_uuid": "7eabb9e3-2cc8-4dd4-afec-ececf6ae5ccb",
+    "ts": "2026-05-22T05:00:55.955553",
+    "value": "0.006731613333333333"
+  },
+  {
+    "hash": "",
+    "id": 201518,
+    "observed_at": "1779426055.8461912",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 19,
+      "meta": null,
+      "name": "xlm",
+      "secondary": null,
+      "target": null,
+      "uuid": "1ba26157-fe2e-4716-89b1-46151f515f95"
+    },
+    "stream_id": 19,
+    "stream_uuid": "1ba26157-fe2e-4716-89b1-46151f515f95",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "0.147884"
+  },
+  {
+    "hash": "",
+    "id": 201520,
+    "observed_at": "1779426055.8465211",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 21,
+      "meta": null,
+      "name": "trx",
+      "secondary": null,
+      "target": null,
+      "uuid": "0acab924-4e80-4bfd-b500-4a0de101b96e"
+    },
+    "stream_id": 21,
+    "stream_uuid": "0acab924-4e80-4bfd-b500-4a0de101b96e",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "0.364696"
+  },
+  {
+    "hash": "",
+    "id": 201515,
+    "observed_at": "1779426055.8457012",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 16,
+      "meta": null,
+      "name": "dot",
+      "secondary": null,
+      "target": null,
+      "uuid": "5be8ac45-5974-46f8-9cac-068b5febe6ef"
+    },
+    "stream_id": 16,
+    "stream_uuid": "5be8ac45-5974-46f8-9cac-068b5febe6ef",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "1.3193333333333335"
+  },
+  {
+    "hash": "",
+    "id": 201516,
+    "observed_at": "1779426055.845868",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 17,
+      "meta": null,
+      "name": "xrp",
+      "secondary": null,
+      "target": null,
+      "uuid": "a6618409-13e3-4e79-8ead-be09978104b2"
+    },
+    "stream_id": 17,
+    "stream_uuid": "a6618409-13e3-4e79-8ead-be09978104b2",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "1.3695666666666668"
+  },
+  {
+    "hash": "",
+    "id": 201519,
+    "observed_at": "1779426055.8463516",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 20,
+      "meta": null,
+      "name": "xtz",
+      "secondary": null,
+      "target": null,
+      "uuid": "630276fc-fd54-4e18-9ede-5f2f83e67805"
+    },
+    "stream_id": 20,
+    "stream_uuid": "630276fc-fd54-4e18-9ede-5f2f83e67805",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "0.35115433333333335"
+  },
+  {
+    "hash": "",
+    "id": 201513,
+    "observed_at": "1779426055.845329",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 14,
+      "meta": null,
+      "name": "xmr",
+      "secondary": null,
+      "target": null,
+      "uuid": "b01d825b-f2f3-4c63-93f9-de8c948c1b5e"
+    },
+    "stream_id": 14,
+    "stream_uuid": "b01d825b-f2f3-4c63-93f9-de8c948c1b5e",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "248.98999999999998"
+  },
+  {
+    "hash": "",
+    "id": 201517,
+    "observed_at": "1779426055.8460302",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 18,
+      "meta": null,
+      "name": "sol",
+      "secondary": null,
+      "target": null,
+      "uuid": "e3ae1c06-0f24-4327-8786-543799c46e50"
+    },
+    "stream_id": 18,
+    "stream_uuid": "e3ae1c06-0f24-4327-8786-543799c46e50",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "86.92666666666678"
+  },
+  {
+    "hash": "",
+    "id": 201514,
+    "observed_at": "1779426055.845512",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 15,
+      "meta": null,
+      "name": "neo",
+      "secondary": null,
+      "target": null,
+      "uuid": "9d94c522-31e3-4bae-a2e2-1c8f3083c717"
+    },
+    "stream_id": 15,
+    "stream_uuid": "9d94c522-31e3-4bae-a2e2-1c8f3083c717",
+    "ts": "2026-05-22T05:00:55.955552",
+    "value": "2.9035"
+  },
+  {
+    "hash": "",
+    "id": 201512,
+    "observed_at": "1779426055.8451145",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 13,
+      "meta": null,
+      "name": "mkr",
+      "secondary": null,
+      "target": null,
+      "uuid": "276acf9b-fb01-412a-a5dd-a75187695182"
+    },
+    "stream_id": 13,
+    "stream_uuid": "276acf9b-fb01-412a-a5dd-a75187695182",
+    "ts": "2026-05-22T05:00:55.955551",
+    "value": "1722.5356717983007"
+  },
+  {
+    "hash": "",
+    "id": 201507,
+    "observed_at": "1779426055.8441205",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 8,
+      "meta": null,
+      "name": "doge",
+      "secondary": null,
+      "target": null,
+      "uuid": "7d7ad0b9-0551-4f02-83dc-3a3782d4c89f"
+    },
+    "stream_id": 8,
+    "stream_uuid": "7d7ad0b9-0551-4f02-83dc-3a3782d4c89f",
+    "ts": "2026-05-22T05:00:55.955551",
+    "value": "0.10566966666666666"
+  },
+  {
+    "hash": "",
+    "id": 201508,
+    "observed_at": "1779426055.8442898",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 9,
+      "meta": null,
+      "name": "eos",
+      "secondary": null,
+      "target": null,
+      "uuid": "083d5ebf-fd15-4699-8d43-b59203e6cffa"
+    },
+    "stream_id": 9,
+    "stream_uuid": "083d5ebf-fd15-4699-8d43-b59203e6cffa",
+    "ts": "2026-05-22T05:00:55.955551",
+    "value": "0.3145021111097038"
+  },
+  {
+    "hash": "",
+    "id": 201506,
+    "observed_at": "1779426055.843948",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 7,
+      "meta": null,
+      "name": "atom",
+      "secondary": null,
+      "target": null,
+      "uuid": "4d4f0099-9225-4b27-8a91-e1a6c5b0c738"
+    },
+    "stream_id": 7,
+    "stream_uuid": "4d4f0099-9225-4b27-8a91-e1a6c5b0c738",
+    "ts": "2026-05-22T05:00:55.955551",
+    "value": "2.121"
+  },
+  {
+    "hash": "",
+    "id": 201510,
+    "observed_at": "1779426055.8446293",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 11,
+      "meta": null,
+      "name": "fil",
+      "secondary": null,
+      "target": null,
+      "uuid": "abbd31e1-e611-4abb-a4ea-a554a64125df"
+    },
+    "stream_id": 11,
+    "stream_uuid": "abbd31e1-e611-4abb-a4ea-a554a64125df",
+    "ts": "2026-05-22T05:00:55.955551",
+    "value": "1.015"
+  },
+  {
+    "hash": "",
+    "id": 201509,
+    "observed_at": "1779426055.8444576",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 10,
+      "meta": null,
+      "name": "eth",
+      "secondary": null,
+      "target": null,
+      "uuid": "2d0823d7-b473-4f47-b634-8bf92fbe0391"
+    },
+    "stream_id": 10,
+    "stream_uuid": "2d0823d7-b473-4f47-b634-8bf92fbe0391",
+    "ts": "2026-05-22T05:00:55.955551",
+    "value": "2132.2466666666573"
+  },
+  {
+    "hash": "",
+    "id": 201511,
+    "observed_at": "1779426055.8448167",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 12,
+      "meta": null,
+      "name": "ltc",
+      "secondary": null,
+      "target": null,
+      "uuid": "908d12dc-7ac2-4223-a953-42a11bd8eb74"
+    },
+    "stream_id": 12,
+    "stream_uuid": "908d12dc-7ac2-4223-a953-42a11bd8eb74",
+    "ts": "2026-05-22T05:00:55.955551",
+    "value": "54.25"
+  },
+  {
+    "hash": "",
+    "id": 201505,
+    "observed_at": "1779426055.843754",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 6,
+      "meta": null,
+      "name": "link",
+      "secondary": null,
+      "target": null,
+      "uuid": "2d71a73c-db3f-45b8-999d-8121bf57d160"
+    },
+    "stream_id": 6,
+    "stream_uuid": "2d71a73c-db3f-45b8-999d-8121bf57d160",
+    "ts": "2026-05-22T05:00:55.955550",
+    "value": "9.807"
+  },
+  {
+    "hash": "",
+    "id": 201501,
+    "observed_at": "1779426055.8429086",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 2,
+      "meta": null,
+      "name": "algo",
+      "secondary": null,
+      "target": null,
+      "uuid": "db49774e-44e5-4ba0-85ef-323f7f1f62ec"
+    },
+    "stream_id": 2,
+    "stream_uuid": "db49774e-44e5-4ba0-85ef-323f7f1f62ec",
+    "ts": "2026-05-22T05:00:55.955550",
+    "value": "0.11461233333333333"
+  },
+  {
+    "hash": "",
+    "id": 201502,
+    "observed_at": "1779426055.8431594",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 3,
+      "meta": null,
+      "name": "bnb",
+      "secondary": null,
+      "target": null,
+      "uuid": "1a7842a5-f893-4fb1-ba92-af9abeb9da5e"
+    },
+    "stream_id": 3,
+    "stream_uuid": "1a7842a5-f893-4fb1-ba92-af9abeb9da5e",
+    "ts": "2026-05-22T05:00:55.955550",
+    "value": "658.4933333333296"
+  },
+  {
+    "hash": "",
+    "id": 201503,
+    "observed_at": "1779426055.8433528",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 4,
+      "meta": null,
+      "name": "btc",
+      "secondary": null,
+      "target": null,
+      "uuid": "9abbafb0-9ecf-47be-93bc-eced5351d2c5"
+    },
+    "stream_id": 4,
+    "stream_uuid": "9abbafb0-9ecf-47be-93bc-eced5351d2c5",
+    "ts": "2026-05-22T05:00:55.955550",
+    "value": "77599.03333326685"
+  },
+  {
+    "hash": "",
+    "id": 201500,
+    "observed_at": "1779426055.8425202",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 1,
+      "meta": null,
+      "name": "aave",
+      "secondary": null,
+      "target": null,
+      "uuid": "def6004b-a128-4197-abb7-bdf21cb9668e"
+    },
+    "stream_id": 1,
+    "stream_uuid": "def6004b-a128-4197-abb7-bdf21cb9668e",
+    "ts": "2026-05-22T05:00:55.955550",
+    "value": "87.85999999999986"
+  },
+  {
+    "hash": "",
+    "id": 201504,
+    "observed_at": "1779426055.843544",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 5,
+      "meta": null,
+      "name": "ada",
+      "secondary": null,
+      "target": null,
+      "uuid": "8067f359-430d-4f74-9412-b99ce76132df"
+    },
+    "stream_id": 5,
+    "stream_uuid": "8067f359-430d-4f74-9412-b99ce76132df",
+    "ts": "2026-05-22T05:00:55.955550",
+    "value": "0.25156033333333333"
+  },
+  {
+    "hash": "",
+    "id": 201499,
+    "observed_at": "1779426055.33064",
+    "stream": {
+      "author": null,
+      "description": null,
+      "id": 69,
+      "meta": null,
+      "name": "bitcoin",
+      "secondary": null,
+      "target": null,
+      "uuid": "631adaf6-5173-48e1-a181-151ff0713a46"
+    },
+    "stream_id": 69,
+    "stream_uuid": "631adaf6-5173-48e1-a181-151ff0713a46",
+    "ts": "2026-05-22T05:00:55.955548",
+    "value": "77578.0"
+  }
+]
