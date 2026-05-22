@@ -1,0 +1,29 @@
+#!/bin/bash
+# Run the engine testing ground in a one-off container.
+#
+# Uses the SAME dev image as ./satori-dev (satorinet/satori-lite:dev), but the
+# command is overridden to the playground script — so start.py (the neuron,
+# relay, web UI, observation pollers) NEVER runs. Only the playground runs;
+# the container is removed when it exits (--rm).
+#
+# Usage:
+#   ./playground                       # bundled sample batch
+#   ./playground <path-to-batch.json>  # e.g. a live dump under engine-lite/
+set -euo pipefail
+
+IMAGE="satorinet/satori-lite:dev"
+REPO="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="/Satori/Engine/testground/engine_testground.py"
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "Error: image '$IMAGE' not found."
+    echo "Run ./satori-dev once to build it, then retry."
+    exit 1
+fi
+
+exec docker run --rm \
+    -v "$REPO/engine-lite:/Satori/Engine" \
+    -v "$REPO/../satorilib/src:/Satori/Lib" \
+    -e PYTHONPATH="/Satori/Lib:/Satori/Engine" \
+    "$IMAGE" \
+    python "$SCRIPT" "$@"
