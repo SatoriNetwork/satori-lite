@@ -4254,19 +4254,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     def pollObservationsForever(self):
         """
         Poll the central server for new observations.
-        Initial delay: random (0-11 hours) to distribute load
-        Subsequent polls: every 11 hours
+        Initial delay: random (5-30 minutes) to distribute load.
+        Subsequent polls: every 11 hours.
         """
         import pandas as pd
         import random
+        from satoriengine.data_helper import batch_to_stream_frames
 
         def pollForever():
-            # First poll: random delay between 5 and 30 minutes
             initial_delay = random.randint(60 * 5, 60 * 30)
             logging.info(f"First observation poll in {initial_delay / 60:.1f} minutes", color='blue')
             time.sleep(initial_delay)
 
-            # Subsequent polls: every 11 hours
             while True:
                 try:
                     if not hasattr(self, 'server') or self.server is None:
@@ -4279,8 +4278,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         time.sleep(60 * 60 * 11)
                         continue
 
-                    # Get latest batch of observations from central-lite
-                    # This includes Bitcoin, multi-crypto, and SafeTrade observations
                     storage = getattr(self.aiengine, 'storage', None)
                     observations = self.server.getObservationsBatch(storage=storage)
 
@@ -4290,113 +4287,80 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         continue
 
                     logging.info(f"Received {len(observations)} observations from server", color='cyan')
-
-                    # Update last observation time
                     self.latestObservationTime = time.time()
 
-                    # Process each observation
+                    # Normalize + group into one DataFrame per stream.
+                    # Timestamp parsed to float epoch exactly once here.
+                    stream_frames = batch_to_stream_frames(observations)
+
                     observations_processed = 0
-                    for observation in observations:
+                    for stream_uuid, frame in stream_frames.items():
                         try:
-                            # Extract values
-                            value = observation.get('value')
-                            hash_val = observation.get('hash') or observation.get('id')
-                            stream_uuid = observation.get('stream_uuid')
-                            stream = observation.get('stream')
-                            stream_name = stream.get('name', 'unknown') if stream else 'unknown'
+                            stream = next(
+                                (o.get('stream') for o in observations
+                                 if o.get('stream_uuid') == stream_uuid), {})
+                            stream_name = (stream or {}).get('name', 'unknown')
 
-                            if value is None:
-                                logging.warning(f"Skipping observation with no value (stream: {stream_name})", color='yellow')
-                                continue
-
-                            # Convert observation to DataFrame for engine
-                            df = pd.DataFrame([{
-                                'ts': observation.get('observed_at') or observation.get('ts'),
-                                'value': float(value),
-                                'hash': str(hash_val) if hash_val is not None else None,
-                            }])
-
-                            # Store using server-provided stream UUID
-                            if stream_uuid:
-                                observations_processed += 1
-
-                                # Create stream model if it doesn't exist
-                                if stream_uuid not in self.aiengine.streamModels:
+                            # Create StreamModel if it doesn't exist
+                            if stream_uuid not in self.aiengine.streamModels:
+                                try:
+                                    from satoriengine.veda.engine import StreamModel
+                                    sub_id = StreamId(
+                                        source='central-lite',
+                                        author='satori',
+                                        stream=stream_name,
+                                        target='')
+                                    pub_id = StreamId(
+                                        source='central-lite',
+                                        author='satori',
+                                        stream=f"{stream_name}_pred",
+                                        target='')
+                                    subscriptionStream = Stream(streamId=sub_id)
+                                    publicationStream = Stream(streamId=pub_id, predicting=sub_id)
+                                    self.aiengine.streamModels[stream_uuid] = StreamModel.createFromServer(
+                                        streamUuid=stream_uuid,
+                                        predictionStreamUuid=pub_id.uuid,
+                                        server=self.server,
+                                        wallet=self.wallet,
+                                        subscriptionStream=subscriptionStream,
+                                        publicationStream=publicationStream,
+                                        pauseAll=self.aiengine.pause,
+                                        resumeAll=self.aiengine.resume,
+                                        storage=self.aiengine.storage)
+                                    self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
                                     try:
-                                        # Import required classes
-                                        from satoriengine.veda.engine import StreamModel
-
-                                        # Create StreamId objects for subscription and publication
-                                        sub_id = StreamId(
-                                            source='central-lite',
-                                            author='satori',
-                                            stream=stream_name,
-                                            target=''
-                                        )
-
-                                        # Prediction stream uses "_pred" suffix
-                                        pub_id = StreamId(
-                                            source='central-lite',
-                                            author='satori',
-                                            stream=f"{stream_name}_pred",
-                                            target=''
-                                        )
-
-                                        # Create Stream objects
-                                        subscriptionStream = Stream(streamId=sub_id)
-                                        publicationStream = Stream(streamId=pub_id, predicting=sub_id)
-
-                                        # Create StreamModel using factory method
-                                        self.aiengine.streamModels[stream_uuid] = StreamModel.createFromServer(
-                                            streamUuid=stream_uuid,
-                                            predictionStreamUuid=pub_id.uuid,
-                                            server=self.server,
-                                            wallet=self.wallet,
-                                            subscriptionStream=subscriptionStream,
-                                            publicationStream=publicationStream,
-                                            pauseAll=self.aiengine.pause,
-                                            resumeAll=self.aiengine.resume,
-                                            storage=self.aiengine.storage
-                                        )
-
-                                        # Choose and initialize appropriate adapter
-                                        self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
-
-                                        # Start training thread for this stream
-                                        try:
-                                            self.aiengine.streamModels[stream_uuid].run_forever()
-                                        except Exception as e:
-                                            logging.error(f"Failed to start training thread for {stream_name}: {e}", color='red')
+                                        self.aiengine.streamModels[stream_uuid].run_forever()
                                     except Exception as e:
-                                        logging.error(f"Failed to create model for {stream_name}: {e}", color='red')
-                                        import traceback
-                                        logging.error(traceback.format_exc())
+                                        logging.error(f"Failed to start training thread for {stream_name}: {e}", color='red')
+                                except Exception as e:
+                                    logging.error(f"Failed to create model for {stream_name}: {e}", color='red')
+                                    import traceback
+                                    logging.error(traceback.format_exc())
+                                    continue
 
-                                # Pass data to the model
-                                if stream_uuid in self.aiengine.streamModels:
-                                    try:
-                                        self.aiengine.streamModels[stream_uuid].onDataReceived(df)
-                                        logging.info(f"✓ Stored {stream_name}: ${float(value):,.2f} (UUID: {stream_uuid[:8]}...)", color='green')
-                                    except Exception as e:
-                                        logging.error(f"Error passing to engine for {stream_name}: {e}", color='red')
-                            else:
-                                logging.warning(f"Observation for {stream_name} missing stream_uuid", color='yellow')
+                            # Convert epoch -> datetime64 once per stream, pass to engine.
+                            if stream_uuid in self.aiengine.streamModels:
+                                engine_frame = pd.DataFrame({
+                                    'date_time': pd.to_datetime(frame['epoch'], unit='s', utc=True),
+                                    'value': frame['value'].values,
+                                    'id': frame['id'].values,
+                                })
+                                try:
+                                    self.aiengine.streamModels[stream_uuid].onDataReceived(engine_frame)
+                                    observations_processed += 1
+                                except Exception as e:
+                                    logging.error(f"Error passing data to engine for {stream_name}: {e}", color='red')
 
                         except Exception as e:
-                            logging.error(f"Error processing individual observation: {e}", color='red')
+                            logging.error(f"Error processing stream {stream_uuid}: {e}", color='red')
 
-                    logging.info(f"✓ Processed and stored {observations_processed}/{len(observations)} observations", color='cyan')
-
-                    # After processing all observations, collect predictions and submit in batch
+                    logging.info(f"✓ Processed {observations_processed}/{len(stream_frames)} streams", color='cyan')
                     self.collectAndSubmitPredictions()
-
-                    # Log training queue status
                     self.logTrainingQueueStatus()
 
                 except Exception as e:
                     logging.error(f"Error polling observations: {e}", color='red')
 
-                # Wait 11 hours before next poll
                 time.sleep(60 * 60 * 11)
 
         self.pollObservationsThread = threading.Thread(

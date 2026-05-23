@@ -2,9 +2,11 @@
 High-level storage manager for engine.
 Provides simple API for storing/retrieving stream and prediction data.
 """
+import os
 import pandas as pd
 from typing import Optional, Union
 from .sqlite_manager import EngineSqliteDatabase
+from satoriengine.stream_store import StreamStore
 from satorilib.logging import INFO, setup, debug, info, warning, error
 
 setup(level=INFO)
@@ -28,22 +30,22 @@ class EngineStorageManager:
 
     def __init__(self, data_dir: str = '/Satori/Engine/db', dbname: str = 'engine.db'):
         self.db = EngineSqliteDatabase(data_dir, dbname)
+        self.stream_store = StreamStore(os.path.join(data_dir, dbname))
 
     # ==================== Stream Data Methods ====================
 
     def storeStreamData(self, streamUuid: str, df: pd.DataFrame, provider: str = 'central') -> int:
         """
-        Store subscription stream data.
+        Store subscription stream data via StreamStore.
 
         Args:
-            streamUuid: The stream UUID (used as table name)
-            df: DataFrame with 'value' column, index as timestamp
-            provider: Data provider identifier
+            streamUuid: The stream UUID
+            df: DataFrame with columns [epoch, value, id]
 
         Returns:
             Number of rows inserted
         """
-        return self.db.insertDataframe(streamUuid, df, provider)
+        return self.stream_store.append(streamUuid, df)
 
     def storeStreamObservation(
         self,
@@ -83,37 +85,18 @@ class EngineStorageManager:
     def getStreamDataForEngine(self, streamUuid: str) -> pd.DataFrame:
         """
         Get stream data formatted for engine consumption.
-        Returns DataFrame with columns: date_time, value, id (matching engine format)
-
-        Args:
-            streamUuid: The stream UUID
-
-        Returns:
-            DataFrame with columns: date_time, value, id
+        Returns DataFrame with columns: date_time (datetime64 UTC), value, id.
+        Epoch -> datetime64 conversion happens once here via StreamStore.history().
         """
-        df = self.db.getTableData(streamUuid)
-        if df.empty:
-            return pd.DataFrame(columns=['date_time', 'value', 'id'])
-
-        # Convert from storage format to engine format
-        df = df.reset_index()
-        df = df.rename(columns={'ts': 'date_time', 'hash': 'id'})
-
-        # Convert Unix timestamp to datetime if needed
-        if not pd.api.types.is_datetime64_any_dtype(df['date_time']):
-            df['date_time'] = pd.to_datetime(df['date_time'], unit='s', utc=True)
-
-        if 'provider' in df.columns:
-            df = df.drop(columns=['provider'])
-        return df
+        return self.stream_store.history(streamUuid)
 
     def hasStreamData(self, streamUuid: str) -> bool:
         """Check if we have local data for a stream."""
-        return self.db.getRowCount(streamUuid) > 0
+        return self.stream_store.row_count(streamUuid) > 0
 
     def getStreamRowCount(self, streamUuid: str) -> int:
         """Get number of rows for a stream."""
-        return self.db.getRowCount(streamUuid)
+        return self.stream_store.row_count(streamUuid)
 
     def getLatestStreamTimestamp(self, streamUuid: str) -> Optional[str]:
         """Get the latest timestamp for a stream."""

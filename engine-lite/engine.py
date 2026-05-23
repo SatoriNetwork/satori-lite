@@ -565,53 +565,29 @@ class StreamModel:
     def onDataReceived(self, data: pd.DataFrame):
         """
         Called when new data is received from Central Server.
-        Stores data in SQLite and passes to engine for predictions.
 
         Args:
-            data: DataFrame with columns: ts (or date_time), value, hash (or id)
-                  Index should be timestamp or 'ts' column should contain timestamps.
-
-        TODO: Call this method when data arrives from Central Server.
+            data: DataFrame with columns [date_time (datetime64 UTC), value, id]
         """
         try:
             if data.empty:
                 return
 
-            # Normalize column names for storage
-            storageDf = data.copy()
-            if 'date_time' in storageDf.columns:
-                storageDf = storageDf.set_index('date_time')
-            elif 'ts' in storageDf.columns:
-                storageDf = storageDf.set_index('ts')
-
-            # Store in SQLite (table name = streamUuid)
-            insertedRows = self.storage.storeStreamData(
-                self.streamUuid,
-                storageDf,
-                provider='central'
-            )
+            # Build storage frame [epoch, value, id] from the datetime64 column.
+            # This is the only epoch extraction point — no string round-trips.
+            storageDf = pd.DataFrame({
+                'epoch': data['date_time'].astype('int64') // 10 ** 9,
+                'value': data['value'],
+                'id': data['id'],
+            })
+            insertedRows = self.storage.storeStreamData(self.streamUuid, storageDf)
             if insertedRows > 0:
-                info(f"Stored {insertedRows} new rows in SQLite for stream {self.streamUuid}", color='green')
+                info(f"Stored {insertedRows} new rows for stream {self.streamUuid}", color='green')
 
-            # Also update in-memory data for predictions
-            engineDf = data.copy()
-            if 'ts' in engineDf.columns:
-                engineDf = engineDf.rename(columns={'ts': 'date_time', 'hash': 'id'})
-            if 'provider' in engineDf.columns:
-                del engineDf['provider']
-
-            # Ensure date_time is datetime type (handle both Unix timestamps and ISO strings)
-            if 'date_time' in engineDf.columns and not pd.api.types.is_datetime64_any_dtype(engineDf['date_time']):
-                # Try as Unix timestamp first
-                numeric_times = pd.to_numeric(engineDf['date_time'], errors='coerce')
-                if numeric_times.notna().all() and numeric_times.min() > 946684800:
-                    engineDf['date_time'] = pd.to_datetime(numeric_times, unit='s', utc=True)
-                else:
-                    # Parse as ISO string
-                    engineDf['date_time'] = pd.to_datetime(engineDf['date_time'], utc=True)
-
-            self.data = pd.concat([self.data, engineDf], ignore_index=True)
-            self.data = self.data.drop_duplicates(subset=['date_time'], keep='last')
+            # Update in-memory history — append only rows not already present.
+            new_rows = data[~data['date_time'].isin(self.data['date_time'])]
+            if not new_rows.empty:
+                self.data = pd.concat([self.data, new_rows], ignore_index=True)
 
             # Check if adapter should be upgraded (e.g., StarterAdapter -> XgbAdapter)
             previousAdapter = self.adapter.__name__
@@ -621,7 +597,7 @@ class StreamModel:
             if previousAdapter == 'StarterAdapter' and self.adapter.__name__ != 'StarterAdapter':
                 if self.streamUuid != DEFAULT_STREAM_UUID:
                     info(f"Stream {self.streamUuid[:8]} upgraded from StarterAdapter to {self.adapter.__name__}, joining training queue", color='green')
-                self.run_forever()  # Join the training queue now
+                self.run_forever()
 
             # Trigger prediction when new observation arrives
             if insertedRows > 0:
