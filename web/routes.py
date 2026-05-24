@@ -755,6 +755,70 @@ def register_routes(app):
             'publications_count': len(startup.publications) if hasattr(startup, 'publications') and startup.publications else 0
         })
 
+    @app.route('/api/settings/adapter', methods=['GET', 'POST'])
+    @login_required
+    def adapter_setting():
+        """
+        Get or set the prediction engine adapter.
+
+        GET  → {"adapter": "<current>", "choices": [...], "default": "auto"}
+        POST {"adapter": "<choice>"} → persists to config and re-applies to
+            every running StreamModel.
+        """
+        from satorineuron import config as neuronConfig
+        from satoriengine.veda.engine import (
+            VALID_ADAPTER_CHOICES, buildPreferredAdapters)
+
+        if request.method == 'GET':
+            cfg = neuronConfig.get() or {}
+            engineCfg = cfg.get('engine') or {}
+            return jsonify({
+                'adapter': engineCfg.get('preferred_adapter', 'auto'),
+                'choices': VALID_ADAPTER_CHOICES,
+                'default': 'auto',
+            })
+
+        data = request.get_json(silent=True) or {}
+        choice = data.get('adapter')
+        if choice not in VALID_ADAPTER_CHOICES:
+            return jsonify({
+                'status': 'error',
+                'message': f'adapter must be one of {VALID_ADAPTER_CHOICES}',
+            }), 400
+
+        # Merge-update so we don't clobber other config keys.
+        cfg = neuronConfig.get() or {}
+        engineCfg = dict(cfg.get('engine') or {})
+        engineCfg['preferred_adapter'] = choice
+        neuronConfig.add(data={'engine': engineCfg})
+
+        # Update the preferred/default lists on every running StreamModel.
+        # We deliberately do NOT call chooseAdapter(inplace=True) here — each
+        # stream's training thread picks up the new lists on its next tick and
+        # swaps the pilot atomically inside that thread, avoiding a cross-
+        # thread race against an in-flight fit()/compare()/save() sequence.
+        scheduled = 0
+        warning_msg = None
+        try:
+            startup = get_startup()
+            if startup is not None and getattr(startup, 'aiengine', None) is not None:
+                newAdapters = buildPreferredAdapters()
+                streamModels = getattr(startup.aiengine, 'streamModels', {}) or {}
+                for sm in streamModels.values():
+                    try:
+                        sm.preferredAdapters = newAdapters
+                        sm.defaultAdapters = newAdapters
+                        scheduled += 1
+                    except Exception:
+                        pass
+        except Exception as e:
+            warning_msg = f'scheduling partial: {e}'
+
+        resp = {'status': 'ok', 'adapter': choice, 'scheduled': scheduled}
+        if warning_msg:
+            resp['warning'] = warning_msg
+        return jsonify(resp)
+
     @app.route('/api/system/stats', methods=['GET'])
     @login_required
     def get_system_stats():

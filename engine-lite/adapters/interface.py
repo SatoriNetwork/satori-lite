@@ -21,25 +21,33 @@ class ModelAdapter:
     @staticmethod
     def condition(*args, **kwargs) -> float:
         """
-        defines the condition for the adapter to be executed
+        Defines the condition for the adapter to be executed.
 
         Args:
             accepts information about the environment (hardware specs, etc.)
             and data (length, entropy, etc.)
 
         Returns:
-            returns a float between or including 0 and 1,
-            0 meaning you should not use this model under those conditions and
-            1 meaning these conditions are ideal for this model
+            float in [0, 1]. 0 = do not use this model under these conditions;
+            1 = these conditions are ideal for this model.
+
+        Guidelines for new adapters:
+            - DO check adapter-specific requirements: RAM/CPU/GPU, optional
+              dependencies (e.g. torch), data shape (univariate, sampling
+              regularity), etc.
+            - DO NOT gate on minimum data length. The engine enforces a
+              universal floor via MIN_OBSERVATIONS_FOR_TRAINED_MODEL in
+              engine.py (chooseAdapter forces StarterAdapter below it).
+              Adapters can assume `len(data) >= MIN_OBSERVATIONS_FOR_TRAINED_MODEL`
+              when their condition() is invoked.
+            - Returning 1 unconditionally is fine if no adapter-specific
+              concern applies — the central guard plus user preference order
+              will handle the rest.
         """
-        # any adapter that hasn't implemented condition should return false in
-        # the case of a condition that is not met so we can use the default
         if (
             isinstance(kwargs.get('availableRamGigs'), float)
             and kwargs.get('availableRamGigs') < .1
         ):
-            return 0
-        if len(kwargs.get('data', [])) < 10:
             return 0
         return 1
 

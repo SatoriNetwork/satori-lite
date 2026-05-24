@@ -17,14 +17,14 @@ class XgbAdapter(ModelAdapter):
 
     @staticmethod
     def condition(*args, **kwargs) -> float:
+        # Data-length floor is enforced centrally — see
+        # MIN_OBSERVATIONS_FOR_TRAINED_MODEL in engine.py.
         if (
             isinstance(kwargs.get('availableRamGigs'), float)
             and kwargs.get('availableRamGigs') < .025
         ):
             return 0
-        if kwargs.get('cpu', 0) == 1 or len(kwargs.get('data', [])) > 10:
-            return 1.0
-        return 0.0
+        return 1.0
 
     def __init__(self, **kwargs):
         super().__init__()

@@ -24,8 +24,69 @@ from satorilib.server import SatoriServerClient
 # )
 from satoriengine.veda import config
 from satoriengine.veda.data import StreamForecast, validate_single_entry
-from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter
+from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter, ETSAdapter
 from satoriengine.veda.storage import EngineStorageManager
+
+
+# ---------------------------------------------------------------------------
+# Adapter selection
+# ---------------------------------------------------------------------------
+# Registry of all user-selectable adapters. Values may be None when the
+# underlying dependency isn't installed; those entries are filtered from the
+# user-visible choices below. xgb-chronos is intentionally not exposed yet —
+# enable it by adding it back to the registry once torch is shipped.
+ADAPTER_REGISTRY = {
+    'ets':     ETSAdapter,
+    'xgboost': XgbAdapter,
+    'starter': StarterAdapter,
+}
+
+# Auto-selection order preserves the historical default (XGBoost → Starter)
+# so existing neurons don't silently migrate to ETS on upgrade. Users must
+# opt in to ETS via the settings UI.
+AUTO_ADAPTERS = [XgbAdapter, StarterAdapter]
+
+# Universal minimum-observations threshold. Any stream with fewer than this
+# many rows is forced onto StarterAdapter regardless of user preference or
+# any per-adapter condition() opinion. This is the single source of truth —
+# new adapters should not duplicate this check.
+MIN_OBSERVATIONS_FOR_TRAINED_MODEL = 10
+
+# Only expose adapters whose dependency loaded successfully.
+VALID_ADAPTER_CHOICES = ['auto'] + [
+    k for k, v in ADAPTER_REGISTRY.items() if v is not None
+]
+
+
+def _getPreferredAdapterSetting() -> str:
+    """Read engine.preferred_adapter from neuron config; 'auto' if absent."""
+    try:
+        from satorineuron import config as _neuronConfig
+        cfg = _neuronConfig.get() or {}
+        engineCfg = cfg.get('engine') or {}
+        return engineCfg.get('preferred_adapter', 'auto') or 'auto'
+    except Exception:
+        return 'auto'
+
+
+def buildPreferredAdapters() -> list:
+    """
+    Resolve the preferredAdapters list from neuron config.
+
+    - 'auto'  → ETS → XGBoost → Starter (skipping any None entries)
+    - explicit key → user's pick first, Starter appended as a safety net
+    """
+    choice = _getPreferredAdapterSetting()
+    auto = [a for a in AUTO_ADAPTERS if a is not None]
+    if choice == 'auto':
+        return auto or [StarterAdapter]
+    chosen = ADAPTER_REGISTRY.get(choice)
+    if chosen is None:
+        return auto or [StarterAdapter]
+    result = [chosen]
+    if StarterAdapter is not None and StarterAdapter is not chosen:
+        result.append(StarterAdapter)
+    return result
 
 warnings.filterwarnings('ignore')
 
@@ -455,8 +516,10 @@ class StreamModel:
         streamModel.cpu = getProcessorCount()
         streamModel.pauseAll = pauseAll
         streamModel.resumeAll = resumeAll
-        streamModel.preferredAdapters = [XgbAdapter, StarterAdapter]
-        streamModel.defaultAdapters = [XgbAdapter, XgbAdapter, StarterAdapter]
+        # Config-driven: reads engine.preferred_adapter from neuron config
+        # ('auto' = [ETS, XGB, Starter]; explicit key forces that adapter).
+        streamModel.preferredAdapters = buildPreferredAdapters()
+        streamModel.defaultAdapters = buildPreferredAdapters()
         streamModel.failedAdapters = []
         streamModel.thread = None
         streamModel.streamUuid = streamUuid
@@ -495,9 +558,10 @@ class StreamModel:
         self.cpu = getProcessorCount()
         self.pauseAll = pauseAll
         self.resumeAll = resumeAll
-        # self.preferredAdapters: list[ModelAdapter] = [XgbChronosAdapter, XgbAdapter, StarterAdapter ]# SKAdapter #model[0] issue
-        self.preferredAdapters: list[ModelAdapter] = [ XgbAdapter, StarterAdapter ]# SKAdapter #model[0] issue
-        self.defaultAdapters: list[ModelAdapter] = [XgbAdapter, XgbAdapter, StarterAdapter]
+        # Config-driven: reads engine.preferred_adapter from neuron config
+        # ('auto' = [ETS, XGB, Starter]; explicit key forces that adapter).
+        self.preferredAdapters: list[ModelAdapter] = buildPreferredAdapters()
+        self.defaultAdapters: list[ModelAdapter] = buildPreferredAdapters()
         self.failedAdapters = []
         self.thread: threading.Thread = None
         self.streamUuid: str = streamUuid
@@ -1122,7 +1186,11 @@ class StreamModel:
         #       predictions. if not, we should then choose the best one from the
         #       list - we should optimize after we gather acceptable options.
 
-        if False: # for testing specific adapters
+        # Universal threshold: too little data for any trained model.
+        # See MIN_OBSERVATIONS_FOR_TRAINED_MODEL at module top.
+        if len(self.data) < MIN_OBSERVATIONS_FOR_TRAINED_MODEL:
+            adapter = StarterAdapter
+        elif False: # for testing specific adapters
             adapter = XgbChronosAdapter
         else:
             import psutil
@@ -1194,7 +1262,19 @@ class StreamModel:
                     warning(f'Training failed for {self.streamUuid[:8]} (status={trainingResult.status})')
                 self.failedAdapters.append(self.pilot)
         except Exception as e:
-            error(f"Training error for {self.streamUuid[:8]}: {e}")
+            # Discard the broken pilot so we don't keep retrying with bad
+            # state (e.g. a loaded model whose schema doesn't match current
+            # data). The next training tick will construct a fresh adapter
+            # and rebuild from current observations.
+            error(
+                f"Training error for {self.streamUuid[:8]}: {e} "
+                f"— resetting pilot ({self.adapter.__name__})")
+            try:
+                self.pilot = self.adapter(uid=self.streamUuid)
+            except Exception as reset_err:
+                error(
+                    f"Failed to reset pilot for {self.streamUuid[:8]}: "
+                    f"{reset_err}")
 
     def run(self):
         """
@@ -1266,6 +1346,14 @@ class StreamModel:
                     debug(self.pilot.dataset)
                 except Exception as e:
                     pass
+                # Discard the broken pilot so the next loop iteration starts
+                # fresh instead of repeatedly hitting the same bad state.
+                try:
+                    self.pilot = self.adapter(uid=self.streamUuid)
+                except Exception as reset_err:
+                    error(
+                        f"Failed to reset pilot for {self.streamUuid}: "
+                        f"{reset_err}")
 
             # Sleep between training iterations based on user setting
             if self.trainingDelay > 0:

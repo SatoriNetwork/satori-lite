@@ -7,6 +7,12 @@ import psutil
 from satorilib.logging import error, warning, info, debug
 
 
+# Minimum sleep between consecutive training iterations of the same stream.
+# Prevents the worker from hot-spinning when trainingDelay is 0 or unset and
+# nothing has changed (e.g. ETS fast-path returning instantly).
+MIN_REQUEUE_DELAY_SECONDS = 5
+
+
 class TrainingQueueManager:
     """Manages training queue with single worker thread."""
 
@@ -87,8 +93,12 @@ class TrainingQueueManager:
             with self.lock:
                 self.current_stream = None
 
-            # Re-queue for next iteration after delay
-            time.sleep(stream_model.trainingDelay)
+            # Re-queue for next iteration after the user-configured delay,
+            # but never hot-loop — enforce a minimum so trainingDelay=0
+            # (or accidental misconfig) can't pin a CPU spinning through
+            # no-op fast-path fits.
+            delay = max(stream_model.trainingDelay, MIN_REQUEUE_DELAY_SECONDS)
+            time.sleep(delay)
             self.queue_training(stream_model)
 
     def queue_training(self, stream_model):

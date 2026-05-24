@@ -62,13 +62,23 @@ class PretrainedChronosAdapter(ModelAdapter):
         return TrainingResult(1, self)
 
     def predict(self, data: pd.DataFrame, **kwargs) -> np.ndarray:
-        data = data.values  # Convert DataFrame to numpy array
-        if self.model is None:
-            return np.asarray(data[-1], dtype=np.float32)
-        # Squeeze only if the first dimension is 1
-        if len(data.shape) > 1 and data.shape[0] == 1:
-            data = np.squeeze(data, axis=0)
-        data = data[-self.contextLen:]  # Use the last `contextLen` rows
+        # Chronos forecasts a single univariate series, so we must extract the
+        # numeric 'value' column. Engine passes DataFrames with
+        # [date_time, value, id] (mixed dtypes) — feeding that straight into
+        # torch.tensor() errors. Fall back to the 2nd column on legacy shapes.
+        if isinstance(data, pd.DataFrame):
+            if 'value' in data.columns:
+                series = pd.to_numeric(data['value'], errors='coerce')
+            elif data.shape[1] >= 2:
+                series = pd.to_numeric(data.iloc[:, 1], errors='coerce')
+            else:
+                series = pd.to_numeric(data.iloc[:, 0], errors='coerce')
+            series = series.dropna().to_numpy(dtype=np.float32)
+        else:
+            series = np.asarray(data, dtype=np.float32).reshape(-1)
+        if self.model is None or len(series) == 0:
+            return np.asarray(series[-1:] if len(series) else [0.0], dtype=np.float32)
+        data = series[-self.contextLen:]
         context = torch.tensor(data)
         #t1_start = time.perf_counter_ns()
         forecast = self.model.predict(

@@ -1109,6 +1109,46 @@
                 </div>
             </div>
         </div>
+
+        <!-- Prediction Engine adapter selector -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2">psychology</i>
+                        Prediction Engine
+                    </h5>
+                    <span class="mode-chip status-off" id="adapterCurrentChip">Loading…</span>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info mb-3">
+                        Choose the forecasting model used by this neuron.
+                        <strong>Auto</strong> keeps the historical default (XGBoost → Starter).
+                        Pick <strong>ETS</strong> to try the lighter exponential-smoothing model.
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="adapterSelect">Preferred Adapter</label>
+                            <select class="form-select" id="adapterSelect">
+                                <option value="auto">Auto — XGBoost → Starter (default)</option>
+                                <option value="ets">ETS — Exponential Smoothing (fast, light)</option>
+                                <option value="xgboost">XGBoost — Gradient boosted trees</option>
+                                <option value="starter">Starter — Naive / last-value (minimal resources)</option>
+                            </select>
+                            <div class="mode-port-help mt-2">
+                                Saved choices apply to every running stream immediately and persist across restarts.
+                            </div>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="d-flex align-items-center gap-3 flex-wrap">
+                                <button class="btn btn-primary" id="adapterApplyBtn" onclick="applyAdapter()">Save Adapter</button>
+                                <span id="adapterApplyStatus" class="text-muted"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1427,11 +1467,58 @@
         }
     }
 
+    // -------- Prediction Engine adapter --------
+    async function loadAdapter() {
+        const chip = document.getElementById('adapterCurrentChip');
+        try {
+            const resp = await fetch('/api/settings/adapter');
+            const data = await resp.json();
+            document.getElementById('adapterSelect').value = data.adapter || 'auto';
+            chip.textContent = `Active: ${data.adapter || 'auto'}`;
+            chip.className = 'mode-chip status-public';
+        } catch (err) {
+            chip.textContent = 'Unavailable';
+            chip.className = 'mode-chip status-error';
+        }
+    }
+
+    async function applyAdapter() {
+        const statusEl = document.getElementById('adapterApplyStatus');
+        const btn = document.getElementById('adapterApplyBtn');
+        const choice = document.getElementById('adapterSelect').value;
+        btn.disabled = true;
+        statusEl.className = 'text-info';
+        statusEl.textContent = 'Saving…';
+        try {
+            const resp = await fetch('/api/settings/adapter', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({adapter: choice})
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.status === 'error') {
+                throw new Error(data.message || 'Failed to save adapter');
+            }
+            statusEl.className = 'text-success';
+            const tail = typeof data.scheduled === 'number'
+                ? ` (${data.scheduled} stream${data.scheduled === 1 ? '' : 's'} will switch on next training tick)`
+                : '';
+            statusEl.textContent = `Saved: ${data.adapter}${tail}`;
+            document.getElementById('adapterCurrentChip').textContent = `Active: ${data.adapter}`;
+        } catch (err) {
+            statusEl.className = 'text-danger';
+            statusEl.textContent = err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         renderRelayStatus(currentRelayStatus);
         loadRelays();
         loadCustomRelays();
         loadEvrAddress();
+        loadAdapter();
 
         // Clicking any radio should sync the active card immediately.
         ['off', 'public', 'private'].forEach((value) => {
