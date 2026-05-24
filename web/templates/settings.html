@@ -1123,17 +1123,16 @@
                 <div class="card-body">
                     <div class="alert alert-info mb-3">
                         Choose the forecasting model used by this neuron.
-                        <strong>Auto</strong> keeps the historical default (XGBoost → Starter).
+                        <strong>Default</strong> uses XGBoost.
                         Pick <strong>ETS</strong> to try the lighter exponential-smoothing model.
                     </div>
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label" for="adapterSelect">Preferred Adapter</label>
                             <select class="form-select" id="adapterSelect">
-                                <option value="auto">Auto — XGBoost → Starter (default)</option>
-                                <option value="ets">ETS — Exponential Smoothing (fast, light)</option>
-                                <option value="xgboost">XGBoost — Gradient boosted trees</option>
-                                <option value="starter">Starter — Naive / last-value (minimal resources)</option>
+                                <option value="auto">Default</option>
+                                <option value="ets">ETS (Exponential Smoothing, fast and light)</option>
+                                <option value="xgboost">XGBoost (gradient boosted trees)</option>
                             </select>
                             <div class="mode-port-help mt-2">
                                 Saved choices apply to every running stream immediately and persist across restarts.
