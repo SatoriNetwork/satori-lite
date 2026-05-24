@@ -1170,7 +1170,7 @@
                                 </div>
                                 <ul>
                                     <li>Recommended for most neurons</li>
-                                    <li>Falls back to Starter for streams with under 10 observations</li>
+                                    <li>Matches behavior of prior releases</li>
                                 </ul>
                             </div>
 
@@ -1210,7 +1210,7 @@
 
                     <div class="adapter-actions">
                         <div class="set-help adapter-actions-help">
-                            Changes apply on each stream's next training tick and persist across restarts.
+                            Streams with fewer than 10 observations always use the Starter adapter regardless of this choice. Changes apply on each stream's next training tick and persist across restarts.
                         </div>
                         <div class="adapter-actions-buttons">
                             <span id="adapterApplyStatus" class="adapter-status"></span>
