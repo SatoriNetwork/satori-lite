@@ -33,10 +33,10 @@ class ETSAdapter(ModelAdapter):
         self.uid = uid
         self.modelPath = modelPath
         self._lastSeries: Union[np.ndarray, None] = None
-        self._lastFingerprint: Union[bytes, None] = None
         self.modelError: Union[float, None] = None
-        # Hyperparameters drawn per-adapter-instance. Each new pilot draws
-        # fresh values; the pilot/stable scoring loop keeps good draws.
+        # Initial hyperparameters so predict() works before any fit(). Each
+        # subsequent fit() redraws via _drawFitParams() for ongoing
+        # exploration (the pilot/stable loop filters bad draws).
         self._fitParams: dict = self._drawFitParams()
 
     @staticmethod
@@ -75,27 +75,26 @@ class ETSAdapter(ModelAdapter):
 
     def fit(self, data: pd.DataFrame, **kwargs) -> TrainingResult:
         """
-        ETS refits on every predict (cheap). fit() caches the series and
-        computes a one-step rolling-origin MAE on the tail so the engine's
-        score-based selection has a real number to compare.
-
-        Fast-path: if the input series hashes identical to the previous
-        fit() call, skip the rolling MAE entirely and reuse the cached
-        modelError. This avoids burning CPU when the engine re-trains on
-        an unchanged dataset (e.g. trainingDelay=0 hot loops).
+        Each fit draws fresh hyperparameters and scores them via a one-step
+        rolling-origin MAE backtest on the tail. The pilot/stable loop in
+        StreamModel keeps the good draws and discards the rest, so this is
+        ongoing exploration (mirrors XGB's per-fit behavior).
         """
+        self._fitParams = self._drawFitParams()
         series = self._extractSeries(data)
-        fingerprint = series.tobytes() if series is not None else None
-        if (fingerprint is not None
-                and fingerprint == self._lastFingerprint
-                and self.modelError is not None):
-            return TrainingResult(1, self)
         self._lastSeries = series
-        self._lastFingerprint = fingerprint
         self.modelError = self._rollingMae(series, params=self._fitParams)
         return TrainingResult(1, self)
 
-    def score(self, **kwargs) -> float:
+    def score(self, series: Union[np.ndarray, None] = None, **kwargs) -> float:
+        """
+        If `series` is given, recompute MAE on it using this instance's
+        locked-in hyperparameters. Used by compare() so both pilot and
+        stable are evaluated on the SAME current dataset (otherwise stable
+        carries a stale score from older/smaller data).
+        """
+        if series is not None:
+            return self._rollingMae(series, params=self._fitParams)
         return self.modelError if self.modelError is not None else float('inf')
 
     def compare(self, other: ModelAdapter = None, **kwargs) -> bool:
@@ -108,8 +107,10 @@ class ETSAdapter(ModelAdapter):
                 f'\n  stable model: {type(other).__name__ if other is not None else "None"}',
                 color='green')
             return True
+        # Re-score stable on current series so both are compared on the
+        # same data (mirrors XGB.compare which passes self.testX/testY).
         try:
-            otherScore = other.score()
+            otherScore = other.score(series=self._lastSeries)
         except Exception:
             otherScore = float('inf')
         isImproved = thisScore < otherScore

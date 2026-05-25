@@ -81,7 +81,10 @@ class StarterAdapter(ModelAdapter):
         # lookback window and optional gentle recency weighting only — the
         # intercept is always fit (no-intercept forces lines through origin
         # and produces wildly biased extrapolations for non-zero series).
-        min_lookback = max(10, int(n * 0.8))
+        # Use at least 80% of available rows (and never fewer than 5 since
+        # this branch is gated on n > 4). Caps at n so rng.integers always
+        # has a valid range.
+        min_lookback = max(5, int(n * 0.8))
         lookback = int(rng.integers(min_lookback, n + 1))
         window = starterDataset.iloc[-lookback:]
         x = window.index.values.reshape(-1, 1)
