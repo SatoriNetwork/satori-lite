@@ -1,7 +1,9 @@
 import pandas as pd
+import numpy as np
 from typing import Union
 from collections import namedtuple
 from sklearn.linear_model import LinearRegression
+from satoriengine.veda.adapters._rng import make_rng
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
 
 
@@ -48,31 +50,52 @@ class StarterAdapter(ModelAdapter):
 
     @staticmethod
     def starterEnginePipeline(starterDataset: pd.DataFrame) -> pd.DataFrame:
-        """Starter Engine function for the Satori Engine"""
-        #result = namedtuple(
-        #    "Result",
-        #    ["forecast", "backtest_error", "model_name", "unfitted_forecaster"])
+        """
+        Starter pipeline. Per-call RNG draws principled hyperparameters
+        (lookback window, intercept choice, recency-weight half-life) so
+        different nodes produce diverse but valid forecasts on identical
+        data. The pilot/stable loop filters bad draws over time.
+        """
         if starterDataset is None or len(starterDataset) == 0:
             return pd.DataFrame({
                 "ds": [pd.Timestamp.now() + pd.Timedelta(days=1)],
                 "pred": [0]})
         if len(starterDataset) == 1:
-            # If dataset has only 1 row, return the same value in the forecast dataframe
             value = starterDataset.iloc[0, 1]
             return pd.DataFrame({
                 "ds": [pd.Timestamp.now() + pd.Timedelta(days=1)],
                 "pred": [value]})
-        if len(starterDataset) <= 4:
-            # If dataset has 2-4 rows, return the average of the last 2
-            value = starterDataset.iloc[-2:, 1].mean()
+        rng = make_rng()
+        n = len(starterDataset)
+        if n <= 4:
+            # Always at least the last 2 rows; small jitter into 3-4 when
+            # available. Keeps results near the original mean-of-last-2
+            # behavior while still differing across nodes.
+            tail_k = int(rng.integers(2, n + 1)) if n >= 3 else 2
+            value = starterDataset.iloc[-tail_k:, 1].mean()
             return pd.DataFrame({
                 "ds": [pd.Timestamp.now() + pd.Timedelta(days=1)],
                 "pred": [value]})
-        # If dataset has more than 4 rows, use linear regression
-        x = starterDataset.index.values.reshape(-1, 1)
-        y = starterDataset.iloc[:, 1].values
+        # Narrow ranges since Starter has no scoring loop (compare() always
+        # returns True), so every draw is visible. Diversity comes from the
+        # lookback window and optional gentle recency weighting only — the
+        # intercept is always fit (no-intercept forces lines through origin
+        # and produces wildly biased extrapolations for non-zero series).
+        min_lookback = max(10, int(n * 0.8))
+        lookback = int(rng.integers(min_lookback, n + 1))
+        window = starterDataset.iloc[-lookback:]
+        x = window.index.values.reshape(-1, 1)
+        y = window.iloc[:, 1].values
         model = LinearRegression()
-        model.fit(x, y)
+        # 60% pure OLS, 40% gentle recency weighting with a long half-life
+        # so weights stay near uniform.
+        if rng.random() < 0.6:
+            model.fit(x, y)
+        else:
+            half_life = float(rng.choice([float(lookback), 2.0 * lookback]))
+            ages = (x[-1, 0] - x[:, 0]).astype(float)
+            weights = np.power(0.5, ages / half_life)
+            model.fit(x, y, sample_weight=weights)
         next_time = starterDataset.index[-1] + 1
         predicted_value = model.predict([[next_time]])[0]
         return pd.DataFrame({

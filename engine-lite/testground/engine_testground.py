@@ -177,8 +177,173 @@ def main() -> None:
     print(f'{len(predictions)} prediction(s) collected (no network call):')
     print(json.dumps(predictions, indent=2))
 
+    rule('8. Variance — fit/predict each adapter N times on identical data')
+    variance_check(store)
+
+    rule('9. Backtest — walk-forward accuracy on real engine.db streams')
+    backtest_real_streams()
+
     store.close()
     rule('done')
+
+
+REAL_DB = '/Satori/Engine/db/engine.db'
+
+
+def backtest_real_streams(
+    max_streams: int = 1000,
+    holdout_frac: float = 0.20,
+    min_history: int = 20,
+) -> None:
+    """
+    Read real streams from the neuron's engine.db (read-only path), do a
+    walk-forward backtest with an 80/20 split: hold out the final 20% of
+    each stream's history as the test set, then for each test point fit
+    on the prefix and predict one step ahead.
+
+    Reports per-adapter mean absolute error and MAPE for cross-stream
+    comparability, plus per-stream winner counts.
+    """
+    import time
+    from satoriengine.stream_store import StreamStore
+    from satoriengine.veda.adapters import XgbAdapter, StarterAdapter
+    try:
+        from satoriengine.veda.adapters.ets.ets_model import ETSAdapter
+    except Exception as e:
+        print(f'  ETSAdapter unavailable: {e}')
+        ETSAdapter = None
+
+    if not os.path.isfile(REAL_DB):
+        print(f'  real engine.db not found at {REAL_DB} - skipping backtest')
+        return
+
+    store = StreamStore(REAL_DB)
+    import sqlite3
+    con = sqlite3.connect(f'file:{REAL_DB}?mode=ro', uri=True)
+    rows = con.execute(
+        'SELECT stream_uuid, COUNT(*) AS n FROM observations '
+        'GROUP BY stream_uuid HAVING n >= ? ORDER BY n DESC LIMIT ?',
+        (min_history, max_streams),
+    ).fetchall()
+    con.close()
+
+    adapters: list[tuple[str, type]] = [
+        ('Starter', StarterAdapter),
+        ('XGB', XgbAdapter),
+    ]
+    if ETSAdapter is not None:
+        adapters.append(('ETS', ETSAdapter))
+
+    # Per-adapter accumulators across all (stream, step) pairs.
+    abs_err: dict[str, list[float]] = {name: [] for name, _ in adapters}
+    pct_err: dict[str, list[float]] = {name: [] for name, _ in adapters}
+    wins: dict[str, int] = {name: 0 for name, _ in adapters}
+
+    print(f'  streams={len(rows)}  holdout={int(holdout_frac*100)}% per stream  '
+          f'(min history >= {min_history})')
+
+    t0 = time.time()
+    for stream_idx, (stream_uuid, n) in enumerate(rows, 1):
+        df = store.history(stream_uuid)
+        if len(df) < min_history:
+            continue
+        holdout = max(1, int(len(df) * holdout_frac))
+        per_stream_err: dict[str, list[float]] = {name: [] for name, _ in adapters}
+        for step in range(holdout):
+            test_idx = len(df) - holdout + step
+            prefix = df.iloc[:test_idx].reset_index(drop=True)
+            actual = float(df.iloc[test_idx]['value'])
+            if not np.isfinite(actual):
+                continue
+            scale = max(abs(actual), 1e-9)
+            for name, cls in adapters:
+                try:
+                    adapter = cls()
+                    if name in ('XGB', 'ETS'):
+                        adapter.fit(prefix)
+                    result = adapter.predict(prefix)
+                    if result is None or 'pred' not in result.columns:
+                        continue
+                    pred = float(result['pred'].iloc[0])
+                    if not np.isfinite(pred):
+                        continue
+                    err = abs(pred - actual)
+                    abs_err[name].append(err)
+                    pct_err[name].append(err / scale)
+                    per_stream_err[name].append(err)
+                except Exception:
+                    pass
+        # Per-stream winner: lowest mean abs error across the holdout steps.
+        means = {n: float(np.mean(e)) for n, e in per_stream_err.items() if e}
+        if means:
+            winner = min(means, key=means.get)
+            wins[winner] += 1
+        print(f'  [{stream_idx:3d}/{len(rows)}] {stream_uuid[:8]}  '
+              f'n={n:3d} holdout={holdout:2d}  '
+              + '  '.join(f'{n_}={(np.mean(e) if e else float("nan")):.4g}'
+                          for n_, e in per_stream_err.items()))
+
+    elapsed = time.time() - t0
+    print(f'\n  --- aggregate over {len(rows)} streams, 80/20 walk-forward '
+          f'(took {elapsed:.1f}s) ---')
+    print(f'  {"adapter":<8} {"MAE":>14} {"MAPE":>10} {"wins":>6}')
+    for name, _ in adapters:
+        mae = float(np.mean(abs_err[name])) if abs_err[name] else float('nan')
+        mape = float(np.mean(pct_err[name]) * 100) if pct_err[name] else float('nan')
+        print(f'  {name:<8} {mae:>14.6g} {mape:>9.2f}% {wins[name]:>6}')
+
+    store.close()
+
+
+def variance_check(store: StreamStore, n_runs: int = 8) -> None:
+    """
+    Each adapter draws principled per-fit hyperparameters from a wall-clock
+    RNG (engine-lite/adapters/_rng.py). Running the same adapter N times on
+    the exact same history should yield N different (but valid) predictions,
+    proving that 1000 nodes on identical data will produce a diverse
+    ensemble rather than echoing one another.
+    """
+    import time
+    from satoriengine.veda.adapters import XgbAdapter, StarterAdapter
+    try:
+        from satoriengine.veda.adapters.ets.ets_model import ETSAdapter
+    except Exception as e:
+        print(f'  ETSAdapter unavailable: {e}')
+        ETSAdapter = None
+
+    history = store.history(SYNTHETIC_UUID)
+    print(f'  using synthetic stream ({len(history)} rows), {n_runs} runs per adapter')
+
+    adapters = [('Starter', StarterAdapter), ('XGB', XgbAdapter)]
+    if ETSAdapter is not None:
+        adapters.append(('ETS', ETSAdapter))
+
+    for label, cls in adapters:
+        preds: list[float] = []
+        for _ in range(n_runs):
+            try:
+                adapter = cls()
+                if label in ('XGB', 'ETS'):
+                    adapter.fit(history)
+                result = adapter.predict(history)
+                if result is not None and 'pred' in result.columns:
+                    preds.append(float(result['pred'].iloc[0]))
+            except Exception as e:
+                print(f'  {label} run failed: {e}')
+            # Force the wall-clock microsecond to advance so successive
+            # runs land on distinct seeds (otherwise tight loops can hit
+            # the same microsecond // 100 bucket).
+            time.sleep(0.001)
+        if not preds:
+            print(f'  {label}: no predictions produced')
+            continue
+        arr = np.array(preds)
+        spread = float(arr.max() - arr.min())
+        unique = len(set(round(p, 9) for p in preds))
+        status = 'OK' if unique > 1 else 'IDENTICAL (no variance!)'
+        print(f'  {label:<8} unique={unique}/{n_runs}  spread={spread:.6f}  '
+              f'mean={arr.mean():.4f}  [{status}]')
+        print(f'           samples: {[round(p, 4) for p in preds]}')
 
 
 if __name__ == '__main__':

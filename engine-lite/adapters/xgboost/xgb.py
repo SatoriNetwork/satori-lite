@@ -3,12 +3,12 @@ import os
 import joblib
 import numpy as np
 import pandas as pd
-import datetime
 import psutil
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import train_test_split
 from satorilib.logging import info, debug, warning, error
+from satoriengine.veda.adapters._rng import make_rng
 from satoriengine.veda.adapters.xgboost.preprocess import xgbDataPreprocess, _prepareTimeFeatures
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
 
@@ -39,7 +39,7 @@ class XgbAdapter(ModelAdapter):
         self.fullX: pd.DataFrame = None
         self.fullY: pd.Series = None
         self.split: float = None
-        self.rng = np.random.default_rng(datetime.datetime.now().microsecond // 100)
+        self.rng = make_rng()
 
     def load(self, modelPath: str, **kwargs) -> Union[None, XGBRegressor]:
         """loads the model model from disk if present"""

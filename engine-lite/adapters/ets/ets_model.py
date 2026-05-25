@@ -15,6 +15,7 @@ import warnings
 import joblib
 import numpy as np
 import pandas as pd
+from satoriengine.veda.adapters._rng import make_rng
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
 from satorilib.logging import info, debug
 
@@ -34,6 +35,21 @@ class ETSAdapter(ModelAdapter):
         self._lastSeries: Union[np.ndarray, None] = None
         self._lastFingerprint: Union[bytes, None] = None
         self.modelError: Union[float, None] = None
+        # Hyperparameters drawn per-adapter-instance. Each new pilot draws
+        # fresh values; the pilot/stable scoring loop keeps good draws.
+        self._fitParams: dict = self._drawFitParams()
+
+    @staticmethod
+    def _drawFitParams() -> dict:
+        rng = make_rng()
+        trend = rng.choice(['add', None])
+        damped = bool(rng.integers(0, 2)) if trend == 'add' else False
+        init = rng.choice(['estimated', 'heuristic'])
+        return {
+            'trend': trend,
+            'damped_trend': damped,
+            'initialization_method': init,
+        }
 
     def load(self, modelPath: str = None, **kwargs) -> Union[None, "ModelAdapter"]:
         modelPath = modelPath or self.modelPath
@@ -76,7 +92,7 @@ class ETSAdapter(ModelAdapter):
             return TrainingResult(1, self)
         self._lastSeries = series
         self._lastFingerprint = fingerprint
-        self.modelError = self._rollingMae(series)
+        self.modelError = self._rollingMae(series, params=self._fitParams)
         return TrainingResult(1, self)
 
     def score(self, **kwargs) -> float:
@@ -113,27 +129,28 @@ class ETSAdapter(ModelAdapter):
         series = self._extractSeries(data)
         if series is None or len(series) == 0:
             return None
-        pred = self._forecastOne(series)
+        pred = self._forecastOne(series, params=self._fitParams)
         return self._wrapPrediction(data, pred)
 
     @staticmethod
-    def _forecastOne(series: np.ndarray) -> float:
+    def _forecastOne(series: np.ndarray, params: dict = None) -> float:
         if len(series) < 5 or np.nanstd(series) < 1e-12:
             return float(series[-1])
+        params = params or {'trend': 'add', 'damped_trend': False, 'initialization_method': 'estimated'}
         try:
             from statsmodels.tsa.holtwinters import ExponentialSmoothing
-            # Suppress statsmodels' ConvergenceWarning and related noise —
-            # we fall back to last-value if the fit is unusable anyway.
+            # Suppress statsmodels' ConvergenceWarning and related noise; we
+            # fall back to last-value if the fit is unusable anyway.
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 # use_brute=False skips the grid pre-search; maxiter caps the
-                # L-BFGS-B run so pathological series (very-large magnitudes,
-                # near-constant tails) can't pin the training worker.
+                # L-BFGS-B run so pathological series can't pin the worker.
                 model = ExponentialSmoothing(
                     series,
-                    trend='add',
+                    trend=params['trend'],
+                    damped_trend=params['damped_trend'],
                     seasonal=None,
-                    initialization_method='estimated',
+                    initialization_method=params['initialization_method'],
                 ).fit(
                     optimized=True,
                     use_brute=False,
@@ -147,7 +164,7 @@ class ETSAdapter(ModelAdapter):
             return float(series[-1])
 
     @classmethod
-    def _rollingMae(cls, series: Union[np.ndarray, None], horizon: int = 3) -> float:
+    def _rollingMae(cls, series: Union[np.ndarray, None], horizon: int = 3, params: dict = None) -> float:
         """
         One-step rolling-origin MAE on the last `horizon` points. Default
         horizon=3 is intentionally tight — each iteration runs a full
@@ -161,7 +178,7 @@ class ETSAdapter(ModelAdapter):
         start = max(5, n - horizon)
         errs = []
         for i in range(start, n):
-            pred = cls._forecastOne(series[:i])
+            pred = cls._forecastOne(series[:i], params=params)
             errs.append(abs(pred - float(series[i])))
         if not errs:
             return float('inf')
