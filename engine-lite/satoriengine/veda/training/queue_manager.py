@@ -12,6 +12,13 @@ from satorilib.logging import error, warning, info, debug
 # nothing has changed (e.g. ETS fast-path returning instantly).
 MIN_REQUEUE_DELAY_SECONDS = 5
 
+# Wall-clock cap on a single training iteration. Generous enough that any
+# legitimate fit (XGB seconds, ETS milliseconds) never trips it; catches
+# true hangs (pathological data, stuck I/O, infinite loops in adapter
+# code). On timeout the worker abandons the daemon thread and moves on;
+# the zombie thread cleans up at process exit.
+TRAINING_ITERATION_TIMEOUT_SECONDS = 3600
+
 
 class TrainingQueueManager:
     """Manages training queue with single worker thread."""
@@ -84,19 +91,33 @@ class TrainingQueueManager:
         with self.lock:
             self.current_stream = stream_model.streamUuid
 
+        uuid8 = stream_model.streamUuid[:8]
         try:
-            # Perform training (single iteration)
-            stream_model._single_training_iteration()
-        except Exception as e:
-            error(f"Training failed for {stream_model.streamUuid[:8]}: {e}")
+            # Run the iteration in a daemon thread so a hang can't pin
+            # the whole queue. On timeout the thread is abandoned
+            # (continues running in background) and we move on.
+            captured_exc: list = [None]
+            def _runner():
+                try:
+                    stream_model._single_training_iteration()
+                except Exception as e:
+                    captured_exc[0] = e
+            t = threading.Thread(
+                target=_runner,
+                daemon=True,
+                name=f"fit-{uuid8}")
+            t.start()
+            t.join(timeout=TRAINING_ITERATION_TIMEOUT_SECONDS)
+            if t.is_alive():
+                error(f"Training timed out for {uuid8} after "
+                      f"{TRAINING_ITERATION_TIMEOUT_SECONDS}s "
+                      f"(adapter={stream_model.adapter.__name__}); "
+                      f"abandoning thread, continuing queue")
+            elif captured_exc[0] is not None:
+                error(f"Training failed for {uuid8}: {captured_exc[0]}")
         finally:
             with self.lock:
                 self.current_stream = None
-
-            # Re-queue for next iteration after the user-configured delay,
-            # but never hot-loop — enforce a minimum so trainingDelay=0
-            # (or accidental misconfig) can't pin a CPU spinning through
-            # no-op fast-path fits.
             delay = max(stream_model.trainingDelay, MIN_REQUEUE_DELAY_SECONDS)
             time.sleep(delay)
             self.queue_training(stream_model)
