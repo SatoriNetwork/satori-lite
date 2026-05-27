@@ -408,13 +408,14 @@ class Engine:
                 self.threads.remove(thread)
         debug(f'prediction thread count: {len(self.threads)}')
 
-    def queuePrediction(self, stream_uuid: str, stream_name: str, value: str, observed_at: str, hash_val: str):
+    def queuePrediction(self, stream_uuid: str, stream_name: str, value: str, observed_at: str, hash_val: str, t1_value: str = None):
         """Add a prediction to the queue for batch submission."""
         with self.predictionQueueLock:
             self.predictionQueue.append({
                 'stream_uuid': stream_uuid,
                 'stream_name': stream_name,
                 'value': value,
+                't1_value': t1_value,
                 'observed_at': observed_at,
                 'hash': hash_val
             })
@@ -1034,6 +1035,7 @@ class StreamModel:
                         'stream_uuid': self.streamUuid,
                         'stream_name': stream_name,
                         'value': predictionValue,
+                        't1_value': getattr(self, '_t1_value', None),
                         'observed_at': observationTime,
                         'hash': observationHash
                     }
@@ -1098,6 +1100,7 @@ class StreamModel:
                 if isinstance(firstForecast, pd.DataFrame):
                     firstValue = StreamForecast.firstPredictionOf(firstForecast)
                     debug(f"[AUTOREGRESSION] First prediction: {firstValue}", color='cyan')
+                    self._t1_value = str(firstValue)
 
                     augmentedData = self._createAugmentedData(firstForecast)
                     debug(f"[AUTOREGRESSION] Augmented data size: {len(augmentedData)} rows (original: {len(self.data)})", color='cyan')

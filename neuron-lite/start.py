@@ -4202,6 +4202,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         stream_uuid=pred['stream_uuid'],
                         stream_name=pred['stream_name'],
                         value=pred['value'],
+                        t1_value=pred.get('t1_value'),
                         observed_at=pred['observed_at'],
                         hash_val=pred['hash']
                     )
