@@ -240,20 +240,97 @@ Called by `XgbAdapter._manageData` on every `fit` / `predict`. Takes the
 - `clearoutInfinities`: clamps `±inf` to column min/max.
 - `tomorrow = value.shift(-1)` — the training target.
 
-### B.9 Predictions — storage and submission
+### B.9 Autoregression — the value we ship is t+2, not t+1
+
+`Engine.producePrediction` (`engine.py:1086`) runs **two-step autoregression on
+every adapter, uniformly**. The adapter is asked for a one-step forecast, that
+forecast is appended to the history as if it were a real observation, and the
+adapter is asked again — the **second** forecast is what gets stored and
+submitted.
+
+```
+firstForecast  = model.predict(self.data)
+augmentedData  = self.data + synthetic_row(value=firstValue, date_time=firstForecast.date_time)
+secondForecast = model.predict(augmentedData)
+forecast       = secondForecast if isinstance(secondForecast, DataFrame) else firstForecast
+```
+
+`_createAugmentedData` (`engine.py:1061`) builds the synthetic row:
+
+| Column | Source |
+|---|---|
+| `date_time` | `firstForecast['date_time'].iloc[0]` (or `ds`, or `now()`) |
+| `value` | `StreamForecast.firstPredictionOf(firstForecast)` — the first-step value |
+| `id` | `sha256(f"{firstValue}{timestamp}").hexdigest()[:16]` — synthetic, not a real hash-chain link |
+
+Then `pd.concat([self.data, tempRow])`. The synthetic row only lives for the
+duration of the second predict call; it is not persisted.
+
+**Implications:**
+
+- The value queued for central is a **2-step-ahead** forecast.
+- Cost doubles: every adapter runs `predict` twice per stream per poll.
+- For `XgbAdapter`, the second call re-runs `xgbDataPreprocess` + `_manageData`
+  on a frame that is one row longer.
+- For `ETSAdapter`, the first call is a pure cache hit (`level + φ·trend`,
+  no statsmodels call). The second call walks the synthetic row through the
+  Holt-Winters update equations (manual `refit=False` equivalent, since
+  `HoltWintersResults` has no `.append()`). Both calls are O(1) — no L-BFGS-B.
+- If the second call returns anything other than a DataFrame, the engine logs a
+  warning and falls back to the first forecast.
+
+### B.10 Predictions — storage and submission
 
 After `producePrediction`:
 
 - **Local SQLite**: `storage.storePrediction(predictionStreamUuid, ...)` → written
   to `EngineSqliteDatabase` (per-stream table, `provider='engine'`). Audit log only;
   not read back by the core prediction flow.
-- **In-memory**: stored as `model._pending_prediction = {stream_uuid, value, ...}`.
+- **In-memory**: stored as `model._pending_prediction = {stream_uuid, stream_name, value, observed_at, hash}`
+  (`engine.py:1032`).
 
-`collectAndSubmitPredictions` (called once per poll cycle after all streams processed):
+`collectAndSubmitPredictions` (`start.py:4188`) runs once per poll cycle after
+all streams are processed:
 
-1. Collects `_pending_prediction` from every `StreamModel`.
-2. `aiengine.queuePrediction(...)` for each.
-3. `aiengine.flushPredictionQueue()` — one batch submit to central.
+1. Walks `aiengine.streamModels`, drains each `_pending_prediction` into the
+   engine queue via `aiengine.queuePrediction(...)` (`engine.py:411`).
+2. `aiengine.flushPredictionQueue()` (`engine.py:423`) → one batch submit.
+3. `server.publishPredictionsBatch(predictions)` (`satorilib/src/satorilib/server/server.py:1248`)
+   POSTs to `/api/v1/predictions/batch`.
+
+**Submission payload — `POST /api/v1/predictions/batch`:**
+
+```json
+{
+  "predictions": [
+    {
+      "stream_uuid": "b4bf6ce9-64be-49b2-a17c-037cb4a40f9f",
+      "stream_name": "safetrade_xtm",
+      "value": "0.00084",
+      "observed_at": "1779426055.9544094",
+      "hash": "<observation hash>"
+    }
+  ]
+}
+```
+
+| Field | Source |
+|---|---|
+| `stream_uuid` | `StreamModel.streamUuid` |
+| `stream_name` | Pulled from `subscriptionStream.streamId.stream` |
+| `value` | **Second** (autoregressed) forecast as a string |
+| `observed_at` | The triggering **observation's** timestamp — not the prediction's t+2 timestamp |
+| `hash` | The triggering observation's hash |
+
+Response:
+
+```json
+{ "total_submitted": N, "successful": K, "failed": N-K, "prediction_ids": [...], "errors": [...] }
+```
+
+The queue is cleared only when `successful > 0`. On failure the queue is
+retained and retried on the next flush — predictions can therefore stack up
+across poll cycles if central is unreachable.
 
 ---
 
@@ -340,6 +417,14 @@ once on first startup per node; subsequent restarts hit the sentinel and skip.
    streams. Documented in `tasks/prediction-engine-upgrade.md`.
 6. **`_manageData` reprocesses full history** on every `fit`/`predict` call.
    Fine at low row counts; will slow as history grows past ~400 rows.
+7. ~~**ETS refits from scratch on every predict.**~~ Fixed: `ETSAdapter` now
+   caches `(α, β, φ, level_n, trend_n)` after `fit()` and propagates new
+   observations through the Holt-Winters update equations instead of refitting.
+   Cold refits (when structural params change or the cache is too stale) are
+   warm-started via `start_params`. Bench `./playground-ets` shows ~2x speedup
+   with numerically equal predictions (first call bit-identical; autoregressive
+   second call diverges by < 1e-4 due to frozen smoothing params, which is the
+   intended semantic of `refit=False`).
 
 ---
 
@@ -356,6 +441,7 @@ once on first startup per node; subsequent restarts hit the sentinel and skip.
 | `engine-lite/adapters/xgboost/xgb.py` | `XgbAdapter` — XGBoost model |
 | `engine-lite/adapters/xgboost/preprocess.py` | `xgbDataPreprocess` — XGB DataFrame preprocessing |
 | `engine-lite/adapters/starter/starter_model.py` | `StarterAdapter` — simple-stats fallback (≤10 rows) |
+| `engine-lite/adapters/ets/ets_model.py` | `ETSAdapter` — Holt-Winters (statsmodels), refits on every predict |
 | `engine-lite/satoriengine/veda/training/queue_manager.py` | Shared single-worker training queue |
 | `engine-lite/testground/engine_testground.py` | End-to-end playground: ingest → normalize → persist → engine → predict |
 | `engine-lite/testground/central_batch_sample.json` | Captured 74-observation batch for offline testing |

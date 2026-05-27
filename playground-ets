@@ -1,0 +1,26 @@
+#!/bin/bash
+# Run the ETS warm-start / cached-fit A/B bench in a one-off dev container.
+#
+# Compares the new cached ETSAdapter against a frozen copy of the original
+# refit-from-scratch implementation, on real streams from engine-lite/db/engine.db.
+#
+# Usage:
+#   ./playground-ets
+set -euo pipefail
+
+IMAGE="satorinet/satori-lite:dev"
+REPO="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="/Satori/Engine/testground/ets_warmstart_bench.py"
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    echo "Error: image '$IMAGE' not found."
+    echo "Run ./satori-dev once to build it, then retry."
+    exit 1
+fi
+
+exec docker run --rm \
+    -v "$REPO/engine-lite:/Satori/Engine" \
+    -v "$REPO/../satorilib/src:/Satori/Lib" \
+    -e PYTHONPATH="/Satori/Lib:/Satori/Engine" \
+    "$IMAGE" \
+    python "$SCRIPT" "$@"
