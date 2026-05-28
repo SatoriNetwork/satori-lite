@@ -165,20 +165,21 @@ class WalletManager:
         """
         try:
             if not self.isConnected():
-                # Try to reconnect if needed
-                try:
-                    self._electrumx.reconnect()
-                except Exception as e:
-                    logging.debug(f"Failed to reconnect to Electrumx: {e}")
-                    self._electrumx = None  # Force new connection creation
+                if self._electrumx is not None:
+                    try:
+                        if not self._electrumx.reconnect():
+                            self._electrumx = None
+                    except Exception as e:
+                        logging.debug(f"Failed to reconnect to Electrumx: {e}")
+                        self._electrumx = None
 
             # Create new connection if needed
             if not self._electrumx:
                 self._electrumx = Electrumx.create(
-                hostPorts=config.get().get('electrumx servers'),
-                persistent=self._persistent)
+                    hostPorts=config.get().get('electrumx servers'),
+                    persistent=self._persistent)
 
-            if self.isConnected():
+            if self._electrumx and self.isConnected():
                 # Update wallet and vault with current electrumx instance
                 if self._wallet:
                     self._wallet.electrumx = self._electrumx
