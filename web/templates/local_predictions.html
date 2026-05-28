@@ -519,6 +519,152 @@
         font-size: 0.8rem;
     }
 
+    /* ── Prediction engine card (moved from /settings) ───── */
+    .mode-chip {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        padding: 0.3rem 0.7rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        background: rgba(255,255,255,0.03);
+    }
+    .mode-chip::before {
+        content: '';
+        width: 6px; height: 6px; border-radius: 50%;
+        background: currentColor;
+        opacity: 0.85;
+    }
+    .mode-chip.status-off  { border-color: var(--border-color); color: var(--text-muted); }
+    .mode-chip.status-public {
+        color: #22c55e;
+        border-color: rgba(34, 197, 94, 0.4);
+        background: rgba(34, 197, 94, 0.1);
+    }
+    .mode-chip.status-error {
+        color: #ef4444;
+        border-color: rgba(220, 53, 69, 0.4);
+        background: rgba(220, 53, 69, 0.1);
+    }
+    .eng-label {
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--text-muted);
+        margin-bottom: 0.4rem;
+    }
+    .eng-help {
+        font-size: 0.73rem;
+        color: var(--text-muted);
+        margin: 0;
+        line-height: 1.35;
+        max-width: 28rem;
+    }
+    .mode-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.85rem;
+        align-items: stretch;
+    }
+    .mode-grid > .mode-card { height: 100%; }
+    @media (max-width: 960px) { .mode-grid { grid-template-columns: 1fr; } }
+    .mode-card {
+        position: relative;
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 1rem 1.05rem;
+        background: var(--bg-card);
+        height: 100%;
+        cursor: pointer;
+        transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+        overflow: hidden;
+    }
+    .mode-card::after {
+        content: '';
+        position: absolute;
+        inset: -40% -40% auto auto;
+        width: 220px; height: 220px;
+        background: radial-gradient(closest-side, rgba(90,90,255,0.18), transparent 70%);
+        opacity: 0;
+        transition: opacity 0.25s ease;
+        pointer-events: none;
+    }
+    .mode-card:hover { transform: translateY(-2px); border-color: var(--border-color-focus); }
+    .mode-card.active {
+        border-color: rgba(90,90,255,0.5);
+        background: linear-gradient(140deg, color-mix(in oklab, var(--accent-primary) 12%, var(--bg-card)) 0%, var(--bg-card) 60%);
+        box-shadow: 0 0 0 1px rgba(90,90,255,0.2);
+    }
+    .mode-card.active::after { opacity: 1; }
+    .mode-card .mode-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 0.75rem;
+    }
+    .mode-card .mode-title   { font-size: 0.98rem; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); margin-bottom: 0.25rem; }
+    .mode-card .mode-subtitle { font-size: 0.77rem; color: var(--text-secondary); }
+    .mode-card .mode-radio {
+        width: 18px; height: 18px;
+        border-radius: 50%;
+        border: 2px solid var(--border-color);
+        background: transparent;
+        flex-shrink: 0;
+        position: relative;
+        cursor: pointer;
+        transition: border-color 0.15s ease;
+    }
+    .mode-card ul { padding-left: 1.1rem; margin: 0; font-size: 0.78rem; color: var(--text-secondary); }
+    .mode-card ul li + li { margin-top: 0.2rem; }
+    .mode-card input[type="radio"] { display: none; }
+    .mode-card.active .mode-radio {
+        border-color: var(--accent-primary);
+        background: var(--accent-primary);
+        box-shadow: 0 0 0 3px rgba(90, 90, 255, 0.25);
+    }
+    .mode-card.active .mode-radio::after {
+        content: '';
+        position: absolute;
+        inset: 3px;
+        border-radius: 50%;
+        background: #fff;
+    }
+    .adapter-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        margin-top: 1.1rem;
+        padding-top: 0.95rem;
+        border-top: 1px solid var(--border-color);
+    }
+    .adapter-actions-buttons { display: flex; align-items: center; gap: 0.85rem; margin-left: auto; }
+    .adapter-status { font-size: 0.82rem; color: var(--text-muted); min-height: 1em; }
+    @media (max-width: 720px) {
+        .adapter-actions { flex-direction: column; align-items: flex-start; }
+        .adapter-actions-buttons { margin-left: 0; width: 100%; justify-content: space-between; }
+    }
+    .eng-save-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.5rem 0.9rem;
+        border-radius: 9px;
+        border: none;
+        background: var(--accent-gradient);
+        color: #fff;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: filter 0.15s ease, transform 0.15s ease;
+    }
+    .eng-save-btn:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); }
+    .eng-save-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+    .eng-save-btn .material-icons { font-size: 16px; }
+
     /* Entrance animation */
     .dashboard-widget-col {
         animation: lp-fade-up 0.38s cubic-bezier(.2,.8,.2,1) both;
@@ -622,6 +768,73 @@
                         <span class="text-muted">Select a stream to view performance.</span>
                     </div>
                     <div class="alert alert-secondary" id="statusBox">Loading local predictions...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prediction engine selector -->
+        <div class="col-12 dashboard-widget-col" data-widget-id="lp_engine">
+            <div class="card">
+                <div class="card-header lp-card-head">
+                    <h5><i class="material-icons">psychology</i>Prediction engine</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="mode-chip status-off" id="adapterCurrentChip">Loading…</span>
+                        <span class="drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <label class="eng-label">Forecasting model</label>
+                    <div class="mode-grid">
+                        <div class="mode-card" id="adapterCardEts" onclick="if(event.target.tagName!=='INPUT') document.getElementById('adapterEts').click()">
+                            <div class="mode-head">
+                                <div>
+                                    <div class="mode-title">ETS</div>
+                                    <div class="mode-subtitle">Start predicting right away</div>
+                                </div>
+                                <span class="mode-radio"></span>
+                                <input class="form-check-input" type="radio" name="adapterChoice" id="adapterEts" value="ets">
+                            </div>
+                            <ul>
+                                <li>Accurate from the very first prediction</li>
+                                <li>No warmup time needed</li>
+                                <li>Great for streams with steady, predictable patterns</li>
+                                <li>Works well even with very little historical data</li>
+                            </ul>
+                            <div style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border-color);font-size:0.74rem;color:var(--text-muted);">
+                                <strong style="color:var(--text-secondary);">Keep in mind:</strong> Less effective on streams with sudden shifts or complex irregular behaviour.
+                            </div>
+                        </div>
+                        <div class="mode-card" id="adapterCardXgb" onclick="if(event.target.tagName!=='INPUT') document.getElementById('adapterXgb').click()">
+                            <div class="mode-head">
+                                <div>
+                                    <div class="mode-title">XGBoost <span style="font-size:0.7rem;font-weight:600;color:#5a5aff;background:rgba(90,90,255,0.12);border-radius:999px;padding:0.1rem 0.5rem;vertical-align:middle;">Recommended</span></div>
+                                    <div class="mode-subtitle">Gets smarter the longer it runs</div>
+                                </div>
+                                <span class="mode-radio"></span>
+                                <input class="form-check-input" type="radio" name="adapterChoice" id="adapterXgb" value="xgboost">
+                            </div>
+                            <ul>
+                                <li>Learns your streams over time</li>
+                                <li>Accuracy improves with every prediction</li>
+                                <li>Handles complex and irregular patterns well</li>
+                                <li>Stronger when you have lots of historical data</li>
+                            </ul>
+                            <div style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border-color);font-size:0.74rem;color:var(--text-muted);">
+                                <strong style="color:var(--text-secondary);">Keep in mind:</strong> Needs time to learn. Early predictions may be less accurate until enough data builds up.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="adapter-actions">
+                        <div class="adapter-actions-buttons">
+                            <span id="adapterApplyStatus" class="adapter-status"></span>
+                            <button class="eng-save-btn" id="adapterApplyBtn" onclick="applyAdapter()" type="button">
+                                <i class="material-icons">check_circle</i>
+                                Save
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1411,6 +1624,74 @@ async function loadPerformance() {
     }
 }
 
+// ── Prediction engine adapter ────────────────────────────
+const ADAPTER_CARDS = {ets: 'adapterCardEts', xgboost: 'adapterCardXgb'};
+const ADAPTER_LABELS = {ets: 'ETS', xgboost: 'XGBoost'};
+
+function syncAdapterCardActive() {
+    const selected = document.querySelector('input[name="adapterChoice"]:checked');
+    const value = selected ? selected.value : 'auto';
+    Object.entries(ADAPTER_CARDS).forEach(([key, id]) => {
+        document.getElementById(id).classList.toggle('active', key === value);
+    });
+}
+
+function selectAdapter(value) {
+    const resolved = value === 'auto' ? 'xgboost' : value;
+    const radio = document.getElementById({ets: 'adapterEts', xgboost: 'adapterXgb'}[resolved]);
+    if (radio) radio.checked = true;
+    syncAdapterCardActive();
+}
+
+async function loadAdapter() {
+    const chip = document.getElementById('adapterCurrentChip');
+    try {
+        const resp = await fetch('/api/settings/adapter');
+        const data = await resp.json();
+        const current = data.adapter || 'auto';
+        const resolved = current === 'auto' ? 'xgboost' : current;
+        selectAdapter(resolved);
+        chip.textContent = `Active: ${ADAPTER_LABELS[resolved] || resolved}`;
+        chip.className = 'mode-chip status-public';
+    } catch (err) {
+        chip.textContent = 'Unavailable';
+        chip.className = 'mode-chip status-error';
+    }
+}
+
+async function applyAdapter() {
+    const statusEl = document.getElementById('adapterApplyStatus');
+    const btn = document.getElementById('adapterApplyBtn');
+    const selected = document.querySelector('input[name="adapterChoice"]:checked');
+    const choice = selected ? selected.value : 'auto';
+    btn.disabled = true;
+    statusEl.style.color = 'var(--text-muted)';
+    statusEl.textContent = 'Saving…';
+    try {
+        const resp = await fetch('/api/settings/adapter', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({adapter: choice})
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.status === 'error') {
+            throw new Error(data.message || 'Failed to save adapter');
+        }
+        const label = ADAPTER_LABELS[data.adapter] || data.adapter;
+        const tail = typeof data.scheduled === 'number'
+            ? ` · ${data.scheduled} stream${data.scheduled === 1 ? '' : 's'} queued`
+            : '';
+        statusEl.style.color = 'var(--accent-primary)';
+        statusEl.textContent = `Saved · ${label}${tail}`;
+        document.getElementById('adapterCurrentChip').textContent = `Active: ${label}`;
+    } catch (err) {
+        statusEl.style.color = '#ef4444';
+        statusEl.textContent = err.message;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     applyLocalPredictionsLayout();
     initLocalPredictionsDragDrop();
@@ -1434,6 +1715,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('exportCsvBtn').addEventListener('click', exportCurrentTableToCsv);
     document.getElementById('streamSearchInput').addEventListener('input', (event) => {
         renderStreamDropdownOptions(event.target.value || '');
+    });
+
+    loadAdapter();
+    ['adapterEts', 'adapterXgb'].forEach((id) => {
+        const radio = document.getElementById(id);
+        if (radio) radio.addEventListener('change', syncAdapterCardActive);
     });
 
     await loadStreams();

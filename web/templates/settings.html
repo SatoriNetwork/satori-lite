@@ -411,38 +411,6 @@
         .mode-grid { grid-template-columns: 1fr; }
     }
 
-    /* ── Prediction-engine action bar ────────────────────── */
-    .adapter-actions {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 1rem;
-        margin-top: 1.1rem;
-        padding-top: 0.95rem;
-        border-top: 1px solid var(--border-color);
-    }
-    .adapter-actions-help {
-        margin: 0;
-        max-width: 28rem;
-    }
-    .adapter-actions-buttons {
-        display: flex;
-        align-items: center;
-        gap: 0.85rem;
-        margin-left: auto;
-    }
-    .adapter-status {
-        font-size: 0.82rem;
-        color: var(--text-muted);
-        min-height: 1em;
-    }
-    @media (max-width: 720px) {
-        .adapter-actions {
-            flex-direction: column;
-            align-items: flex-start;
-        }
-        .adapter-actions-buttons { margin-left: 0; width: 100%; justify-content: space-between; }
-    }
     .mode-card {
         position: relative;
         border: 1px solid var(--border-color);
@@ -1145,84 +1113,6 @@
             </div>
         </div>
 
-        <!-- Prediction Engine adapter selector -->
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header set-card-head">
-                    <h5><i class="material-icons">psychology</i>Prediction engine</h5>
-                    <div class="set-head-actions">
-                        <span class="mode-chip status-off" id="adapterCurrentChip">Loading…</span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="set-section">
-                        <label class="set-label">Forecasting model</label>
-                        <div class="mode-grid">
-                            <!-- Default -->
-                            <div class="mode-card" id="adapterCardAuto" onclick="document.getElementById('adapterAuto').click()">
-                                <div class="mode-head">
-                                    <div>
-                                        <div class="mode-title">Default</div>
-                                        <div class="mode-subtitle">XGBoost on every stream</div>
-                                    </div>
-                                    <span class="mode-radio"></span>
-                                    <input class="form-check-input" type="radio" name="adapterChoice" id="adapterAuto" value="auto">
-                                </div>
-                                <ul>
-                                    <li>Recommended for most neurons</li>
-                                    <li>Matches behavior of prior releases</li>
-                                </ul>
-                            </div>
-
-                            <!-- ETS -->
-                            <div class="mode-card" id="adapterCardEts" onclick="if(event.target.tagName!=='INPUT') document.getElementById('adapterEts').click()">
-                                <div class="mode-head">
-                                    <div>
-                                        <div class="mode-title">ETS</div>
-                                        <div class="mode-subtitle">Exponential smoothing, lighter and faster</div>
-                                    </div>
-                                    <span class="mode-radio"></span>
-                                    <input class="form-check-input" type="radio" name="adapterChoice" id="adapterEts" value="ets">
-                                </div>
-                                <ul>
-                                    <li>No persistent weights (refits each cycle)</li>
-                                    <li>Lower CPU and memory than gradient boosting</li>
-                                </ul>
-                            </div>
-
-                            <!-- XGBoost -->
-                            <div class="mode-card" id="adapterCardXgb" onclick="if(event.target.tagName!=='INPUT') document.getElementById('adapterXgb').click()">
-                                <div class="mode-head">
-                                    <div>
-                                        <div class="mode-title">XGBoost</div>
-                                        <div class="mode-subtitle">Gradient boosted trees</div>
-                                    </div>
-                                    <span class="mode-radio"></span>
-                                    <input class="form-check-input" type="radio" name="adapterChoice" id="adapterXgb" value="xgboost">
-                                </div>
-                                <ul>
-                                    <li>Persistent booster weights saved to disk</li>
-                                    <li>Strong on structured, multi-feature streams</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="adapter-actions">
-                        <div class="set-help adapter-actions-help">
-                            Streams with fewer than 10 observations always use the Starter adapter regardless of this choice. Changes apply on each stream's next training tick and persist across restarts.
-                        </div>
-                        <div class="adapter-actions-buttons">
-                            <span id="adapterApplyStatus" class="adapter-status"></span>
-                            <button class="set-btn set-btn-primary" id="adapterApplyBtn" onclick="applyAdapter()" type="button">
-                                <i class="material-icons">check_circle</i>
-                                Save adapter
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -1541,78 +1431,11 @@
         }
     }
 
-    // -------- Prediction Engine adapter --------
-    const ADAPTER_CARDS = {auto: 'adapterCardAuto', ets: 'adapterCardEts', xgboost: 'adapterCardXgb'};
-    const ADAPTER_LABELS = {auto: 'Default', ets: 'ETS', xgboost: 'XGBoost'};
-
-    function syncAdapterCardActive() {
-        const selected = document.querySelector('input[name="adapterChoice"]:checked');
-        const value = selected ? selected.value : 'auto';
-        Object.entries(ADAPTER_CARDS).forEach(([key, id]) => {
-            document.getElementById(id).classList.toggle('active', key === value);
-        });
-    }
-
-    function selectAdapter(value) {
-        const radio = document.getElementById({auto: 'adapterAuto', ets: 'adapterEts', xgboost: 'adapterXgb'}[value]);
-        if (radio) radio.checked = true;
-        syncAdapterCardActive();
-    }
-
-    async function loadAdapter() {
-        const chip = document.getElementById('adapterCurrentChip');
-        try {
-            const resp = await fetch('/api/settings/adapter');
-            const data = await resp.json();
-            const current = data.adapter || 'auto';
-            selectAdapter(current);
-            chip.textContent = `Active: ${ADAPTER_LABELS[current] || current}`;
-            chip.className = 'mode-chip status-public';
-        } catch (err) {
-            chip.textContent = 'Unavailable';
-            chip.className = 'mode-chip status-error';
-        }
-    }
-
-    async function applyAdapter() {
-        const statusEl = document.getElementById('adapterApplyStatus');
-        const btn = document.getElementById('adapterApplyBtn');
-        const selected = document.querySelector('input[name="adapterChoice"]:checked');
-        const choice = selected ? selected.value : 'auto';
-        btn.disabled = true;
-        statusEl.style.color = 'var(--text-muted)';
-        statusEl.textContent = 'Saving…';
-        try {
-            const resp = await fetch('/api/settings/adapter', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({adapter: choice})
-            });
-            const data = await resp.json();
-            if (!resp.ok || data.status === 'error') {
-                throw new Error(data.message || 'Failed to save adapter');
-            }
-            const label = ADAPTER_LABELS[data.adapter] || data.adapter;
-            const tail = typeof data.scheduled === 'number'
-                ? ` · ${data.scheduled} stream${data.scheduled === 1 ? '' : 's'} queued`
-                : '';
-            statusEl.style.color = 'var(--accent-primary)';
-            statusEl.textContent = `Saved · ${label}${tail}`;
-            document.getElementById('adapterCurrentChip').textContent = `Active: ${label}`;
-        } catch (err) {
-            statusEl.style.color = '#ef4444';
-            statusEl.textContent = err.message;
-        } finally {
-            btn.disabled = false;
-        }
-    }
-
     document.addEventListener('DOMContentLoaded', () => {
         renderRelayStatus(currentRelayStatus);
         loadRelays();
         loadCustomRelays();
         loadEvrAddress();
-        loadAdapter();
 
         // Clicking any radio should sync the active card immediately.
         ['off', 'public', 'private'].forEach((value) => {
@@ -1620,12 +1443,6 @@
             if (radio) {
                 radio.addEventListener('change', () => updateModeCards(value));
             }
-        });
-
-        // Same pattern for the adapter selector.
-        ['adapterAuto', 'adapterEts', 'adapterXgb'].forEach((id) => {
-            const radio = document.getElementById(id);
-            if (radio) radio.addEventListener('change', syncAdapterCardActive);
         });
     });
 
