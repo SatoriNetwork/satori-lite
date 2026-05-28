@@ -127,6 +127,13 @@
         margin-bottom: 0.5rem;
     }
     .stk-section-label .material-icons { font-size: 13px; opacity: 0.55; vertical-align: middle; }
+    .stk-section-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+    }
+    .stk-section-label-row .stk-section-label { margin-bottom: 0; }
     .stk-section + .stk-section {
         margin-top: 1.2rem;
         padding-top: 1.2rem;
@@ -332,6 +339,12 @@
     .stk-btn-ghost {
         background: transparent;
     }
+    .stk-btn-sm {
+        padding: 0.3rem 0.65rem;
+        font-size: 0.76rem;
+        border-radius: 7px;
+    }
+    .stk-btn-sm .material-icons { font-size: 14px; }
 
     /* ── Pool-commission slider (minimal, number-first) ──── */
     .stk-commission {
@@ -722,7 +735,13 @@
                     </div>
 
                     <div class="stk-section">
-                        <label class="stk-section-label" for="poolCommission">Pool commission fee</label>
+                        <div class="stk-section-label-row">
+                            <label class="stk-section-label" for="poolCommission">Pool commission fee</label>
+                            <button type="button" class="stk-btn stk-btn-danger stk-btn-sm" id="closePoolBtn" onclick="leavePool()">
+                                <i class="material-icons">do_not_disturb_on</i>
+                                Close pool
+                            </button>
+                        </div>
                         <span class="d-inline-block w-100" id="poolCommissionWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
                             <div class="stk-commission">
                                 <div class="stk-commission-value">
@@ -1119,6 +1138,21 @@
         if (result) {
             const msg = commission === null || commission === 0 ? 'Pool closed' : `Pool open with ${commission}% commission fee`;
             showToast(msg);
+            await loadPoolCommission();
+            await loadAvailablePools();
+            updateMutualExclusionUI();
+        }
+    }
+
+    async function leavePool() {
+        const commissionInput = document.getElementById('poolCommission');
+        commissionInput.value = '';
+        const range = document.getElementById('poolCommissionRange');
+        range.value = 0;
+        range.style.setProperty('--stk-comm-fill', '0%');
+        const result = await apiCall('/pool/toggle-open', 'POST', { commission: null });
+        if (result) {
+            showToast('Pool commission cleared');
             await loadPoolCommission();
             await loadAvailablePools();
             updateMutualExclusionUI();
