@@ -43,10 +43,10 @@ COPY web /Satori/web
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /Satori/requirements.txt && \
+    pip install --no-cache-dir --retries 10 --timeout 120 -r /Satori/requirements.txt && \
     # Ensure ETH address derivation dependency is available at runtime.
-    pip install --no-cache-dir coincurve && \
-    pip install pytest
+    pip install --no-cache-dir --retries 10 --timeout 120 coincurve && \
+    pip install --retries 10 --timeout 120 pytest
 
 COPY tests /Satori/tests
 

@@ -31,7 +31,7 @@ RUN git clone --depth 1 https://github.com/hoytech/strfry.git /tmp/strfry && \
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /tmp/requirements.txt
+    pip install --no-cache-dir --retries 10 --timeout 120 -r /tmp/requirements.txt
 
 # Strip debug symbols from compiled extensions to reclaim ~150-300 MB.
 RUN find /usr/local/lib/python3.10/site-packages -name '*.so' \
