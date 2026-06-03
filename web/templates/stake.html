@@ -958,13 +958,25 @@
         if (!pill || !label) return;
         pill.classList.remove('is-pool');
         const input = document.getElementById('poolCommission');
+        // Empty input ('') === commission null === not a pool.
+        // '0' === a pool that charges 0% (still a pool, just not accepting new lenders).
         const raw = input && input.value !== '' ? parseInt(input.value) : null;
-        if (raw && raw > 0) {
+        const isPool = raw !== null && !isNaN(raw);
+        if (!isPool) {
+            // null commission: not registered as a pool at all
+            label.textContent = 'Not a pool';
+        } else if (raw > 0) {
+            // open pool, listed and accepting new lenders
             pill.classList.add('is-pool');
             label.textContent = `Pool open · ${raw}% fee`;
         } else {
-            label.textContent = 'Pool closed';
+            // commission 0: still a pool, but closed to new lenders
+            pill.classList.add('is-pool');
+            label.textContent = 'Pool · 0% fee';
         }
+        // "Close pool" only makes sense when you actually are a pool.
+        const closeBtn = document.getElementById('closePoolBtn');
+        if (closeBtn) closeBtn.style.display = isPool ? '' : 'none';
     }
 
     /* ── Mutual exclusion ──────────────────────────────── */
@@ -1136,7 +1148,16 @@
 
         const result = await apiCall('/pool/toggle-open', 'POST', { commission: commission });
         if (result) {
-            const msg = commission === null || commission === 0 ? 'Pool closed' : `Pool open with ${commission}% commission fee`;
+            let msg;
+            if (commission === null) {
+                msg = 'Pool closed';
+            } else if (commission === 0) {
+                // 0% is still a pool, it just charges no commission and is not
+                // listed for new lenders. Use "Close pool" to stop being a pool.
+                msg = 'Pool set to 0% commission';
+            } else {
+                msg = `Pool open with ${commission}% fee`;
+            }
             showToast(msg);
             await loadPoolCommission();
             await loadAvailablePools();
@@ -1152,7 +1173,7 @@
         range.style.setProperty('--stk-comm-fill', '0%');
         const result = await apiCall('/pool/toggle-open', 'POST', { commission: null });
         if (result) {
-            showToast('Pool commission cleared');
+            showToast('Pool closed, you are no longer a pool');
             await loadPoolCommission();
             await loadAvailablePools();
             updateMutualExclusionUI();
