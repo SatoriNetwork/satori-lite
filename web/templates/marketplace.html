@@ -1042,6 +1042,21 @@
     .vote-flag-btn:hover { color: #dc3545; border-color: rgba(220,53,69,0.35); }
     .vote-flag-btn .material-icons { font-size: 16px; }
     .vote-flag-btn.is-flagged { color: #dc3545; }
+    .vote-row.is-flagged-row {
+        opacity: 0.65;
+        background: color-mix(in oklab, #dc3545 4%, var(--bg-card));
+        border-color: rgba(220,53,69,0.2);
+    }
+    .vote-flagged-badge {
+        display: inline-flex; align-items: center; gap: 4px;
+        font-size: 0.73rem; font-weight: 600;
+        color: #dc3545;
+        padding: 0.22rem 0.5rem;
+        border-radius: 6px;
+        background: rgba(220,53,69,0.08);
+        border: 1px solid rgba(220,53,69,0.25);
+        white-space: nowrap;
+    }
     @media (max-width: 600px) {
         .vote-row { grid-template-columns: 1fr auto auto; }
         .vote-flag-btn { display: none; }
@@ -2113,9 +2128,11 @@
         } else {
             delete pendingVotes[key];
         }
-        input.classList.toggle('is-over',
-            Object.values(pendingVotes).reduce((s, v) => s + (parseFloat(v) || 0), 0) > 100);
+        const total = Object.values(pendingVotes).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+        input.classList.toggle('is-over', total > 100);
         updateBudgetBar();
+        // Re-render so the flag button on this row reflects the vote/no-vote state
+        renderVoting();
     }
 
     function renderVoting() {
@@ -2160,26 +2177,44 @@
                 ? `<strong>${netTotal}%</strong> from ${netVoters} voter${netVoters !== 1 ? 's' : ''}`
                 : '<span style="color:var(--text-muted)">No votes yet</span>';
             const isFlagged = flaggedStreams.has(k);
-            html += `
-            <div class="vote-row" style="animation-delay:${Math.min(i,12)*30}ms">
-                <div style="min-width:0;">
-                    <div class="vote-row-name" title="${escapeAttr(s.stream_name)}">${escapeHtml(s.name || s.stream_name)}</div>
-                    <div class="vote-row-meta">${escapeHtml(s.stream_name)}</div>
-                </div>
-                <div class="vote-row-net">${netLabel}</div>
-                <div class="vote-input-wrap">
+            const hasVote = (pendingVotes[k] || 0) > 0;
+
+            // Vote input: disabled when flagged (can't vote for a flagged stream)
+            const voteCell = isFlagged
+                ? `<div class="vote-flagged-badge"><i class="material-icons" style="font-size:14px;">flag</i>Flagged</div>`
+                : `<div class="vote-input-wrap">
                     <input class="vote-input" type="number" min="0" max="100" step="0.1"
                            value="${myPct > 0 ? myPct : ''}"
                            placeholder="0"
                            oninput="onVoteInput(this, '${escapeJs(k)}')"
                            title="Your vote % for ${escapeAttr(s.stream_name)}">
                     <span class="vote-input-pct">%</span>
-                </div>
-                <button class="vote-flag-btn ${isFlagged ? 'is-flagged' : ''}"
-                        title="${isFlagged ? 'You flagged this stream' : 'Flag this stream'}"
+                   </div>`;
+
+            // Flag button: disabled when stream already has pending votes
+            const flagCell = isFlagged
+                ? `<button class="vote-flag-btn is-flagged" title="You flagged this stream" disabled>
+                    <i class="material-icons">flag</i>
+                   </button>`
+                : hasVote
+                ? `<button class="vote-flag-btn" title="Remove your vote first to flag this stream" disabled style="opacity:0.3;">
+                    <i class="material-icons">outlined_flag</i>
+                   </button>`
+                : `<button class="vote-flag-btn"
+                        title="Flag this stream as spam, misleading, or inactive"
                         onclick="openFlagDialog('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}','${escapeJs(s.name||s.stream_name)}')">
-                    <i class="material-icons">${isFlagged ? 'flag' : 'outlined_flag'}</i>
-                </button>
+                    <i class="material-icons">outlined_flag</i>
+                   </button>`;
+
+            html += `
+            <div class="vote-row ${isFlagged ? 'is-flagged-row' : ''}" style="animation-delay:${Math.min(i,12)*30}ms">
+                <div style="min-width:0;">
+                    <div class="vote-row-name" title="${escapeAttr(s.stream_name)}">${escapeHtml(s.name || s.stream_name)}</div>
+                    <div class="vote-row-meta">${escapeHtml(s.stream_name)}</div>
+                </div>
+                <div class="vote-row-net">${netLabel}</div>
+                ${voteCell}
+                ${flagCell}
             </div>`;
         }
         grid.innerHTML = html;
@@ -2265,9 +2300,13 @@
                 document.getElementById('flagSubmitStatus').textContent = 'Error: ' + (data.error || resp.status);
                 return;
             }
-            flaggedStreams.add(voteKey(_flagTarget.stream_name, _flagTarget.provider_pubkey));
+            const fk = voteKey(_flagTarget.stream_name, _flagTarget.provider_pubkey);
+            flaggedStreams.add(fk);
+            // Remove any pending vote for this stream — vote and flag are mutually exclusive
+            delete pendingVotes[fk];
             dlg.close();
             showToast('Stream flagged and published to relays.');
+            updateBudgetBar();
             renderVoting();
         } catch(e) {
             document.getElementById('flagSubmitStatus').textContent = 'Network error: ' + e.message;
@@ -2278,7 +2317,7 @@
         const btn = document.getElementById('voteSubmitBtn');
         const status = document.getElementById('voteSubmitStatus');
         const allocations = Object.entries(pendingVotes)
-            .filter(([, pct]) => parseFloat(pct) > 0)
+            .filter(([k, pct]) => parseFloat(pct) > 0 && !flaggedStreams.has(k))
             .map(([k, pct]) => {
                 const [stream_name, provider_pubkey] = k.split('|||');
                 return { stream_name, provider_pubkey, percentage: parseFloat(pct) };
