@@ -3373,6 +3373,39 @@ def register_routes(app):
         summary = startup.networkDB.get_stream_vote_summary()
         return jsonify(summary)
 
+    @app.route('/api/witness/stream-flag', methods=['POST'])
+    @login_required
+    def api_witness_stream_flag():
+        """Flag a stream as spam, misleading, inactive, or other."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        if not startup.walletManager or not startup.walletManager.wallet_pubkey:
+            return jsonify({'error': 'Wallet not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        provider_pubkey = data.get('provider_pubkey', '').strip()
+        reason = data.get('reason', '').strip()
+        details = data.get('details', '').strip()
+        if not stream_name or not provider_pubkey:
+            return jsonify({'error': 'stream_name and provider_pubkey are required'}), 400
+        try:
+            startup.submitStreamFlagSync(stream_name, provider_pubkey, reason, details)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except RuntimeError as e:
+            return jsonify({'error': str(e)}), 503
+        return jsonify({'success': True})
+
+    @app.route('/api/witness/stream-flag-summary', methods=['GET'])
+    @login_required
+    def api_witness_stream_flag_summary():
+        """Return aggregated flag counts per stream."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        return jsonify(startup.networkDB.get_stream_flag_summary())
+
     # ── Access request routes (approval-gated streams) ───────────────────────
 
     @app.route('/api/access/request', methods=['POST'])

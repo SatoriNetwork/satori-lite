@@ -446,6 +446,20 @@ class NetworkDB:
                 published           INTEGER NOT NULL DEFAULT 0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS stream_flags (
+                id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                flagger_nostr_pubkey     TEXT NOT NULL,
+                flagged_stream_name      TEXT NOT NULL,
+                flagged_provider_pubkey  TEXT NOT NULL,
+                reason                   TEXT NOT NULL,
+                details                  TEXT,
+                flagged_at               INTEGER NOT NULL,
+                nostr_event_id           TEXT,
+                published                INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey)
+            )
+        """)
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -1701,4 +1715,78 @@ class NetworkDB:
         result.sort(key=lambda x: x['total_percentage'], reverse=True)
         for r in result:
             r['total_percentage'] = round(r['total_percentage'], 4)
+        return result
+
+    # ── Stream flags ────────────────────────────────────────────────
+
+    def save_stream_flag(
+        self,
+        flagger_nostr_pubkey: str,
+        flagged_stream_name: str,
+        flagged_provider_pubkey: str,
+        reason: str,
+        details: str,
+        flagged_at: int,
+    ) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            """INSERT OR REPLACE INTO stream_flags
+               (flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey,
+                reason, details, flagged_at, published)
+               VALUES (?, ?, ?, ?, ?, ?, 0)""",
+            (flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey,
+             reason, details, flagged_at))
+        conn.commit()
+
+    def mark_stream_flag_published(
+        self, flagger_nostr_pubkey: str, flagged_stream_name: str,
+        flagged_provider_pubkey: str, nostr_event_id: str
+    ) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE stream_flags SET published = 1, nostr_event_id = ? "
+            "WHERE flagger_nostr_pubkey = ? AND flagged_stream_name = ? "
+            "AND flagged_provider_pubkey = ?",
+            (nostr_event_id, flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey))
+        conn.commit()
+
+    def get_my_stream_flag(
+        self, flagger_nostr_pubkey: str, flagged_stream_name: str, flagged_provider_pubkey: str
+    ) -> dict | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT reason, details, flagged_at FROM stream_flags "
+            "WHERE flagger_nostr_pubkey = ? AND flagged_stream_name = ? "
+            "AND flagged_provider_pubkey = ?",
+            (flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey)
+        ).fetchone()
+        if not row:
+            return None
+        return {'reason': row[0], 'details': row[1], 'flagged_at': row[2]}
+
+    def get_stream_flag_summary(self) -> list[dict]:
+        """Aggregate flag counts per stream across all known flaggers.
+
+        Returns list sorted by flag_count descending.
+        Each entry: {stream_name, provider_pubkey, flag_count, reasons}
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT flagged_stream_name, flagged_provider_pubkey, reason "
+            "FROM stream_flags"
+        ).fetchall()
+        tally: dict[tuple, dict] = {}
+        for flagged_stream_name, flagged_provider_pubkey, reason in rows:
+            key = (flagged_stream_name, flagged_provider_pubkey)
+            if key not in tally:
+                tally[key] = {
+                    'stream_name': flagged_stream_name,
+                    'provider_pubkey': flagged_provider_pubkey,
+                    'flag_count': 0,
+                    'reasons': {},
+                }
+            tally[key]['flag_count'] += 1
+            tally[key]['reasons'][reason] = tally[key]['reasons'].get(reason, 0) + 1
+        result = list(tally.values())
+        result.sort(key=lambda x: x['flag_count'], reverse=True)
         return result

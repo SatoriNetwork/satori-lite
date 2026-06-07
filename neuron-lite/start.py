@@ -3769,6 +3769,49 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 logging.warning(f'Witness relay publish error: {e}')
         return event_id
 
+    def submitStreamFlagSync(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+        reason: str,
+        details: str = '',
+    ) -> bool:
+        """Validate, sign, save, and publish a stream flag event.
+
+        Raises:
+            RuntimeError: if wallet not ready.
+            ValueError: if reason is invalid.
+        """
+        from satorineuron.witness.voting import build_stream_flag, KIND_STREAM_FLAG
+        import json as _json
+        if not self.walletManager or not self.walletManager.wallet_pubkey:
+            raise RuntimeError('Wallet not initialized')
+        payload, tags = build_stream_flag(
+            stream_name, provider_pubkey, reason, details,
+            self.walletManager, self.nostrPubkey)
+        self.networkDB.save_stream_flag(
+            flagger_nostr_pubkey=self.nostrPubkey,
+            flagged_stream_name=stream_name,
+            flagged_provider_pubkey=provider_pubkey,
+            reason=reason,
+            details=details,
+            flagged_at=payload['flagged_at'],
+        )
+        content = _json.dumps(payload, sort_keys=True, separators=(',', ':'))
+        loop = getattr(self, '_networkLoop', None)
+        if loop and not loop.is_closed() and self._networkClients:
+            future = asyncio.run_coroutine_threadsafe(
+                self._publishWitnessOnAllRelays(KIND_STREAM_FLAG, tags, content),
+                loop)
+            try:
+                event_id = future.result(timeout=10)
+                if event_id:
+                    self.networkDB.mark_stream_flag_published(
+                        self.nostrPubkey, stream_name, provider_pubkey, event_id)
+            except Exception as e:
+                logging.warning(f'Witness: stream flag publish failed: {e}')
+        return True
+
     def discoverBountiesSync(self, active_only: bool = True) -> list:
         """Discover bounties from connected relays (sync context)."""
         if not self._networkClients:

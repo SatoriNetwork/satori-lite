@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Satori | Marketplace{% endblock %}
+{% block title %}Satori | Streams{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -997,37 +997,55 @@
     }
 
     /* ── Vote cards ─────────────────────────────────────── */
-    .vote-grid { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
+    .vote-grid { display: flex; flex-direction: column; gap: 0.45rem; }
     .vote-row {
         display: grid;
-        grid-template-columns: 1fr auto auto;
+        grid-template-columns: 1fr auto auto auto;
         align-items: center;
-        gap: 1rem;
-        padding: 0.75rem 1rem;
+        gap: 0.75rem 1rem;
+        padding: 0.7rem 1rem;
         border-radius: 10px;
         background: var(--bg-card);
         border: 1px solid var(--border-color);
-        transition: border-color .15s;
+        transition: border-color .15s, box-shadow .15s;
+        animation: mkt-fade-up 0.28s cubic-bezier(.2,.8,.2,1) both;
     }
-    .vote-row:hover { border-color: var(--accent); }
-    .vote-row-name { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .vote-row-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+    .vote-row:hover { border-color: var(--border-color-focus); box-shadow: var(--shadow-sm); }
+    .vote-row-name { font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vote-row-meta { font-size: 0.73rem; color: var(--text-muted); margin-top: 2px; }
     .vote-row-net {
-        font-size: 0.8rem; color: var(--text-muted); text-align: right;
+        font-size: 0.78rem; color: var(--text-muted); text-align: right;
         white-space: nowrap;
     }
-    .vote-row-net strong { color: var(--accent); font-size: 0.95rem; }
+    .vote-row-net strong { color: var(--accent-primary,#5a5aff); font-size: 0.92rem; }
     .vote-input-wrap { display: flex; align-items: center; gap: 4px; }
     .vote-input {
-        width: 72px; text-align: right;
+        width: 68px; text-align: right;
         padding: 4px 6px; border-radius: 6px;
         border: 1px solid var(--border-color);
-        background: var(--surface-2, var(--bg-card));
-        color: var(--text); font-size: 0.9rem;
+        background: var(--bg-input);
+        color: var(--text-primary); font-size: 0.88rem;
     }
-    .vote-input:focus { outline: none; border-color: var(--accent); }
+    .vote-input:focus { outline: none; border-color: var(--border-color-focus); }
     .vote-input.is-over { border-color: #dc3545; }
-    .vote-input-pct { font-size: 0.85rem; color: var(--text-muted); }
+    .vote-input-pct { font-size: 0.82rem; color: var(--text-muted); }
+    .vote-flag-btn {
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--text-muted);
+        border-radius: 7px;
+        padding: 0.25rem 0.3rem;
+        cursor: pointer;
+        display: inline-flex; align-items: center;
+        transition: color .15s, border-color .15s;
+    }
+    .vote-flag-btn:hover { color: #dc3545; border-color: rgba(220,53,69,0.35); }
+    .vote-flag-btn .material-icons { font-size: 16px; }
+    .vote-flag-btn.is-flagged { color: #dc3545; }
+    @media (max-width: 600px) {
+        .vote-row { grid-template-columns: 1fr auto auto; }
+        .vote-flag-btn { display: none; }
+    }
 </style>
 {% endblock %}
 
@@ -1040,9 +1058,9 @@
     <header class="mkt-hero">
         <div class="mkt-hero-title">
             <span class="mkt-hero-eyebrow">Network</span>
-            <h1 class="mkt-hero-h1">Data <span class="mkt-accent">Marketplace</span></h1>
+            <h1 class="mkt-hero-h1">Data <span class="mkt-accent">Streams</span></h1>
             <p class="mkt-hero-sub">
-                Browse every datastream announced across your connected nostr relays.
+                Browse, subscribe to, and vote on datastreams across your connected nostr relays.
                 Filter by category, price, or search by name.
             </p>
         </div>
@@ -1171,11 +1189,11 @@
 
     <!-- Voting panel -->
     <section id="votingPanel" style="display:none;">
-        <div class="mkt-filters" style="align-items:center;gap:1rem;">
-            <div style="flex:1;">
-                <input id="voteSearch" type="text" class="mkt-search" placeholder="Search streams…"
-                       style="width:100%;padding:0.5rem 0.75rem;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);"
-                       oninput="renderVoting()">
+        <div class="mkt-filters">
+            <div class="mkt-search">
+                <i class="material-icons">search</i>
+                <input id="voteSearch" type="text" placeholder="Search streams…"
+                       autocomplete="off" oninput="currentVotePage=1; renderVoting()">
             </div>
             <button class="mkt-refresh" onclick="refreshVoting()">
                 <i class="material-icons">refresh</i><span>Refresh</span>
@@ -1183,7 +1201,7 @@
         </div>
 
         <!-- Budget bar -->
-        <div id="voteBudgetBar" style="margin:1rem 0 0.5rem;padding:0.75rem 1rem;border-radius:10px;background:var(--surface-2);display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <div id="voteBudgetBar" style="margin:1rem 0 0.5rem;padding:0.75rem 1rem;border-radius:10px;background:var(--bg-card);border:1px solid var(--border-color);display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
             <div style="flex:1;min-width:180px;">
                 <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">Your vote budget</div>
                 <div style="display:flex;align-items:center;gap:0.5rem;">
@@ -1201,12 +1219,49 @@
         <div id="voteSubmitStatus" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.75rem;min-height:1.2em;"></div>
 
         <!-- Stream vote list -->
-        <div id="voteGrid"></div>
+        <div class="mkt-count" id="voteCount" style="display:none;">
+            <div>Showing <strong id="voteVisible">0</strong> of <span id="voteTotal">0</span> streams</div>
+        </div>
+        <div id="voteGrid" class="vote-grid"></div>
         <div id="voteEmpty" style="display:none;text-align:center;padding:3rem;color:var(--text-muted);">
             <i class="material-icons" style="font-size:2.5rem;">manage_search</i>
-            <div style="margin-top:0.5rem;">No streams found. Refresh the marketplace first.</div>
+            <div style="margin-top:0.5rem;">No streams found. Refresh first.</div>
         </div>
+        <div id="votePager" class="mkt-pager"></div>
     </section>
+
+    <!-- Flag stream dialog -->
+    <dialog id="flagDialog" style="border:1px solid var(--border-color);border-radius:14px;background:var(--bg-card);color:var(--text-primary);padding:1.5rem;max-width:420px;width:92%;">
+        <form method="dialog">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                <div style="font-size:1rem;font-weight:700;">Flag stream</div>
+                <button value="cancel" style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:1.25rem;line-height:1;">&#x2715;</button>
+            </div>
+            <div id="flagStreamLabel" style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;word-break:break-all;"></div>
+            <div style="font-size:0.8rem;font-weight:600;margin-bottom:0.5rem;">Reason</div>
+            <div style="display:flex;flex-direction:column;gap:0.4rem;margin-bottom:1rem;">
+                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+                    <input type="radio" name="flagReason" value="spam" style="accent-color:var(--accent-primary);"> Spam or irrelevant
+                </label>
+                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+                    <input type="radio" name="flagReason" value="misleading" style="accent-color:var(--accent-primary);"> Misleading or inaccurate data
+                </label>
+                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+                    <input type="radio" name="flagReason" value="inactive" style="accent-color:var(--accent-primary);"> Stale or no longer publishing
+                </label>
+                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+                    <input type="radio" name="flagReason" value="other" style="accent-color:var(--accent-primary);"> Other
+                </label>
+            </div>
+            <div style="font-size:0.8rem;font-weight:600;margin-bottom:0.4rem;">Details <span style="font-weight:400;color:var(--text-muted);">(optional)</span></div>
+            <textarea id="flagDetails" rows="2" style="width:100%;resize:vertical;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-input);color:var(--text-primary);padding:0.5rem 0.6rem;font-size:0.85rem;margin-bottom:1rem;" placeholder="Any additional context…"></textarea>
+            <div id="flagSubmitStatus" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em;margin-bottom:0.75rem;"></div>
+            <div style="display:flex;gap:0.6rem;justify-content:flex-end;">
+                <button value="cancel" style="background:transparent;border:1px solid var(--border-color);color:var(--text-secondary);padding:0.4rem 0.9rem;border-radius:8px;cursor:pointer;font-size:0.85rem;">Cancel</button>
+                <button type="button" onclick="submitFlag()" style="background:var(--accent-gradient,#5a5aff);border:none;color:#fff;padding:0.4rem 1rem;border-radius:8px;cursor:pointer;font-size:0.85rem;font-weight:600;">Submit flag</button>
+            </div>
+        </form>
+    </dialog>
 
 </main>
 
@@ -1841,6 +1896,16 @@
                 Subscribe</button>`;
         }
 
+        // Flag button (only for streams we don't own)
+        const cardFlagKey = voteKey(s.stream_name, s.nostr_pubkey);
+        const cardFlagged = flaggedStreams.has(cardFlagKey);
+        const flagBtnHtml = s.is_mine ? '' :
+            `<button class="vote-flag-btn ${cardFlagged ? 'is-flagged' : ''}"
+                title="${cardFlagged ? 'You flagged this stream' : 'Flag as spam / misleading / inactive'}"
+                onclick="openFlagDialog('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}','${escapeJs(s.name||s.stream_name)}')">
+                <i class="material-icons" style="font-size:15px;">${cardFlagged ? 'flag' : 'outlined_flag'}</i>
+            </button>`;
+
         // Footer publisher label / toggle
         const cardId = 'mkt-card-' + s.stream_name.replace(/[^a-z0-9]/gi, '_');
         let pubsCell;
@@ -1907,7 +1972,10 @@
             ${warnHtml}
             <div class="mkt-card-foot">
                 ${pubsCell}
-                ${actionHtml}
+                <div style="display:flex;align-items:center;gap:0.35rem;">
+                    ${flagBtnHtml}
+                    ${actionHtml}
+                </div>
             </div>
             ${pubsListHtml}
         </article>`;
@@ -2000,8 +2068,10 @@
 
     // ── Voting panel ─────────────────────────────────────────────────────────
 
-    // pendingVotes: {streamKey -> percentage}  (streamKey = stream_name + '\x00' + nostr_pubkey)
+    // pendingVotes: {streamKey -> percentage}  (streamKey = stream_name + '|||' + nostr_pubkey)
     let pendingVotes = {};
+    let currentVotePage = 1;
+    const votePageSize = 20;
 
     function voteKey(stream_name, nostr_pubkey) {
         return stream_name + '|||' + nostr_pubkey;
@@ -2052,19 +2122,36 @@
         const q = (document.getElementById('voteSearch')?.value || '').toLowerCase().trim();
         const grid = document.getElementById('voteGrid');
         const empty = document.getElementById('voteEmpty');
-        const streams = votingStreams().filter(s =>
+        const countEl = document.getElementById('voteCount');
+        const pager = document.getElementById('votePager');
+
+        const all = votingStreams().filter(s =>
             !q || s.stream_name.toLowerCase().includes(q) ||
             (s.name || '').toLowerCase().includes(q));
 
-        if (streams.length === 0) {
+        if (all.length === 0) {
             grid.innerHTML = '';
+            if (pager) pager.innerHTML = '';
+            if (countEl) countEl.style.display = 'none';
             empty.style.display = '';
             return;
         }
         empty.style.display = 'none';
+        if (countEl) countEl.style.display = '';
 
-        let html = '<div class="vote-grid">';
-        for (const s of streams) {
+        // Paginate
+        const totalPages = Math.max(1, Math.ceil(all.length / votePageSize));
+        if (currentVotePage > totalPages) currentVotePage = totalPages;
+        const start = (currentVotePage - 1) * votePageSize;
+        const end = Math.min(start + votePageSize, all.length);
+        const page = all.slice(start, end);
+
+        if (document.getElementById('voteTotal')) document.getElementById('voteTotal').textContent = all.length;
+        if (document.getElementById('voteVisible')) document.getElementById('voteVisible').textContent = (start + 1) + '–' + end;
+
+        let html = '';
+        for (let i = 0; i < page.length; i++) {
+            const s = page[i];
             const k = voteKey(s.stream_name, s.nostr_pubkey);
             const myPct = pendingVotes[k] ?? (s.my_vote || 0);
             const netVoters = s.vote_count || 0;
@@ -2072,10 +2159,11 @@
             const netLabel = netVoters > 0
                 ? `<strong>${netTotal}%</strong> from ${netVoters} voter${netVoters !== 1 ? 's' : ''}`
                 : '<span style="color:var(--text-muted)">No votes yet</span>';
+            const isFlagged = flaggedStreams.has(k);
             html += `
-            <div class="vote-row">
-                <div>
-                    <div class="vote-row-name">${escapeHtml(s.name || s.stream_name)}</div>
+            <div class="vote-row" style="animation-delay:${Math.min(i,12)*30}ms">
+                <div style="min-width:0;">
+                    <div class="vote-row-name" title="${escapeAttr(s.stream_name)}">${escapeHtml(s.name || s.stream_name)}</div>
                     <div class="vote-row-meta">${escapeHtml(s.stream_name)}</div>
                 </div>
                 <div class="vote-row-net">${netLabel}</div>
@@ -2087,16 +2175,103 @@
                            title="Your vote % for ${escapeAttr(s.stream_name)}">
                     <span class="vote-input-pct">%</span>
                 </div>
+                <button class="vote-flag-btn ${isFlagged ? 'is-flagged' : ''}"
+                        title="${isFlagged ? 'You flagged this stream' : 'Flag this stream'}"
+                        onclick="openFlagDialog('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}','${escapeJs(s.name||s.stream_name)}')">
+                    <i class="material-icons">${isFlagged ? 'flag' : 'outlined_flag'}</i>
+                </button>
             </div>`;
         }
-        html += '</div>';
         grid.innerHTML = html;
         updateBudgetBar();
+        renderVotePager(totalPages);
+    }
+
+    function renderVotePager(totalPages) {
+        const pager = document.getElementById('votePager');
+        if (!pager || totalPages <= 1) { if (pager) pager.innerHTML = ''; return; }
+
+        const btn = (label, page, opts = {}) => {
+            const cls = 'mkt-pg-btn' + (opts.active ? ' is-active' : '');
+            const dis = opts.disabled ? ' disabled' : '';
+            return `<button class="${cls}" onclick="goToVotePage(${page})"${dis}>${label}</button>`;
+        };
+        const gap = () => `<span class="mkt-pg-gap">…</span>`;
+
+        const pages = new Set([1, totalPages, currentVotePage,
+            currentVotePage - 1, currentVotePage + 1]);
+        const sorted = [...pages].filter(p => p >= 1 && p <= totalPages).sort((a,b)=>a-b);
+
+        let html = btn('‹', currentVotePage - 1, { disabled: currentVotePage === 1 });
+        let prev = 0;
+        for (const p of sorted) {
+            if (p - prev > 1) html += gap();
+            html += btn(String(p), p, { active: p === currentVotePage });
+            prev = p;
+        }
+        html += btn('›', currentVotePage + 1, { disabled: currentVotePage === totalPages });
+        pager.innerHTML = html;
+    }
+
+    function goToVotePage(p) {
+        currentVotePage = p;
+        renderVoting();
+        document.getElementById('voteGrid').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     async function refreshVoting() {
         await fetchStreamsOnce();
         renderVoting();
+    }
+
+    // ── Flag dialog ──────────────────────────────────────────────────────────
+
+    let flaggedStreams = new Set(); // voteKeys of streams the user has already flagged
+    let _flagTarget = null; // {stream_name, provider_pubkey}
+
+    function openFlagDialog(stream_name, provider_pubkey, display_name) {
+        _flagTarget = { stream_name, provider_pubkey };
+        const dlg = document.getElementById('flagDialog');
+        document.getElementById('flagStreamLabel').textContent = display_name + ' — ' + stream_name;
+        document.getElementById('flagDetails').value = '';
+        document.getElementById('flagSubmitStatus').textContent = '';
+        dlg.querySelectorAll('input[name=flagReason]').forEach(r => { r.checked = false; });
+        dlg.showModal();
+    }
+
+    async function submitFlag() {
+        if (!_flagTarget) return;
+        const dlg = document.getElementById('flagDialog');
+        const reason = [...dlg.querySelectorAll('input[name=flagReason]')]
+            .find(r => r.checked)?.value;
+        if (!reason) {
+            document.getElementById('flagSubmitStatus').textContent = 'Please select a reason.';
+            return;
+        }
+        const details = document.getElementById('flagDetails').value.trim();
+        document.getElementById('flagSubmitStatus').textContent = 'Publishing…';
+        try {
+            const resp = await fetch('/api/witness/stream-flag', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stream_name: _flagTarget.stream_name,
+                    provider_pubkey: _flagTarget.provider_pubkey,
+                    reason, details,
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                document.getElementById('flagSubmitStatus').textContent = 'Error: ' + (data.error || resp.status);
+                return;
+            }
+            flaggedStreams.add(voteKey(_flagTarget.stream_name, _flagTarget.provider_pubkey));
+            dlg.close();
+            showToast('Stream flagged and published to relays.');
+            renderVoting();
+        } catch(e) {
+            document.getElementById('flagSubmitStatus').textContent = 'Network error: ' + e.message;
+        }
     }
 
     async function submitVoteAllocation() {

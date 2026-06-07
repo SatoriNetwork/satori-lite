@@ -1,8 +1,11 @@
-"""Witness voting: stream vote allocation event builder (Model B dual-sig)."""
+"""Witness voting: stream vote allocation and stream flag event builders (Model B dual-sig)."""
 import json
 import time
 
 KIND_STREAM_VOTE_ALLOCATION = 34610
+KIND_STREAM_FLAG = 34611
+
+VALID_FLAG_REASONS = frozenset({'spam', 'misleading', 'inactive', 'other'})
 
 
 def build_vote_allocation(
@@ -54,5 +57,44 @@ def build_vote_allocation(
     tags = [
         ['d', nostr_pubkey],
         ['satori', 'stream_vote_allocation'],
+    ]
+    return payload, tags
+
+
+def build_stream_flag(
+    stream_name: str,
+    provider_pubkey: str,
+    reason: str,
+    details: str,
+    wallet_manager,
+    nostr_pubkey: str,
+) -> tuple[dict, list[list[str]]]:
+    """Build and sign a STREAM_FLAG inner payload.
+
+    Raises:
+        ValueError: if reason is not in VALID_FLAG_REASONS
+    """
+    if reason not in VALID_FLAG_REASONS:
+        raise ValueError(f"Invalid reason '{reason}'. Must be one of: {', '.join(sorted(VALID_FLAG_REASONS))}")
+
+    d_tag = f'{nostr_pubkey}|||{stream_name}|||{provider_pubkey}'
+    payload = {
+        'action': 'stream_flag',
+        'flagged_stream_name': stream_name,
+        'flagged_provider_pubkey': provider_pubkey,
+        'reason': reason,
+        'details': (details or '').strip(),
+        'flagger_wallet_pubkey': wallet_manager.wallet_pubkey,
+        'flagger_evr_address': wallet_manager.wallet_evr_address,
+        'flagger_nostr_pubkey': nostr_pubkey,
+        'flagged_at': int(time.time()),
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    payload['evr_signature'] = wallet_manager.sign_message(canonical)
+
+    tags = [
+        ['d', d_tag],
+        ['satori', 'stream_flag'],
+        ['stream', stream_name],
     ]
     return payload, tags
