@@ -2286,12 +2286,30 @@ def register_routes(app):
             p['stream_name']
             for p in startup.networkDB.get_active_publications()
         }
+        # Build vote summary lookup: (stream_name, provider_pubkey) -> {voter_count, total_percentage}
+        vote_lookup = {
+            (v['stream_name'], v['provider_pubkey']): v
+            for v in startup.networkDB.get_stream_vote_summary()
+        }
+        # Include my current allocation as a lookup: stream_name -> percentage
+        my_alloc_row = startup.networkDB.get_my_vote_allocation(startup.nostrPubkey)
+        import json as _json
+        my_alloc = {}
+        if my_alloc_row:
+            for a in _json.loads(my_alloc_row.get('allocations_json', '[]')):
+                key = (a.get('stream_name', ''), a.get('provider_pubkey', ''))
+                my_alloc[key] = a.get('percentage', 0)
         streams = []
         for s in startup.networkStreams:
             s_copy = dict(s)
             s_copy['subscribed'] = startup.networkDB.is_subscribed(
                 s['stream_name'], s['nostr_pubkey'])
             s_copy['is_mine'] = s['stream_name'] in my_pub_names
+            vk = (s['stream_name'], s.get('nostr_pubkey', ''))
+            vote = vote_lookup.get(vk, {})
+            s_copy['vote_count'] = vote.get('voter_count', 0)
+            s_copy['vote_total'] = vote.get('total_percentage', 0.0)
+            s_copy['my_vote'] = my_alloc.get(vk, 0)
             streams.append(s_copy)
         return jsonify({
             'connected': connected,

@@ -995,6 +995,39 @@
         .mkt-segments { grid-template-columns: 1fr; }
         .mkt-refresh { margin-left: 0; }
     }
+
+    /* ── Vote cards ─────────────────────────────────────── */
+    .vote-grid { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
+    .vote-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 10px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        transition: border-color .15s;
+    }
+    .vote-row:hover { border-color: var(--accent); }
+    .vote-row-name { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vote-row-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+    .vote-row-net {
+        font-size: 0.8rem; color: var(--text-muted); text-align: right;
+        white-space: nowrap;
+    }
+    .vote-row-net strong { color: var(--accent); font-size: 0.95rem; }
+    .vote-input-wrap { display: flex; align-items: center; gap: 4px; }
+    .vote-input {
+        width: 72px; text-align: right;
+        padding: 4px 6px; border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background: var(--surface-2, var(--bg-card));
+        color: var(--text); font-size: 0.9rem;
+    }
+    .vote-input:focus { outline: none; border-color: var(--accent); }
+    .vote-input.is-over { border-color: #dc3545; }
+    .vote-input-pct { font-size: 0.85rem; color: var(--text-muted); }
 </style>
 {% endblock %}
 
@@ -1027,11 +1060,11 @@
             <div class="mkt-seg-title">Streams</div>
             <div class="mkt-seg-sub">Live datastreams to subscribe to and consume.</div>
         </button>
-        <button class="mkt-seg" role="tab" aria-selected="false"
-                onclick="window.location.href='/bounties'">
-            <div class="mkt-seg-icon"><i class="material-icons">insights</i></div>
-            <div class="mkt-seg-title">Predictions</div>
-            <div class="mkt-seg-sub">Post a bounty on any data stream. Predict accurately to earn the reward.</div>
+        <button class="mkt-seg" role="tab" aria-selected="false" id="segVoting"
+                onclick="selectSegment('voting')">
+            <div class="mkt-seg-icon"><i class="material-icons">how_to_vote</i></div>
+            <div class="mkt-seg-title">Voting</div>
+            <div class="mkt-seg-sub">Allocate your vote weight across streams to signal support.</div>
         </button>
     </div>
 
@@ -1136,6 +1169,45 @@
         <div id="mktPager" class="mkt-pager"></div>
     </section>
 
+    <!-- Voting panel -->
+    <section id="votingPanel" style="display:none;">
+        <div class="mkt-filters" style="align-items:center;gap:1rem;">
+            <div style="flex:1;">
+                <input id="voteSearch" type="text" class="mkt-search" placeholder="Search streams…"
+                       style="width:100%;padding:0.5rem 0.75rem;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);"
+                       oninput="renderVoting()">
+            </div>
+            <button class="mkt-refresh" onclick="refreshVoting()">
+                <i class="material-icons">refresh</i><span>Refresh</span>
+            </button>
+        </div>
+
+        <!-- Budget bar -->
+        <div id="voteBudgetBar" style="margin:1rem 0 0.5rem;padding:0.75rem 1rem;border-radius:10px;background:var(--surface-2);display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+            <div style="flex:1;min-width:180px;">
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">Your vote budget</div>
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <div id="voteBudgetUsed" style="font-size:1.4rem;font-weight:700;color:var(--accent);">0%</div>
+                    <div style="font-size:0.85rem;color:var(--text-muted);">of 100% allocated</div>
+                </div>
+                <div style="height:6px;border-radius:3px;background:var(--border);margin-top:6px;overflow:hidden;">
+                    <div id="voteBudgetFill" style="height:100%;border-radius:3px;background:var(--accent);width:0%;transition:width 0.2s;"></div>
+                </div>
+            </div>
+            <button id="voteSubmitBtn" class="btn btn-primary" style="white-space:nowrap;" onclick="submitVoteAllocation()">
+                <i class="material-icons" style="font-size:1rem;vertical-align:-2px;margin-right:4px;">send</i>Publish allocation
+            </button>
+        </div>
+        <div id="voteSubmitStatus" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.75rem;min-height:1.2em;"></div>
+
+        <!-- Stream vote list -->
+        <div id="voteGrid"></div>
+        <div id="voteEmpty" style="display:none;text-align:center;padding:3rem;color:var(--text-muted);">
+            <i class="material-icons" style="font-size:2.5rem;">manage_search</i>
+            <div style="margin-top:0.5rem;">No streams found. Refresh the marketplace first.</div>
+        </div>
+    </section>
+
 </main>
 
 <input type="hidden" id="nostrPubkey" value="{{ nostr_pubkey or '' }}">
@@ -1169,7 +1241,7 @@
     let subOnly = false;             // show only streams the user is subscribed to
     let predOnly = localStorage.getItem('mkt-pred-only') === '1'; // off by default → predictions hidden
     let priceUnit = localStorage.getItem('mkt-price-unit') || 'sats'; // 'sats' | 'satori'
-    let activeSegment = 'streams';   // 'streams' | 'predictions' (disabled)
+    let activeSegment = 'streams';   // 'streams' | 'voting'
     let currentPage = 1;
     let pageSize = 24;
     const SATS_PER_SATORI = 100000000;
@@ -1194,6 +1266,16 @@
     (async function init() {
         await loadClassifications();
         renderClassChips();
+        // Pre-load my existing vote allocation into pendingVotes
+        try {
+            const vr = await fetch('/api/witness/vote-allocation');
+            const vd = await vr.json();
+            if (vd && vd.allocations) {
+                vd.allocations.forEach(a => {
+                    pendingVotes[voteKey(a.stream_name, a.provider_pubkey)] = a.percentage;
+                });
+            }
+        } catch(e) { /* ignore */ }
         try { await fetchStreamsOnce(); } catch(e) { allStreams = []; }
         if (allStreams.length > 0) {
             renderStreams();
@@ -1205,8 +1287,14 @@
     })();
 
     function selectSegment(seg) {
-        if (seg === 'predictions') return; // disabled
         activeSegment = seg;
+        document.getElementById('streamsPanel').style.display = seg === 'streams' ? '' : 'none';
+        document.getElementById('votingPanel').style.display  = seg === 'voting'  ? '' : 'none';
+        document.getElementById('segStreams').classList.toggle('is-active', seg === 'streams');
+        document.getElementById('segVoting').classList.toggle('is-active',  seg === 'voting');
+        document.getElementById('segStreams').setAttribute('aria-selected', seg === 'streams' ? 'true' : 'false');
+        document.getElementById('segVoting').setAttribute('aria-selected',  seg === 'voting'  ? 'true' : 'false');
+        if (seg === 'voting') renderVoting();
     }
 
     async function loadClassifications() {
@@ -1909,5 +1997,143 @@
     }
     function escapeJs(s) { return String(s).replace(/'/g, "\\'"); }
     function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+
+    // ── Voting panel ─────────────────────────────────────────────────────────
+
+    // pendingVotes: {streamKey -> percentage}  (streamKey = stream_name + '\x00' + nostr_pubkey)
+    let pendingVotes = {};
+
+    function voteKey(stream_name, nostr_pubkey) {
+        return stream_name + '|||' + nostr_pubkey;
+    }
+
+    function votingStreams() {
+        // Dedupe by (stream_name, nostr_pubkey) — same logic as renderStreams but simpler
+        const seen = new Map();
+        for (const s of allStreams) {
+            if (!s.active && !s.is_mine && (s.price_per_obs || 0) === 0) continue;
+            if (s.metadata && s.metadata.source_stream_name) continue; // skip prediction streams
+            const k = voteKey(s.stream_name, s.nostr_pubkey);
+            const prev = seen.get(k);
+            if (!prev || (s.last_observation_at || 0) > (prev.last_observation_at || 0)) {
+                seen.set(k, s);
+            }
+        }
+        // Sort by network vote total desc, then stream name
+        return Array.from(seen.values()).sort((a, b) =>
+            (b.vote_total || 0) - (a.vote_total || 0) || a.stream_name.localeCompare(b.stream_name)
+        );
+    }
+
+    function updateBudgetBar() {
+        const total = Object.values(pendingVotes).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+        const pct = Math.min(total, 100);
+        const over = total > 100;
+        document.getElementById('voteBudgetUsed').textContent = total.toFixed(1) + '%';
+        document.getElementById('voteBudgetUsed').style.color = over ? '#dc3545' : 'var(--accent)';
+        document.getElementById('voteBudgetFill').style.width = pct + '%';
+        document.getElementById('voteBudgetFill').style.background = over ? '#dc3545' : 'var(--accent)';
+        document.getElementById('voteSubmitBtn').disabled = over;
+    }
+
+    function onVoteInput(input, key) {
+        const val = parseFloat(input.value) || 0;
+        if (val > 0) {
+            pendingVotes[key] = val;
+        } else {
+            delete pendingVotes[key];
+        }
+        input.classList.toggle('is-over',
+            Object.values(pendingVotes).reduce((s, v) => s + (parseFloat(v) || 0), 0) > 100);
+        updateBudgetBar();
+    }
+
+    function renderVoting() {
+        const q = (document.getElementById('voteSearch')?.value || '').toLowerCase().trim();
+        const grid = document.getElementById('voteGrid');
+        const empty = document.getElementById('voteEmpty');
+        const streams = votingStreams().filter(s =>
+            !q || s.stream_name.toLowerCase().includes(q) ||
+            (s.name || '').toLowerCase().includes(q));
+
+        if (streams.length === 0) {
+            grid.innerHTML = '';
+            empty.style.display = '';
+            return;
+        }
+        empty.style.display = 'none';
+
+        let html = '<div class="vote-grid">';
+        for (const s of streams) {
+            const k = voteKey(s.stream_name, s.nostr_pubkey);
+            const myPct = pendingVotes[k] ?? (s.my_vote || 0);
+            const netVoters = s.vote_count || 0;
+            const netTotal = (s.vote_total || 0).toFixed(1);
+            const netLabel = netVoters > 0
+                ? `<strong>${netTotal}%</strong> from ${netVoters} voter${netVoters !== 1 ? 's' : ''}`
+                : '<span style="color:var(--text-muted)">No votes yet</span>';
+            html += `
+            <div class="vote-row">
+                <div>
+                    <div class="vote-row-name">${escapeHtml(s.name || s.stream_name)}</div>
+                    <div class="vote-row-meta">${escapeHtml(s.stream_name)}</div>
+                </div>
+                <div class="vote-row-net">${netLabel}</div>
+                <div class="vote-input-wrap">
+                    <input class="vote-input" type="number" min="0" max="100" step="0.1"
+                           value="${myPct > 0 ? myPct : ''}"
+                           placeholder="0"
+                           oninput="onVoteInput(this, '${escapeJs(k)}')"
+                           title="Your vote % for ${escapeAttr(s.stream_name)}">
+                    <span class="vote-input-pct">%</span>
+                </div>
+            </div>`;
+        }
+        html += '</div>';
+        grid.innerHTML = html;
+        updateBudgetBar();
+    }
+
+    async function refreshVoting() {
+        await fetchStreamsOnce();
+        renderVoting();
+    }
+
+    async function submitVoteAllocation() {
+        const btn = document.getElementById('voteSubmitBtn');
+        const status = document.getElementById('voteSubmitStatus');
+        const allocations = Object.entries(pendingVotes)
+            .filter(([, pct]) => parseFloat(pct) > 0)
+            .map(([k, pct]) => {
+                const [stream_name, provider_pubkey] = k.split('|||');
+                return { stream_name, provider_pubkey, percentage: parseFloat(pct) };
+            });
+        if (allocations.length === 0) {
+            status.textContent = 'No allocations to submit.';
+            return;
+        }
+        btn.disabled = true;
+        status.textContent = 'Publishing…';
+        try {
+            const resp = await fetch('/api/witness/vote-allocation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allocations }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                status.textContent = 'Error: ' + (data.error || resp.status);
+            } else {
+                status.textContent = 'Allocation published to relays.';
+                // Refresh so my_vote values update
+                await fetchStreamsOnce();
+                renderVoting();
+            }
+        } catch(e) {
+            status.textContent = 'Network error: ' + e.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
 </script>
 {% endblock %}
