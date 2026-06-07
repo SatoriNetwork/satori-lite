@@ -2081,18 +2081,33 @@
         // Dedupe by (stream_name, nostr_pubkey) — same logic as renderStreams but simpler
         const seen = new Map();
         for (const s of allStreams) {
-            if (!s.active && !s.is_mine && (s.price_per_obs || 0) === 0) continue;
-            if (s.metadata && s.metadata.source_stream_name) continue; // skip prediction streams
             const k = voteKey(s.stream_name, s.nostr_pubkey);
+            // Always include streams the user has voted on so their allocation is always visible
+            const hasMyVote = (pendingVotes[k] || 0) > 0;
+            if (!hasMyVote) {
+                if (!s.active && !s.is_mine && (s.price_per_obs || 0) === 0) continue;
+                if (s.metadata && s.metadata.source_stream_name) continue; // skip prediction streams
+            }
             const prev = seen.get(k);
             if (!prev || (s.last_observation_at || 0) > (prev.last_observation_at || 0)) {
                 seen.set(k, s);
             }
         }
-        // Sort by network vote total desc, then stream name
-        return Array.from(seen.values()).sort((a, b) =>
-            (b.vote_total || 0) - (a.vote_total || 0) || a.stream_name.localeCompare(b.stream_name)
-        );
+        // Ensure every voted stream appears even if it's not in allStreams
+        for (const k of Object.keys(pendingVotes)) {
+            if ((pendingVotes[k] || 0) > 0 && !seen.has(k)) {
+                const [stream_name, nostr_pubkey] = k.split('|||');
+                seen.set(k, { stream_name, nostr_pubkey, name: stream_name, active: false, is_mine: false, price_per_obs: 0 });
+            }
+        }
+
+        // Voted streams first, then by network vote total desc, then name
+        return Array.from(seen.values()).sort((a, b) => {
+            const aVoted = (pendingVotes[voteKey(a.stream_name, a.nostr_pubkey)] || 0) > 0;
+            const bVoted = (pendingVotes[voteKey(b.stream_name, b.nostr_pubkey)] || 0) > 0;
+            if (aVoted !== bVoted) return aVoted ? -1 : 1;
+            return (b.vote_total || 0) - (a.vote_total || 0) || a.stream_name.localeCompare(b.stream_name);
+        });
     }
 
     function updateBudgetBar() {
@@ -2116,8 +2131,6 @@
         const total = Object.values(pendingVotes).reduce((s, v) => s + (parseFloat(v) || 0), 0);
         input.classList.toggle('is-over', total > 100);
         updateBudgetBar();
-        // Re-render so the flag button on this row reflects the vote/no-vote state
-        renderVoting();
     }
 
     function renderVoting() {
@@ -2158,8 +2171,11 @@
             const myPct = pendingVotes[k] ?? (s.my_vote || 0);
             const netVoters = s.vote_count || 0;
             const netTotal = (s.vote_total || 0).toFixed(1);
-            const netLabel = netVoters > 0
-                ? `<strong>${netTotal}%</strong> from ${netVoters} voter${netVoters !== 1 ? 's' : ''}`
+            const myPctDisplay = myPct > 0 ? `<strong>${myPct}%</strong> you` : '';
+            const otherVoters = netVoters - (myPct > 0 ? 1 : 0);
+            const otherLabel = otherVoters > 0 ? `<strong>${otherVoters}</strong> other${otherVoters !== 1 ? 's' : ''}` : '';
+            const netLabel = (myPctDisplay || otherLabel)
+                ? [myPctDisplay, otherLabel].filter(Boolean).join(', ')
                 : '<span style="color:var(--text-muted)">No votes yet</span>';
             const isFlagged = flaggedStreams.has(k);
             const hasVote = (pendingVotes[k] || 0) > 0;
