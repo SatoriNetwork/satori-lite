@@ -81,6 +81,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelTombstoneListeners: dict = {}  # relay_url -> asyncio.Task
         self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
         self._accessRequestListeners: dict = {}  # relay_url -> asyncio.Task
+        self._witnessVoteListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
@@ -1051,6 +1052,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsureTombstoneListener(relay_url)
         self._networkEnsurePredictionListener(relay_url)
         self._networkEnsureAccessRequestListener(relay_url)
+        self._networkEnsureWitnessVoteListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -1160,6 +1162,42 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         self._accessRequestListeners[relay_url] = asyncio.ensure_future(
             self._incomingAccessRequestsLoop(client, relay_url))
+
+    def _networkEnsureWitnessVoteListener(self, relay_url: str):
+        """Start a witness vote allocation listener for a relay if one isn't running."""
+        task = self._witnessVoteListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._witnessVoteListeners[relay_url] = asyncio.ensure_future(
+            self._networkListenWitnessVotes(relay_url))
+
+    async def _networkListenWitnessVotes(self, relay_url: str):
+        """Listen for inbound stream vote allocation events and store them."""
+        import json as _json
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            async for vote in client.witness_vote_allocations():
+                try:
+                    await asyncio.to_thread(
+                        self.networkDB.save_vote_allocation,
+                        vote['voter_nostr_pubkey'],
+                        vote.get('voter_wallet_pubkey', ''),
+                        vote.get('voter_evr_address', ''),
+                        _json.dumps(vote['allocations']),
+                        vote['total_percentage'],
+                        vote.get('allocated_at', 0),
+                    )
+                except Exception as e:
+                    logging.warning(f'Witness: failed to save inbound vote: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(f'Witness: vote listener stopped on {relay_url}: {e}')
 
     async def _channelTombstoneListen(self, relay_url: str):
         """Listen for commitment tombstones as a fallback reset (sender side).
@@ -3675,6 +3713,61 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 except Exception as e:
                     logging.warning(f'Bounty: close failed: {e}')
         asyncio.run_coroutine_threadsafe(_close(), loop)
+
+    def submitVoteAllocationSync(self, allocations: list) -> bool:
+        """Validate, sign, save, and publish a stream vote allocation.
+
+        Args:
+            allocations: [{'stream_name': str, 'provider_pubkey': str, 'percentage': float}, ...]
+
+        Returns:
+            True on success.
+
+        Raises:
+            RuntimeError: if wallet not ready.
+            ValueError: if allocations are invalid (>100%, duplicates, etc.)
+        """
+        from satorineuron.witness.voting import build_vote_allocation, KIND_STREAM_VOTE_ALLOCATION
+        import json as _json
+        if not self.walletManager or not self.walletManager.wallet_pubkey:
+            raise RuntimeError('Wallet not initialized')
+        payload, tags = build_vote_allocation(
+            allocations, self.walletManager, self.nostrPubkey)
+        self.networkDB.save_vote_allocation(
+            voter_nostr_pubkey=self.nostrPubkey,
+            voter_wallet_pubkey=self.walletManager.wallet_pubkey,
+            voter_evr_address=self.walletManager.wallet_evr_address,
+            allocations_json=_json.dumps(allocations),
+            total_percentage=payload['total_percentage'],
+            allocated_at=payload['allocated_at'],
+        )
+        content = _json.dumps(payload, sort_keys=True, separators=(',', ':'))
+        loop = getattr(self, '_networkLoop', None)
+        if loop and not loop.is_closed() and self._networkClients:
+            future = asyncio.run_coroutine_threadsafe(
+                self._publishWitnessOnAllRelays(KIND_STREAM_VOTE_ALLOCATION, tags, content),
+                loop)
+            try:
+                event_id = future.result(timeout=10)
+                if event_id:
+                    self.networkDB.mark_vote_allocation_published(
+                        self.nostrPubkey, event_id)
+            except Exception as e:
+                logging.warning(f'Witness: vote allocation publish failed: {e}')
+        return True
+
+    async def _publishWitnessOnAllRelays(
+        self, kind: int, tags: list, content: str
+    ) -> str | None:
+        """Publish a witness event to all connected relay clients."""
+        event_id = None
+        for client in self._networkClients.values():
+            try:
+                eid = await client.publish_witness_event(kind, tags, content)
+                event_id = event_id or eid
+            except Exception as e:
+                logging.warning(f'Witness relay publish error: {e}')
+        return event_id
 
     def discoverBountiesSync(self, active_only: bool = True) -> list:
         """Discover bounties from connected relays (sync context)."""

@@ -243,3 +243,23 @@ class WalletManager:
         if isinstance(self._vault, EvrmoreWallet):
             self._vault.close()
         return self._vault
+
+    @property
+    def wallet_pubkey(self) -> Optional[str]:
+        """66-char hex compressed EVR public key, or None if wallet not ready."""
+        return self._wallet.pubkey if self._wallet else None
+
+    @property
+    def wallet_evr_address(self) -> Optional[str]:
+        """Base58 EVR P2PKH address, or None if wallet not ready."""
+        return self._wallet.address if self._wallet else None
+
+    def sign_message(self, msg: str) -> str:
+        """Sign a message with the wallet's EVR private key.
+
+        Returns base64-encoded signature, compatible with
+        satorilib.wallet.evrmore.verify() as used in central's auth.py.
+        """
+        import base64
+        sig_bytes = self._wallet.sign(message=msg)
+        return base64.b64encode(sig_bytes).decode('utf-8')

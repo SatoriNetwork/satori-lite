@@ -3308,6 +3308,53 @@ def register_routes(app):
             return jsonify({'error': 'Bounty not found'}), 404
         return jsonify(stats)
 
+    # ── Witness voting routes ────────────────────────────────────────────────
+
+    @app.route('/api/witness/vote-allocation', methods=['GET'])
+    @login_required
+    def api_witness_vote_allocation_get():
+        """Return my current stream vote allocation."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        row = startup.networkDB.get_my_vote_allocation(startup.nostrPubkey)
+        if row is None:
+            return jsonify(None)
+        import json as _json
+        row['allocations'] = _json.loads(row['allocations_json'])
+        return jsonify(row)
+
+    @app.route('/api/witness/vote-allocation', methods=['POST'])
+    @login_required
+    def api_witness_vote_allocation_post():
+        """Submit a new stream vote allocation (replaces any previous allocation)."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        if not startup.walletManager or not startup.walletManager.wallet_pubkey:
+            return jsonify({'error': 'Wallet not ready'}), 503
+        data = request.get_json() or {}
+        allocations = data.get('allocations')
+        if not isinstance(allocations, list) or not allocations:
+            return jsonify({'error': 'allocations must be a non-empty list'}), 400
+        try:
+            startup.submitVoteAllocationSync(allocations)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except RuntimeError as e:
+            return jsonify({'error': str(e)}), 503
+        return jsonify({'success': True})
+
+    @app.route('/api/witness/stream-vote-summary', methods=['GET'])
+    @login_required
+    def api_witness_stream_vote_summary():
+        """Return aggregated vote totals per stream across all known voters."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        summary = startup.networkDB.get_stream_vote_summary()
+        return jsonify(summary)
+
     # ── Access request routes (approval-gated streams) ───────────────────────
 
     @app.route('/api/access/request', methods=['POST'])

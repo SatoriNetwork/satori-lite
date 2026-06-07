@@ -432,6 +432,20 @@ class NetworkDB:
             conn.execute(
                 "ALTER TABLE publications "
                 "ADD COLUMN approval_required INTEGER NOT NULL DEFAULT 0")
+        # Witness vote allocations
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS witness_vote_allocations (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                voter_nostr_pubkey  TEXT NOT NULL UNIQUE,
+                voter_wallet_pubkey TEXT NOT NULL,
+                voter_evr_address   TEXT NOT NULL,
+                allocations_json    TEXT NOT NULL,
+                total_percentage    REAL NOT NULL,
+                allocated_at        INTEGER NOT NULL,
+                nostr_event_id      TEXT,
+                published           INTEGER NOT NULL DEFAULT 0
+            )
+        """)
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────
@@ -1616,3 +1630,75 @@ class NetworkDB:
             "WHERE stream_name = ? AND p2sh_address = ?",
             (stream_name, p2sh_address)).fetchone()
         return dict(row) if row else None
+
+    # ── Witness Vote Allocations ────────────────────────────────────
+
+    def save_vote_allocation(
+        self,
+        voter_nostr_pubkey: str,
+        voter_wallet_pubkey: str,
+        voter_evr_address: str,
+        allocations_json: str,
+        total_percentage: float,
+        allocated_at: int,
+    ) -> None:
+        """Upsert a vote allocation (own or inbound peer)."""
+        conn = self._get_conn()
+        conn.execute("""
+            INSERT OR REPLACE INTO witness_vote_allocations
+                (voter_nostr_pubkey, voter_wallet_pubkey, voter_evr_address,
+                 allocations_json, total_percentage, allocated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (voter_nostr_pubkey, voter_wallet_pubkey, voter_evr_address,
+              allocations_json, total_percentage, allocated_at))
+        conn.commit()
+
+    def get_my_vote_allocation(self, voter_nostr_pubkey: str) -> dict | None:
+        """Return the current allocation for the given voter pubkey, or None."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM witness_vote_allocations WHERE voter_nostr_pubkey = ?",
+            (voter_nostr_pubkey,)).fetchone()
+        return dict(row) if row else None
+
+    def mark_vote_allocation_published(
+        self, voter_nostr_pubkey: str, nostr_event_id: str
+    ) -> None:
+        """Mark a vote allocation as published with its Nostr event ID."""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE witness_vote_allocations "
+            "SET published = 1, nostr_event_id = ? "
+            "WHERE voter_nostr_pubkey = ?",
+            (nostr_event_id, voter_nostr_pubkey))
+        conn.commit()
+
+    def get_stream_vote_summary(self) -> list[dict]:
+        """Aggregate vote allocations per stream across all known voters.
+
+        Returns list sorted by total_percentage descending.
+        Each entry: {stream_name, provider_pubkey, voter_count, total_percentage}
+        """
+        import json as _json
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT allocations_json FROM witness_vote_allocations"
+        ).fetchall()
+        tally: dict[tuple, dict] = {}
+        for row in rows:
+            try:
+                allocs = _json.loads(row[0])
+            except Exception:
+                continue
+            for a in allocs:
+                key = (a.get('stream_name', ''), a.get('provider_pubkey', ''))
+                if key not in tally:
+                    tally[key] = {'stream_name': key[0], 'provider_pubkey': key[1],
+                                  'voter_count': 0, 'total_percentage': 0.0}
+                tally[key]['voter_count'] += 1
+                tally[key]['total_percentage'] += a.get('percentage', 0.0)
+        result = list(tally.values())
+        result.sort(key=lambda x: x['total_percentage'], reverse=True)
+        for r in result:
+            r['total_percentage'] = round(r['total_percentage'], 4)
+        return result
