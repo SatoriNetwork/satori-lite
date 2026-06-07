@@ -3773,7 +3773,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self,
         stream_name: str,
         provider_pubkey: str,
-        reason: str,
+        reason: str = 'flagged',
         details: str = '',
     ) -> bool:
         """Validate, sign, save, and publish a stream flag event.

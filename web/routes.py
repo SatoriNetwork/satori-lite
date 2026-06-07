@@ -3376,7 +3376,7 @@ def register_routes(app):
     @app.route('/api/witness/stream-flag', methods=['POST'])
     @login_required
     def api_witness_stream_flag():
-        """Flag a stream as spam, misleading, inactive, or other."""
+        """Flag a stream."""
         startup = get_startup()
         if not startup or not hasattr(startup, 'networkDB'):
             return jsonify({'error': 'Not ready'}), 503
@@ -3385,14 +3385,10 @@ def register_routes(app):
         data = request.get_json() or {}
         stream_name = data.get('stream_name', '').strip()
         provider_pubkey = data.get('provider_pubkey', '').strip()
-        reason = data.get('reason', '').strip()
-        details = data.get('details', '').strip()
         if not stream_name or not provider_pubkey:
             return jsonify({'error': 'stream_name and provider_pubkey are required'}), 400
         try:
-            startup.submitStreamFlagSync(stream_name, provider_pubkey, reason, details)
-        except ValueError as e:
-            return jsonify({'error': str(e)}), 400
+            startup.submitStreamFlagSync(stream_name, provider_pubkey)
         except RuntimeError as e:
             return jsonify({'error': str(e)}), 503
         return jsonify({'success': True})

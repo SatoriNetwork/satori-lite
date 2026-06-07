@@ -5,8 +5,6 @@ import time
 KIND_STREAM_VOTE_ALLOCATION = 34610
 KIND_STREAM_FLAG = 34611
 
-VALID_FLAG_REASONS = frozenset({'spam', 'misleading', 'inactive', 'other'})
-
 
 def build_vote_allocation(
     allocations: list[dict],
@@ -74,9 +72,6 @@ def build_stream_flag(
     Raises:
         ValueError: if reason is not in VALID_FLAG_REASONS
     """
-    if reason not in VALID_FLAG_REASONS:
-        raise ValueError(f"Invalid reason '{reason}'. Must be one of: {', '.join(sorted(VALID_FLAG_REASONS))}")
-
     d_tag = f'{nostr_pubkey}|||{stream_name}|||{provider_pubkey}'
     payload = {
         'action': 'stream_flag',

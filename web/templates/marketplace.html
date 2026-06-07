@@ -1246,36 +1246,14 @@
     </section>
 
     <!-- Flag stream dialog -->
-    <dialog id="flagDialog" style="border:1px solid var(--border-color);border-radius:14px;background:var(--bg-card);color:var(--text-primary);padding:1.5rem;max-width:420px;width:92%;">
-        <form method="dialog">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-                <div style="font-size:1rem;font-weight:700;">Flag stream</div>
-                <button value="cancel" style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:1.25rem;line-height:1;">&#x2715;</button>
-            </div>
-            <div id="flagStreamLabel" style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;word-break:break-all;"></div>
-            <div style="font-size:0.8rem;font-weight:600;margin-bottom:0.5rem;">Reason</div>
-            <div style="display:flex;flex-direction:column;gap:0.4rem;margin-bottom:1rem;">
-                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
-                    <input type="radio" name="flagReason" value="spam" style="accent-color:var(--accent-primary);"> Spam or irrelevant
-                </label>
-                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
-                    <input type="radio" name="flagReason" value="misleading" style="accent-color:var(--accent-primary);"> Misleading or inaccurate data
-                </label>
-                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
-                    <input type="radio" name="flagReason" value="inactive" style="accent-color:var(--accent-primary);"> Stale or no longer publishing
-                </label>
-                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
-                    <input type="radio" name="flagReason" value="other" style="accent-color:var(--accent-primary);"> Other
-                </label>
-            </div>
-            <div style="font-size:0.8rem;font-weight:600;margin-bottom:0.4rem;">Details <span style="font-weight:400;color:var(--text-muted);">(optional)</span></div>
-            <textarea id="flagDetails" rows="2" style="width:100%;resize:vertical;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-input);color:var(--text-primary);padding:0.5rem 0.6rem;font-size:0.85rem;margin-bottom:1rem;" placeholder="Any additional context…"></textarea>
-            <div id="flagSubmitStatus" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em;margin-bottom:0.75rem;"></div>
-            <div style="display:flex;gap:0.6rem;justify-content:flex-end;">
-                <button value="cancel" style="background:transparent;border:1px solid var(--border-color);color:var(--text-secondary);padding:0.4rem 0.9rem;border-radius:8px;cursor:pointer;font-size:0.85rem;">Cancel</button>
-                <button type="button" onclick="submitFlag()" style="background:var(--accent-gradient,#5a5aff);border:none;color:#fff;padding:0.4rem 1rem;border-radius:8px;cursor:pointer;font-size:0.85rem;font-weight:600;">Submit flag</button>
-            </div>
-        </form>
+    <dialog id="flagDialog" style="border:1px solid var(--border-color);border-radius:14px;background:var(--bg-card);color:var(--text-primary);padding:1.5rem;max-width:380px;width:92%;">
+        <div style="font-size:1rem;font-weight:700;margin-bottom:0.75rem;">Flag stream</div>
+        <div id="flagStreamLabel" style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.25rem;word-break:break-all;"></div>
+        <div id="flagSubmitStatus" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em;margin-bottom:0.75rem;"></div>
+        <div style="display:flex;gap:0.6rem;justify-content:flex-end;">
+            <button onclick="document.getElementById('flagDialog').close()" style="background:transparent;border:1px solid var(--border-color);color:var(--text-secondary);padding:0.4rem 0.9rem;border-radius:8px;cursor:pointer;font-size:0.85rem;">Cancel</button>
+            <button type="button" onclick="submitFlag()" style="background:#dc3545;border:none;color:#fff;padding:0.4rem 1rem;border-radius:8px;cursor:pointer;font-size:0.85rem;font-weight:600;">Flag stream</button>
+        </div>
     </dialog>
 
 </main>
@@ -1364,7 +1342,10 @@
         document.getElementById('segVoting').classList.toggle('is-active',  seg === 'voting');
         document.getElementById('segStreams').setAttribute('aria-selected', seg === 'streams' ? 'true' : 'false');
         document.getElementById('segVoting').setAttribute('aria-selected',  seg === 'voting'  ? 'true' : 'false');
-        if (seg === 'voting') renderVoting();
+        if (seg === 'voting') {
+            if (allStreams.length === 0) refreshVoting();
+            else renderVoting();
+        }
     }
 
     async function loadClassifications() {
@@ -1481,6 +1462,7 @@
 
         try { await fetchStreamsOnce(); } catch(e) { allStreams = []; updateConnState(false); }
         renderStreams();
+        if (activeSegment === 'voting') renderVoting();
 
         if (discover) {
             // Kick off background discovery, then poll a few times for fresh data.
@@ -1495,7 +1477,10 @@
                 try {
                     const before = allStreams.length;
                     await fetchStreamsOnce();
-                    if (allStreams.length !== before) renderStreams();
+                    if (allStreams.length !== before) {
+                        renderStreams();
+                        if (activeSegment === 'voting') renderVoting();
+                    }
                 } catch(e) { /* keep polling */ }
             }
         }
@@ -2255,7 +2240,14 @@
     }
 
     async function refreshVoting() {
-        await fetchStreamsOnce();
+        if (allStreams.length === 0) {
+            // No streams cached yet — run the full discovery cycle so the
+            // relay scan runs. renderStreams/renderVoting hooks below will
+            // update the voting panel as results arrive.
+            await refreshStreams({ discover: true });
+        } else {
+            await fetchStreamsOnce();
+        }
         renderVoting();
     }
 
@@ -2266,24 +2258,13 @@
 
     function openFlagDialog(stream_name, provider_pubkey, display_name) {
         _flagTarget = { stream_name, provider_pubkey };
-        const dlg = document.getElementById('flagDialog');
-        document.getElementById('flagStreamLabel').textContent = display_name + ' — ' + stream_name;
-        document.getElementById('flagDetails').value = '';
+        document.getElementById('flagStreamLabel').textContent = display_name + (display_name !== stream_name ? ' (' + stream_name + ')' : '');
         document.getElementById('flagSubmitStatus').textContent = '';
-        dlg.querySelectorAll('input[name=flagReason]').forEach(r => { r.checked = false; });
-        dlg.showModal();
+        document.getElementById('flagDialog').showModal();
     }
 
     async function submitFlag() {
         if (!_flagTarget) return;
-        const dlg = document.getElementById('flagDialog');
-        const reason = [...dlg.querySelectorAll('input[name=flagReason]')]
-            .find(r => r.checked)?.value;
-        if (!reason) {
-            document.getElementById('flagSubmitStatus').textContent = 'Please select a reason.';
-            return;
-        }
-        const details = document.getElementById('flagDetails').value.trim();
         document.getElementById('flagSubmitStatus').textContent = 'Publishing…';
         try {
             const resp = await fetch('/api/witness/stream-flag', {
@@ -2292,7 +2273,7 @@
                 body: JSON.stringify({
                     stream_name: _flagTarget.stream_name,
                     provider_pubkey: _flagTarget.provider_pubkey,
-                    reason, details,
+                    reason: 'flagged',
                 }),
             });
             const data = await resp.json();
@@ -2302,9 +2283,8 @@
             }
             const fk = voteKey(_flagTarget.stream_name, _flagTarget.provider_pubkey);
             flaggedStreams.add(fk);
-            // Remove any pending vote for this stream — vote and flag are mutually exclusive
             delete pendingVotes[fk];
-            dlg.close();
+            document.getElementById('flagDialog').close();
             showToast('Stream flagged and published to relays.');
             updateBudgetBar();
             renderVoting();
