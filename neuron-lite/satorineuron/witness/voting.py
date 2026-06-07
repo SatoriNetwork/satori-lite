@@ -62,26 +62,24 @@ def build_vote_allocation(
 def build_stream_flag(
     stream_name: str,
     provider_pubkey: str,
-    reason: str,
-    details: str,
     wallet_manager,
     nostr_pubkey: str,
+    retracted: bool = False,
 ) -> tuple[dict, list[list[str]]]:
-    """Build and sign a STREAM_FLAG inner payload.
+    """Build and sign a STREAM_FLAG inner payload (one-click flag, no reason).
 
-    Raises:
-        ValueError: if reason is not in VALID_FLAG_REASONS
+    Pass retracted=True to publish an unflag: the event keeps the same d-tag, so
+    it replaces the prior flag on the relay, and peers delete their cached row.
     """
     d_tag = f'{nostr_pubkey}|||{stream_name}|||{provider_pubkey}'
     payload = {
         'action': 'stream_flag',
         'flagged_stream_name': stream_name,
         'flagged_provider_pubkey': provider_pubkey,
-        'reason': reason,
-        'details': (details or '').strip(),
         'flagger_wallet_pubkey': wallet_manager.wallet_pubkey,
         'flagger_evr_address': wallet_manager.wallet_evr_address,
         'flagger_nostr_pubkey': nostr_pubkey,
+        'retracted': retracted,
         'flagged_at': int(time.time()),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(',', ':'))

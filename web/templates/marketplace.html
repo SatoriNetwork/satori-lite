@@ -1042,6 +1042,12 @@
     .vote-flag-btn:hover { color: #dc3545; border-color: rgba(220,53,69,0.35); }
     .vote-flag-btn .material-icons { font-size: 16px; }
     .vote-flag-btn.is-flagged { color: #dc3545; }
+    .flag-count-badge {
+        margin-left: 3px;
+        font-size: 0.7rem; font-weight: 700;
+        color: #dc3545;
+        line-height: 1;
+    }
     .vote-row.is-flagged-row {
         opacity: 0.65;
         background: color-mix(in oklab, #dc3545 4%, var(--bg-card));
@@ -1444,6 +1450,10 @@
         const resp = await fetch('/api/network/streams');
         const data = await resp.json();
         allStreams = data.streams || [];
+        // Seed flagged set from server state so "you flagged this" survives refresh.
+        for (const s of allStreams) {
+            if (s.my_flag) flaggedStreams.add(voteKey(s.stream_name, s.nostr_pubkey));
+        }
         updateConnState(!!data.connected);
     }
 
@@ -1899,12 +1909,22 @@
         // Flag button (only for streams we don't own)
         const cardFlagKey = voteKey(s.stream_name, s.nostr_pubkey);
         const cardFlagged = flaggedStreams.has(cardFlagKey);
+        const cardFlagCount = s.flag_count || 0;
+        const cardFlagCountBadge = cardFlagCount > 0
+            ? `<span class="flag-count-badge" title="${cardFlagCount} peer${cardFlagCount !== 1 ? 's' : ''} flagged this stream">${cardFlagCount}</span>`
+            : '';
         const flagBtnHtml = s.is_mine ? '' :
-            `<button class="vote-flag-btn ${cardFlagged ? 'is-flagged' : ''}"
-                title="${cardFlagged ? 'You flagged this stream' : 'Flag as spam / misleading / inactive'}"
+            (cardFlagged
+            ? `<button class="vote-flag-btn is-flagged"
+                title="Click to remove your flag"
+                onclick="unflagStream('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}')">
+                <i class="material-icons" style="font-size:15px;">flag</i>${cardFlagCountBadge}
+            </button>`
+            : `<button class="vote-flag-btn"
+                title="Flag as spam / misleading / inactive"
                 onclick="openFlagDialog('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}','${escapeJs(s.name||s.stream_name)}')">
-                <i class="material-icons" style="font-size:15px;">${cardFlagged ? 'flag' : 'outlined_flag'}</i>
-            </button>`;
+                <i class="material-icons" style="font-size:15px;">outlined_flag</i>${cardFlagCountBadge}
+            </button>`);
 
         // Footer publisher label / toggle
         const cardId = 'mkt-card-' + s.stream_name.replace(/[^a-z0-9]/gi, '_');
@@ -2179,6 +2199,10 @@
                 : '<span style="color:var(--text-muted)">No votes yet</span>';
             const isFlagged = flaggedStreams.has(k);
             const hasVote = (pendingVotes[k] || 0) > 0;
+            const flagCount = s.flag_count || 0;
+            const flagCountBadge = flagCount > 0
+                ? `<span class="flag-count-badge" title="${flagCount} peer${flagCount !== 1 ? 's' : ''} flagged this stream">${flagCount}</span>`
+                : '';
 
             // Vote input: disabled when flagged (can't vote for a flagged stream)
             const voteCell = isFlagged
@@ -2194,17 +2218,18 @@
 
             // Flag button: disabled when stream already has pending votes
             const flagCell = isFlagged
-                ? `<button class="vote-flag-btn is-flagged" title="You flagged this stream" disabled>
-                    <i class="material-icons">flag</i>
+                ? `<button class="vote-flag-btn is-flagged" title="Click to remove your flag"
+                        onclick="unflagStream('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}')">
+                    <i class="material-icons">flag</i>${flagCountBadge}
                    </button>`
                 : hasVote
                 ? `<button class="vote-flag-btn" title="Remove your vote first to flag this stream" disabled style="opacity:0.3;">
-                    <i class="material-icons">outlined_flag</i>
+                    <i class="material-icons">outlined_flag</i>${flagCountBadge}
                    </button>`
                 : `<button class="vote-flag-btn"
                         title="Flag this stream as spam, misleading, or inactive"
                         onclick="openFlagDialog('${escapeJs(s.stream_name)}','${escapeJs(s.nostr_pubkey)}','${escapeJs(s.name||s.stream_name)}')">
-                    <i class="material-icons">outlined_flag</i>
+                    <i class="material-icons">outlined_flag</i>${flagCountBadge}
                    </button>`;
 
             html += `
@@ -2289,7 +2314,6 @@
                 body: JSON.stringify({
                     stream_name: _flagTarget.stream_name,
                     provider_pubkey: _flagTarget.provider_pubkey,
-                    reason: 'flagged',
                 }),
             });
             const data = await resp.json();
@@ -2306,6 +2330,29 @@
             renderVoting();
         } catch(e) {
             document.getElementById('flagSubmitStatus').textContent = 'Network error: ' + e.message;
+        }
+    }
+
+    async function unflagStream(stream_name, provider_pubkey) {
+        const fk = voteKey(stream_name, provider_pubkey);
+        try {
+            const resp = await fetch('/api/witness/stream-flag', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stream_name, provider_pubkey }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                showToast('Error: ' + (data.error || resp.status));
+                return;
+            }
+            flaggedStreams.delete(fk);
+            showToast('Flag removed.');
+            await fetchStreamsOnce();
+            renderStreams();
+            if (activeSegment === 'voting') renderVoting();
+        } catch(e) {
+            showToast('Network error: ' + e.message);
         }
     }
 

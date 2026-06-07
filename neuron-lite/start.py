@@ -82,6 +82,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
         self._accessRequestListeners: dict = {}  # relay_url -> asyncio.Task
         self._witnessVoteListeners: dict = {}  # relay_url -> asyncio.Task
+        self._witnessFlagListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
         self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
         self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
@@ -400,6 +401,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkEnsureChannelOpenListener(relay_url)
             self._networkEnsureSettlementListener(relay_url)
             self._networkEnsureTombstoneListener(relay_url)
+            # Witness vote/flag events are network-wide (any peer can vote or
+            # flag), so their listeners must run on every connected relay too,
+            # not only relays where we subscribe to a stream.
+            self._networkEnsureWitnessVoteListener(relay_url)
+            self._networkEnsureWitnessFlagListener(relay_url)
             asyncio.ensure_future(
                 self._channelPublishStaleTombstones(relay_url))
             return client
@@ -1052,7 +1058,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsureTombstoneListener(relay_url)
         self._networkEnsurePredictionListener(relay_url)
         self._networkEnsureAccessRequestListener(relay_url)
-        self._networkEnsureWitnessVoteListener(relay_url)
 
     # ── Channel support ───────────────────────────────────────────────────────
 
@@ -1198,6 +1203,47 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         except Exception as e:
             logging.warning(f'Witness: vote listener stopped on {relay_url}: {e}')
+
+    def _networkEnsureWitnessFlagListener(self, relay_url: str):
+        """Start a witness stream flag listener for a relay if one isn't running."""
+        task = self._witnessFlagListeners.get(relay_url)
+        if task and not task.done():
+            return
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        self._witnessFlagListeners[relay_url] = asyncio.ensure_future(
+            self._networkListenWitnessFlags(relay_url))
+
+    async def _networkListenWitnessFlags(self, relay_url: str):
+        """Listen for inbound stream flag events and store them."""
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+        try:
+            async for flag in client.witness_stream_flags():
+                try:
+                    if flag.get('retracted'):
+                        await asyncio.to_thread(
+                            self.networkDB.delete_stream_flag,
+                            flag['flagger_nostr_pubkey'],
+                            flag['flagged_stream_name'],
+                            flag['flagged_provider_pubkey'],
+                        )
+                    else:
+                        await asyncio.to_thread(
+                            self.networkDB.save_stream_flag,
+                            flag['flagger_nostr_pubkey'],
+                            flag['flagged_stream_name'],
+                            flag['flagged_provider_pubkey'],
+                            flag.get('flagged_at', 0),
+                        )
+                except Exception as e:
+                    logging.warning(f'Witness: failed to apply inbound flag: {e}')
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(f'Witness: flag listener stopped on {relay_url}: {e}')
 
     async def _channelTombstoneListen(self, relay_url: str):
         """Listen for commitment tombstones as a fallback reset (sender side).
@@ -3773,28 +3819,23 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self,
         stream_name: str,
         provider_pubkey: str,
-        reason: str = 'flagged',
-        details: str = '',
     ) -> bool:
-        """Validate, sign, save, and publish a stream flag event.
+        """Sign, save, and publish a one-click stream flag event.
 
         Raises:
             RuntimeError: if wallet not ready.
-            ValueError: if reason is invalid.
         """
         from satorineuron.witness.voting import build_stream_flag, KIND_STREAM_FLAG
         import json as _json
         if not self.walletManager or not self.walletManager.wallet_pubkey:
             raise RuntimeError('Wallet not initialized')
         payload, tags = build_stream_flag(
-            stream_name, provider_pubkey, reason, details,
+            stream_name, provider_pubkey,
             self.walletManager, self.nostrPubkey)
         self.networkDB.save_stream_flag(
             flagger_nostr_pubkey=self.nostrPubkey,
             flagged_stream_name=stream_name,
             flagged_provider_pubkey=provider_pubkey,
-            reason=reason,
-            details=details,
             flagged_at=payload['flagged_at'],
         )
         content = _json.dumps(payload, sort_keys=True, separators=(',', ':'))
@@ -3810,6 +3851,40 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         self.nostrPubkey, stream_name, provider_pubkey, event_id)
             except Exception as e:
                 logging.warning(f'Witness: stream flag publish failed: {e}')
+        return True
+
+    def submitStreamUnflagSync(
+        self,
+        stream_name: str,
+        provider_pubkey: str,
+    ) -> bool:
+        """Retract a stream flag: delete it locally and publish a retraction.
+
+        The retraction reuses the same d-tag, so it replaces the prior flag on
+        the relay and peers delete their cached copy.
+
+        Raises:
+            RuntimeError: if wallet not ready.
+        """
+        from satorineuron.witness.voting import build_stream_flag, KIND_STREAM_FLAG
+        import json as _json
+        if not self.walletManager or not self.walletManager.wallet_pubkey:
+            raise RuntimeError('Wallet not initialized')
+        payload, tags = build_stream_flag(
+            stream_name, provider_pubkey,
+            self.walletManager, self.nostrPubkey, retracted=True)
+        self.networkDB.delete_stream_flag(
+            self.nostrPubkey, stream_name, provider_pubkey)
+        content = _json.dumps(payload, sort_keys=True, separators=(',', ':'))
+        loop = getattr(self, '_networkLoop', None)
+        if loop and not loop.is_closed() and self._networkClients:
+            future = asyncio.run_coroutine_threadsafe(
+                self._publishWitnessOnAllRelays(KIND_STREAM_FLAG, tags, content),
+                loop)
+            try:
+                future.result(timeout=10)
+            except Exception as e:
+                logging.warning(f'Witness: stream unflag publish failed: {e}')
         return True
 
     def discoverBountiesSync(self, active_only: bool = True) -> list:

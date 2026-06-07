@@ -2291,6 +2291,11 @@ def register_routes(app):
             (v['stream_name'], v['provider_pubkey']): v
             for v in startup.networkDB.get_stream_vote_summary()
         }
+        # Build flag summary lookup: (stream_name, provider_pubkey) -> flag_count
+        flag_lookup = {
+            (f['stream_name'], f['provider_pubkey']): f['flag_count']
+            for f in startup.networkDB.get_stream_flag_summary()
+        }
         # Include my current allocation as a lookup: stream_name -> percentage
         my_alloc_row = startup.networkDB.get_my_vote_allocation(startup.nostrPubkey)
         import json as _json
@@ -2310,6 +2315,10 @@ def register_routes(app):
             s_copy['vote_count'] = vote.get('voter_count', 0)
             s_copy['vote_total'] = vote.get('total_percentage', 0.0)
             s_copy['my_vote'] = my_alloc.get(vk, 0)
+            s_copy['flag_count'] = flag_lookup.get(vk, 0)
+            s_copy['my_flag'] = startup.networkDB.get_my_stream_flag(
+                startup.nostrPubkey, s['stream_name'], s.get('nostr_pubkey', '')
+            ) is not None
             streams.append(s_copy)
         return jsonify({
             'connected': connected,
@@ -3389,6 +3398,26 @@ def register_routes(app):
             return jsonify({'error': 'stream_name and provider_pubkey are required'}), 400
         try:
             startup.submitStreamFlagSync(stream_name, provider_pubkey)
+        except RuntimeError as e:
+            return jsonify({'error': str(e)}), 503
+        return jsonify({'success': True})
+
+    @app.route('/api/witness/stream-flag', methods=['DELETE'])
+    @login_required
+    def api_witness_stream_unflag():
+        """Retract a previously published stream flag."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+        if not startup.walletManager or not startup.walletManager.wallet_pubkey:
+            return jsonify({'error': 'Wallet not ready'}), 503
+        data = request.get_json() or {}
+        stream_name = data.get('stream_name', '').strip()
+        provider_pubkey = data.get('provider_pubkey', '').strip()
+        if not stream_name or not provider_pubkey:
+            return jsonify({'error': 'stream_name and provider_pubkey are required'}), 400
+        try:
+            startup.submitStreamUnflagSync(stream_name, provider_pubkey)
         except RuntimeError as e:
             return jsonify({'error': str(e)}), 503
         return jsonify({'success': True})

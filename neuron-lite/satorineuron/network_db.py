@@ -446,14 +446,17 @@ class NetworkDB:
                 published           INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # Drop the pre-one-click stream_flags table (had reason/details NOT NULL).
+        # The table is unreleased (witness branch only), so recreating is safe.
+        cols = conn.execute("PRAGMA table_info(stream_flags)").fetchall()
+        if any(c[1] == 'reason' for c in cols):
+            conn.execute("DROP TABLE stream_flags")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS stream_flags (
                 id                       INTEGER PRIMARY KEY AUTOINCREMENT,
                 flagger_nostr_pubkey     TEXT NOT NULL,
                 flagged_stream_name      TEXT NOT NULL,
                 flagged_provider_pubkey  TEXT NOT NULL,
-                reason                   TEXT NOT NULL,
-                details                  TEXT,
                 flagged_at               INTEGER NOT NULL,
                 nostr_event_id           TEXT,
                 published                INTEGER NOT NULL DEFAULT 0,
@@ -1724,18 +1727,29 @@ class NetworkDB:
         flagger_nostr_pubkey: str,
         flagged_stream_name: str,
         flagged_provider_pubkey: str,
-        reason: str,
-        details: str,
         flagged_at: int,
     ) -> None:
         conn = self._get_conn()
         conn.execute(
             """INSERT OR REPLACE INTO stream_flags
                (flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey,
-                reason, details, flagged_at, published)
-               VALUES (?, ?, ?, ?, ?, ?, 0)""",
+                flagged_at, published)
+               VALUES (?, ?, ?, ?, 0)""",
             (flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey,
-             reason, details, flagged_at))
+             flagged_at))
+        conn.commit()
+
+    def delete_stream_flag(
+        self, flagger_nostr_pubkey: str, flagged_stream_name: str,
+        flagged_provider_pubkey: str
+    ) -> None:
+        """Remove a flag row (own unflag, or inbound peer retraction)."""
+        conn = self._get_conn()
+        conn.execute(
+            "DELETE FROM stream_flags "
+            "WHERE flagger_nostr_pubkey = ? AND flagged_stream_name = ? "
+            "AND flagged_provider_pubkey = ?",
+            (flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey))
         conn.commit()
 
     def mark_stream_flag_published(
@@ -1755,38 +1769,36 @@ class NetworkDB:
     ) -> dict | None:
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT reason, details, flagged_at FROM stream_flags "
+            "SELECT flagged_at FROM stream_flags "
             "WHERE flagger_nostr_pubkey = ? AND flagged_stream_name = ? "
             "AND flagged_provider_pubkey = ?",
             (flagger_nostr_pubkey, flagged_stream_name, flagged_provider_pubkey)
         ).fetchone()
         if not row:
             return None
-        return {'reason': row[0], 'details': row[1], 'flagged_at': row[2]}
+        return {'flagged_at': row[0]}
 
     def get_stream_flag_summary(self) -> list[dict]:
         """Aggregate flag counts per stream across all known flaggers.
 
         Returns list sorted by flag_count descending.
-        Each entry: {stream_name, provider_pubkey, flag_count, reasons}
+        Each entry: {stream_name, provider_pubkey, flag_count}
         """
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT flagged_stream_name, flagged_provider_pubkey, reason "
+            "SELECT flagged_stream_name, flagged_provider_pubkey "
             "FROM stream_flags"
         ).fetchall()
         tally: dict[tuple, dict] = {}
-        for flagged_stream_name, flagged_provider_pubkey, reason in rows:
+        for flagged_stream_name, flagged_provider_pubkey in rows:
             key = (flagged_stream_name, flagged_provider_pubkey)
             if key not in tally:
                 tally[key] = {
                     'stream_name': flagged_stream_name,
                     'provider_pubkey': flagged_provider_pubkey,
                     'flag_count': 0,
-                    'reasons': {},
                 }
             tally[key]['flag_count'] += 1
-            tally[key]['reasons'][reason] = tally[key]['reasons'].get(reason, 0) + 1
         result = list(tally.values())
         result.sort(key=lambda x: x['flag_count'], reverse=True)
         return result
