@@ -1072,7 +1072,7 @@
             </div>
             <div class="mkt-unit" role="group" aria-label="Price unit">
                 <button class="is-active" data-unit="sats"   onclick="setPriceUnit('sats', this)">sats</button>
-                <button                     data-unit="satori" onclick="setPriceUnit('satori', this)">SATORI</button>
+                <button                     data-unit="satori" onclick="setPriceUnit('satori', this)">SATORIEVR</button>
             </div>
             <button class="mkt-refresh" id="mktRefreshBtn" onclick="refreshStreams({ discover: true })">
                 <i class="material-icons">refresh</i><span>Refresh</span>
@@ -1283,7 +1283,7 @@
             const satori = sats / SATS_PER_SATORI;
             // Trim trailing zeros after up to 8 decimals
             const str = parseFloat(satori.toFixed(8)).toString();
-            return str + ' SATORI';
+            return str + ' SATORIEVR';
         }
         return sats.toLocaleString() + ' sats';
     }
