@@ -67,6 +67,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.isDebug: bool = isDebug
         self.balances: dict = {}
         self.aiengine: Union[Engine, None] = None
+        # Guards ensureEngine() so the relay and central paths can both trigger
+        # engine construction without racing to build two of them.
+        self._engineLock: threading.RLock = threading.RLock()
         self.publications: list[Stream] = []  # Keep for engine
         self.subscriptions: list[Stream] = []  # Keep for engine
         self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
@@ -98,9 +101,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             target=self.checkinCheck,
             daemon=True)
         self.checkinCheckThread.start()
-        alreadySetup: bool = os.path.exists(config.walletPath("wallet.yaml"))
-        if not alreadySetup:
-            threading.Thread(target=self.delayedEngine).start()
         self.ranOnce = False
         self.startFunction = self.start
         if self.runMode == RunMode.normal:
@@ -4369,10 +4369,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             daemon=True)
         self.pollObservationsThread.start()
 
-    def delayedEngine(self):
-        time.sleep(60 * 60 * 6)
-        self.buildEngine()
-
     def checkinCheck(self):
         while True:
             time.sleep(60 * 60 * 6)  # Check every 6 hours
@@ -4411,9 +4407,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.createServerConn()
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
+        # Build the engine before relay listeners start so a relay observation
+        # can never reach _networkRunEngine before self.aiengine exists.
+        self.setupDefaultStream()
+        self.ensureEngine()
         self.startNetworkClient()
         self.localRelay.ensure_state_async()
-        self.setupDefaultStream()
         self.spawnEngine()
         startWebUI(self, port=self.uiPort)  # Start web UI after sync
 
@@ -4438,9 +4437,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.createServerConn()
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
+        # Build the engine before relay listeners start (see start()).
+        self.setupDefaultStream()
+        self.ensureEngine()
         self.startNetworkClient()
         self.localRelay.ensure_state_async()
-        self.setupDefaultStream()
         self.spawnEngine()
         startWebUI(self, port=self.uiPort)  # Start web UI after sync
         threading.Event().wait()
@@ -4620,20 +4621,52 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Suppress log for default stream to reduce noise
         # logging.info(f"Default stream configured: {sub_id.uuid}", color="green")
 
+    def ensureEngine(self) -> Union[Engine, None]:
+        """Construct the AI Engine if it does not exist yet (idempotent, thread-safe).
+
+        One Engine instance backs BOTH the relay and central prediction paths,
+        holding every StreamModel in a single registry. It is built
+        unconditionally -- even with no central stream assignments -- because the
+        relay path needs it available before relay observations start arriving,
+        and an Engine with zero initial streams is a valid (empty) registry.
+
+        Call this AFTER setupDefaultStream() and createServerConn() so the engine
+        is built with the central subscriptions and a live server.
+        """
+        if self.aiengine is not None:
+            return self.aiengine
+        with self._engineLock:
+            if self.aiengine is not None:
+                return self.aiengine
+            try:
+                self.aiengine = Engine.createFromNeuron(
+                    subscriptions=self.subscriptions or [],
+                    publications=self.publications or [],
+                    server=self.server,
+                    wallet=self.wallet)
+                logging.info("AI Engine created", color="green")
+            except Exception as e:
+                logging.error(f"Failed to create AI Engine: {e}")
+        return self.aiengine
+
     def spawnEngine(self):
-        """Spawn the AI Engine with stream assignments from Neuron"""
+        """Start the AI Engine's central path: model init + observation polling.
+
+        The Engine object itself is created by ensureEngine() (called earlier so
+        the relay path has it available); here we only wire up the central stream
+        assignments and start polling. With no central assignments this is a
+        no-op and the engine remains a bare registry the relay path still uses.
+        """
+        self.ensureEngine()
+        if self.aiengine is None:
+            logging.warning("Engine unavailable, skipping central Engine spawn")
+            return
         if not self.subscriptions or not self.publications:
-            logging.warning("No stream assignments available, skipping Engine spawn")
+            logging.info("No central stream assignments; engine ready as a bare registry")
             return
 
         # logging.info("Spawning AI Engine...", color="blue")
         try:
-            self.aiengine = Engine.createFromNeuron(
-                subscriptions=self.subscriptions,
-                publications=self.publications,
-                server=self.server,
-                wallet=self.wallet)
-
             def runEngine():
                 try:
                     self.aiengine.initializeFromNeuron()
@@ -4663,11 +4696,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.info("AI Engine spawned successfully", color="green")
         except Exception as e:
             logging.error(f"Failed to spawn AI Engine: {e}")
-
-    def delayedStart(self):
-        alreadySetup: bool = os.path.exists(config.walletPath("wallet.yaml"))
-        if alreadySetup:
-            threading.Thread(target=self.delayedEngine).start()
 
     def triggerRestart(self, return_code=1):
         os._exit(return_code)
