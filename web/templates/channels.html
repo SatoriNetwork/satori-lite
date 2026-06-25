@@ -14,7 +14,7 @@
         Off-chain micropayments for data streams. Lock SATORI once, pay per observation with no on-chain fee each time.
       </p>
       <div class="ch-unit" role="group" aria-label="Display unit">
-        <button class="is-active" data-unit="satori" onclick="setChannelUnit('satori', this)">SATORI</button>
+        <button class="is-active" data-unit="satori" onclick="setChannelUnit('satori', this)">SATORIEVR</button>
         <button                   data-unit="sats"   onclick="setChannelUnit('sats', this)">sats</button>
       </div>
     </div>
@@ -145,7 +145,7 @@
           <div class="ch-amount-input">
             <input type="number" class="form-control" id="ocAmountSatori"
                    placeholder="0.00000000" min="0.00000001" step="0.00000001">
-            <span class="ch-amount-suffix">SATORI</span>
+            <span class="ch-amount-suffix">SATORIEVR</span>
           </div>
           <div class="form-text" id="ocAmountSats"></div>
         </div>
@@ -195,7 +195,7 @@
           <div class="ch-amount-input">
             <input type="number" class="form-control" id="payAmountSatori"
                    placeholder="0.00000000" min="0.00000001" step="0.00000001">
-            <span class="ch-amount-suffix">SATORI</span>
+            <span class="ch-amount-suffix">SATORIEVR</span>
           </div>
           <div class="form-text" id="payAmountSats"></div>
         </div>
@@ -922,7 +922,7 @@ function fmtSatori(sats) {
   const val = n / 1e8;
   // Up to 8 decimal places, strip trailing zeros
   let s = val.toFixed(8).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
-  return s + ' SATORI';
+  return s + ' SATORIEVR';
 }
 
 function satoriToSats(satori) {

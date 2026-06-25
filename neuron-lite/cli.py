@@ -530,19 +530,22 @@ class NeuronCLI:
             lines = ["Wallet Balance:"]
             lines.append("-" * 40)
 
-            # SATORI balance
+            # SATORIEVR balance
             if hasattr(wallet, 'balance') and wallet.balance:
                 satori_amount = wallet.balance.amount
-                lines.append(f"  SATORI: {satori_amount:.8f}")
+                lines.append(f"  SATORIEVR: {satori_amount:.8f}")
             else:
-                lines.append("  SATORI: 0.00000000")
+                lines.append("  SATORIEVR: 0.00000000")
 
             # EVR balance
             if hasattr(wallet, 'currency') and wallet.currency:
                 evr_amount = wallet.currency.amount
-                lines.append(f"  EVR:    {evr_amount:.8f}")
+                lines.append(f"  EVR:       {evr_amount:.8f}")
             else:
-                lines.append("  EVR:    0.00000000")
+                lines.append("  EVR:       0.00000000")
+
+            lines.append("")
+            lines.append("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
 
             return "\n".join(lines)
 
@@ -593,19 +596,22 @@ class NeuronCLI:
             lines = ["Vault Balance:"]
             lines.append("-" * 40)
 
-            # SATORI balance
+            # SATORIEVR balance
             if hasattr(vault, 'balance') and vault.balance:
                 satori_amount = vault.balance.amount
-                lines.append(f"  SATORI: {satori_amount:.8f}")
+                lines.append(f"  SATORIEVR: {satori_amount:.8f}")
             else:
-                lines.append("  SATORI: 0.00000000")
+                lines.append("  SATORIEVR: 0.00000000")
 
             # EVR balance
             if hasattr(vault, 'currency') and vault.currency:
                 evr_amount = vault.currency.amount
-                lines.append(f"  EVR:    {evr_amount:.8f}")
+                lines.append(f"  EVR:       {evr_amount:.8f}")
             else:
-                lines.append("  EVR:    0.00000000")
+                lines.append("  EVR:       0.00000000")
+
+            lines.append("")
+            lines.append("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
 
             return "\n".join(lines)
 
@@ -640,8 +646,8 @@ class NeuronCLI:
             console_print("=" * 60)
             console_print()
             console_print("Current Balance:")
-            console_print(f"  SATORI: {wallet.balance.amount:.8f}")
-            console_print(f"  EVR:    {wallet.currency.amount:.8f}")
+            console_print(f"  SATORIEVR: {wallet.balance.amount:.8f}")
+            console_print(f"  EVR:       {wallet.currency.amount:.8f}")
             console_print()
 
             # Get recipient address
@@ -665,12 +671,13 @@ class NeuronCLI:
             console_print(f"Recipient: {address}")
             console_print()
             console_print("Current Balance:")
-            console_print(f"  SATORI: {wallet.balance.amount:.8f}")
-            console_print(f"  EVR:    {wallet.currency.amount:.8f}")
+            console_print(f"  SATORIEVR: {wallet.balance.amount:.8f}")
+            console_print(f"  EVR:       {wallet.currency.amount:.8f}")
             console_print()
 
             # Get amount
-            amount_str = console_input("Enter amount of SATORI to send: ")
+            console_print("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
+            amount_str = console_input("Enter amount of SATORIEVR to send: ")
             if amount_str is None:
                 return "Transaction cancelled. Returning to main menu."
             amount_str = amount_str.strip()
@@ -686,7 +693,7 @@ class NeuronCLI:
                 return "Amount must be greater than 0.\nReturning to main menu."
 
             if amount > wallet.balance.amount:
-                return f"Insufficient balance. You have {wallet.balance.amount:.8f} SATORI\nReturning to main menu."
+                return f"Insufficient balance. You have {wallet.balance.amount:.8f} SATORIEVR\nReturning to main menu."
 
             # Show confirmation
             console_print()
@@ -694,7 +701,7 @@ class NeuronCLI:
             console_print("=" * 60)
             console_print(f"  From:   Wallet")
             console_print(f"  To:     {address}")
-            console_print(f"  Amount: {amount} SATORI")
+            console_print(f"  Amount: {amount} SATORIEVR")
             console_print("=" * 60)
             console_print()
 
@@ -754,8 +761,8 @@ class NeuronCLI:
             console_print("=" * 60)
             console_print()
             console_print("Current Balance:")
-            console_print(f"  SATORI: {vault.balance.amount:.8f}")
-            console_print(f"  EVR:    {vault.currency.amount:.8f}")
+            console_print(f"  SATORIEVR: {vault.balance.amount:.8f}")
+            console_print(f"  EVR:       {vault.currency.amount:.8f}")
             console_print()
 
             # Get recipient address
@@ -779,12 +786,13 @@ class NeuronCLI:
             console_print(f"Recipient: {address}")
             console_print()
             console_print("Current Balance:")
-            console_print(f"  SATORI: {vault.balance.amount:.8f}")
-            console_print(f"  EVR:    {vault.currency.amount:.8f}")
+            console_print(f"  SATORIEVR: {vault.balance.amount:.8f}")
+            console_print(f"  EVR:       {vault.currency.amount:.8f}")
             console_print()
 
             # Get amount
-            amount_str = console_input("Enter amount of SATORI to send: ")
+            console_print("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
+            amount_str = console_input("Enter amount of SATORIEVR to send: ")
             if amount_str is None:
                 return "Transaction cancelled. Returning to main menu."
             amount_str = amount_str.strip()
@@ -800,7 +808,7 @@ class NeuronCLI:
                 return "Amount must be greater than 0.\nReturning to main menu."
 
             if amount > vault.balance.amount:
-                return f"Insufficient balance. You have {vault.balance.amount:.8f} SATORI\nReturning to main menu."
+                return f"Insufficient balance. You have {vault.balance.amount:.8f} SATORIEVR\nReturning to main menu."
 
             # Show confirmation
             console_print()
@@ -808,7 +816,7 @@ class NeuronCLI:
             console_print("=" * 60)
             console_print(f"  From:   Vault")
             console_print(f"  To:     {address}")
-            console_print(f"  Amount: {amount} SATORI")
+            console_print(f"  Amount: {amount} SATORIEVR")
             console_print("=" * 60)
             console_print()
 

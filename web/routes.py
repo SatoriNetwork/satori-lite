@@ -2366,7 +2366,7 @@ def register_routes(app):
                 available = 0
             if available < required_satori:
                 return jsonify({
-                    'error': f'Insufficient wallet balance. This stream costs {price_per_obs} sats/obs and requires a minimum channel deposit of {required_satori:.4f} SATORI. You have {available:.4f} SATORI in your wallet.'
+                    'error': f'Insufficient wallet balance. This stream costs {price_per_obs} sats/obs and requires a minimum channel deposit of {required_satori:.4f} SATORIEVR. You have {available:.4f} SATORIEVR in your wallet.'
                 }), 400
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
@@ -3052,7 +3052,7 @@ def register_routes(app):
         except Exception as e:
             msg = str(e)
             if 'not enough satori' in msg.lower():
-                return jsonify({'error': 'Insufficient SATORI balance. Add SATORI to your wallet before opening a channel.'}), 400
+                return jsonify({'error': 'Insufficient SATORIEVR balance. Add SATORIEVR to your wallet before opening a channel.'}), 400
             if 'bad params' in msg.lower():
                 return jsonify({'error': 'Invalid channel parameters. Check the amount and timeout values.'}), 400
             if 'invalid' in msg.lower() or 'pubkey' in msg.lower():

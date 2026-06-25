@@ -817,7 +817,7 @@
     .ds-price-help { font-size: 13px !important; opacity: 0.5; transition: opacity 0.15s; }
     .ds-price-tooltip-wrap:hover .ds-price-help { opacity: 1; }
     .ds-price-tooltip-wrap::after {
-        content: '1 sat = 0.00000001 SATORI, the smallest unit of SATORI';
+        content: '1 sat = 0.00000001 SATORIEVR, the smallest unit of SATORIEVR';
         position: absolute;
         bottom: calc(100% + 6px);
         left: 50%;
@@ -2038,7 +2038,7 @@
         <div class="dash-hero-meta">
             <span class="dash-meta-pill" id="dashHeroSatoriPill">
                 <i class="material-icons">savings</i>
-                <strong id="dashHeroSatori">-</strong> SATORI
+                <strong id="dashHeroSatori">-</strong> SATORIEVR
             </span>
             <span class="dash-meta-pill" id="dashHeroEvrPill">
                 <i class="material-icons">bolt</i>
@@ -2047,6 +2047,28 @@
         </div>
     </header>
     {% endif %}
+
+    <!-- SATORIEVR migration notice (dismissible) -->
+    <div id="satorievrMigrationBanner" style="display:none; align-items:center; gap:10px; padding:10px 14px; margin-bottom:16px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-card); color:var(--text-secondary); font-size:13px;">
+        <i class="material-icons" style="font-size:18px; color:var(--accent-primary);">info</i>
+        <span style="flex:1;">SATORIEVR is now the official Satori token on Evrmore. The SATORI &rarr; SATORIEVR migration is complete.</span>
+        <button type="button" onclick="dismissSatorievrBanner()" aria-label="Dismiss" style="background:none; border:none; color:inherit; opacity:0.6; cursor:pointer; font-size:20px; line-height:1; padding:0 6px;">&times;</button>
+    </div>
+    <script>
+        (function () {
+            try {
+                if (!localStorage.getItem('satorievrMigrationDismissed')) {
+                    var b = document.getElementById('satorievrMigrationBanner');
+                    if (b) b.style.display = 'flex';
+                }
+            } catch (e) {}
+        })();
+        function dismissSatorievrBanner() {
+            try { localStorage.setItem('satorievrMigrationDismissed', '1'); } catch (e) {}
+            var b = document.getElementById('satorievrMigrationBanner');
+            if (b) b.style.display = 'none';
+        }
+    </script>
 
     <div class="row g-4" id="dashboardLayoutRow">
         <!-- Addresses Card -->
@@ -2170,6 +2192,9 @@
                     </span>
                 </div>
                 <div class="card-body">
+                    <p class="text-muted mb-3" style="font-size: 12px;">
+                        SATORIEVR is the official token (migrated from SATORI).
+                    </p>
                     <div id="sendFormFields" class="send-form-fields">
                         <div class="mb-3">
                             <label class="form-label">Send From</label>
@@ -2246,7 +2271,7 @@
                             <div class="dash-stat-value" id="tokenBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
                             </div>
-                            <div class="dash-stat-label">SATORI</div>
+                            <div class="dash-stat-label">SATORIEVR</div>
                         </div>
                         <div class="dash-stat">
                             <div class="dash-stat-value" id="stakeBalance">
@@ -2267,7 +2292,7 @@
                             <div class="dash-stat-value" id="identityWalletBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
                             </div>
-                            <div class="dash-stat-label">SATORI</div>
+                            <div class="dash-stat-label">SATORIEVR</div>
                         </div>
                         <div class="dash-stat">
                             <div class="dash-stat-value" id="identityEvrBalance">
@@ -2277,7 +2302,10 @@
                         </div>
                     </div>
                     <p id="noEvrWarning" class="mb-0 mx-3 mb-3" style="display: none;">
-                        Without EVR in your wallet, larger transaction fees will be paid in SATORI.
+                        Without EVR in your wallet, larger transaction fees will be paid in SATORIEVR.
+                    </p>
+                    <p class="text-muted mb-0 mx-3 mb-3" style="font-size: 12px;">
+                        SATORIEVR is the official token (migrated from SATORI).
                     </p>
                 </div>
             </div>
@@ -2541,7 +2569,7 @@
                                         <i class="material-icons">bolt</i>
                                         <span id="dsPriceLabel">Sats (Satoshis) per Observation</span>
                                         <span class="ds-price-sub">(0 = free)</span>
-                                        <span class="ds-price-tooltip-wrap" title="1 sat = 0.00000001 SATORI, the smallest unit of SATORI">
+                                        <span class="ds-price-tooltip-wrap" title="1 sat = 0.00000001 SATORIEVR, the smallest unit of SATORIEVR">
                                             <i class="material-icons ds-price-help">help_outline</i>
                                         </span>
                                     </div>
@@ -2549,11 +2577,11 @@
                                         <input type="number" id="dsPricePerObs" class="ds-price-input" value="0" min="0" step="1" placeholder="0">
                                         <span id="dsPriceUnit" class="ds-price-unit">sats</span>
                                         <span style="width:1px; height:14px; background:var(--border-color); display:inline-block; margin: 0 0.4rem;"></span>
-                                        <div class="ds-price-toggle" onclick="togglePriceUnit()" title="Switch between sats and SATORI">
+                                        <div class="ds-price-toggle" onclick="togglePriceUnit()" title="Switch between sats and SATORIEVR">
                                             <div class="ds-price-toggle-track" id="dsPriceToggleTrack">
                                                 <div class="ds-price-toggle-thumb"></div>
                                             </div>
-                                            <span class="ds-price-toggle-label" id="dsPriceToggleLabel">SATORI</span>
+                                            <span class="ds-price-toggle-label" id="dsPriceToggleLabel">SATORIEVR</span>
                                         </div>
                                     </div>
                                 </div>
@@ -4224,8 +4252,8 @@
             input.value = currentVal / SATS_PER_SATORI || '';
             input.step = '0.00000001';
             input.placeholder = '0.00000001';
-            document.getElementById('dsPriceUnit').textContent = 'SATORI';
-            document.getElementById('dsPriceLabel').textContent = 'SATORI per Observation';
+            document.getElementById('dsPriceUnit').textContent = 'SATORIEVR';
+            document.getElementById('dsPriceLabel').textContent = 'SATORIEVR per Observation';
             document.getElementById('dsPriceToggleTrack').classList.add('active');
         } else {
             input.value = Math.round(currentVal * SATS_PER_SATORI) || '';
@@ -5002,12 +5030,12 @@
         const amountBlock = tx.sweep
             ? `<div class="send-review-amount">
                    <span class="num">ALL</span>
-                   <span class="unit">SATORI</span>
+                   <span class="unit">SATORIEVR</span>
                    <span class="sweep-pill">sweep</span>
                </div>`
             : `<div class="send-review-amount">
                    <span class="num">${escHtml(tx.amount.toString())}</span>
-                   <span class="unit">SATORI</span>
+                   <span class="unit">SATORIEVR</span>
                </div>`;
 
         console_.innerHTML = `
@@ -5105,7 +5133,7 @@
         const console_ = document.getElementById('sendConsole');
         const amountLine = tx.sweep
             ? `All ${escHtml(tx.sourceName)} funds dispatched`
-            : `${escHtml(tx.amount.toString())} SATORI dispatched from ${escHtml(tx.sourceName)}`;
+            : `${escHtml(tx.amount.toString())} SATORIEVR dispatched from ${escHtml(tx.sourceName)}`;
         console_.innerHTML = `
             <div class="send-console">
                 <div class="send-console-eyebrow is-success">
