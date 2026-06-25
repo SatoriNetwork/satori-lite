@@ -1143,6 +1143,41 @@ class StreamModel:
             error(f"Error creating augmented data for autoregression: {e}")
             return self.data
 
+    def _runForecast(self, model) -> Union[pd.DataFrame, None]:
+        """Predict + 2-step autoregression; return the final forecast DataFrame.
+
+        Returns None when the model is missing or its first prediction is not a
+        DataFrame; returns the first forecast when only the second (autoregressed)
+        prediction fails. Sets self._t1_value as a side effect, matching the prior
+        inline behavior. Shared by producePrediction (central sink) and
+        predictForRelay (returns the value). Callers hold self._modelLock.
+        """
+        if model is None:
+            return None
+
+        firstForecast = model.predict(data=self.data)
+
+        # Only do autoregression if the first prediction is valid
+        if not isinstance(firstForecast, pd.DataFrame):
+            warning(f"First prediction returned {type(firstForecast).__name__} instead of DataFrame (value: {str(firstForecast)[:100]}), skipping autoregression")
+            return None
+
+        firstValue = StreamForecast.firstPredictionOf(firstForecast)
+        debug(f"[AUTOREGRESSION] First prediction: {firstValue}", color='cyan')
+        self._t1_value = str(firstValue)
+
+        augmentedData = self._createAugmentedData(firstForecast)
+        debug(f"[AUTOREGRESSION] Augmented data size: {len(augmentedData)} rows (original: {len(self.data)})", color='cyan')
+
+        secondForecast = model.predict(data=augmentedData)
+        if isinstance(secondForecast, pd.DataFrame):
+            secondValue = StreamForecast.firstPredictionOf(secondForecast)
+            debug(f"[AUTOREGRESSION] Second prediction: {secondValue}", color='cyan')
+            return secondForecast
+
+        warning(f"Second prediction returned {type(secondForecast).__name__} instead of DataFrame, using first prediction only")
+        return firstForecast
+
     def producePrediction(self, updatedModel=None):
         """
         triggered by
@@ -1151,43 +1186,20 @@ class StreamModel:
         """
         try:
             model = updatedModel or self.stable
-            if model is not None:
-                firstForecast = model.predict(data=self.data)
-
-                # Only do autoregression if first prediction is valid
-                if isinstance(firstForecast, pd.DataFrame):
-                    firstValue = StreamForecast.firstPredictionOf(firstForecast)
-                    debug(f"[AUTOREGRESSION] First prediction: {firstValue}", color='cyan')
-                    self._t1_value = str(firstValue)
-
-                    augmentedData = self._createAugmentedData(firstForecast)
-                    debug(f"[AUTOREGRESSION] Augmented data size: {len(augmentedData)} rows (original: {len(self.data)})", color='cyan')
-
-                    secondForecast = model.predict(data=augmentedData)
-                    if isinstance(secondForecast, pd.DataFrame):
-                        secondValue = StreamForecast.firstPredictionOf(secondForecast)
-                        debug(f"[AUTOREGRESSION] Second prediction (queued for batch): {secondValue}", color='cyan')
-                    else:
-                        warning(f"Second prediction returned {type(secondForecast).__name__} instead of DataFrame, using first prediction only")
-                        secondForecast = None
-
-                    forecast = secondForecast if secondForecast is not None else firstForecast
+            if model is None:
+                return
+            forecast = self._runForecast(model)
+            if isinstance(forecast, pd.DataFrame):
+                # Use Unix timestamp for consistency with observation storage
+                predictionDf = pd.DataFrame({ 'value': [StreamForecast.firstPredictionOf(forecast)]
+                                }, index=[datetimeToUnixTimestamp(now())])
+                debug(predictionDf, print=True)
+                if updatedModel is not None:
+                    self.passPredictionData(predictionDf)
                 else:
-                    # First prediction failed, skip autoregression
-                    warning(f"First prediction returned {type(firstForecast).__name__} instead of DataFrame (value: {str(firstForecast)[:100]}), skipping autoregression")
-                    forecast = firstForecast
-
-                if isinstance(forecast, pd.DataFrame):
-                    # Use Unix timestamp for consistency with observation storage
-                    predictionDf = pd.DataFrame({ 'value': [StreamForecast.firstPredictionOf(forecast)]
-                                    }, index=[datetimeToUnixTimestamp(now())])
-                    debug(predictionDf, print=True)
-                    if updatedModel is not None:
-                        self.passPredictionData(predictionDf)
-                    else:
-                        self.passPredictionData(predictionDf, True)
-                else:
-                    raise Exception(f'Forecast not in DataFrame format - got {type(forecast).__name__} with value: {str(forecast)[:200]}')
+                    self.passPredictionData(predictionDf, True)
+            else:
+                raise Exception(f'Forecast not in DataFrame format - got {type(forecast).__name__}')
         except Exception as e:
             error(f"Prediction failed for stream {self.streamUuid}: {type(e).__name__}: {e}")
             self.fallback_prediction()
@@ -1287,55 +1299,64 @@ class StreamModel:
         return adapter
 
     def _single_training_iteration(self):
-        """Execute one training iteration (called by queue worker)."""
-        if self.paused or len(self.data) == 0:
-            return
+        """Execute one training iteration (called by queue worker).
 
-        self.chooseAdapter(inplace=True)
+        Held under self._modelLock for its full duration so the worker's mutation
+        of self.pilot / self.stable / self.data cannot race a concurrent
+        producePrediction or predictForRelay on the same model. The lock is
+        per-model, so this only serializes a prediction against training of the
+        SAME stream (and the single training worker trains one stream at a time
+        regardless); other streams are unaffected.
+        """
+        with self._modelLock:
+            if self.paused or len(self.data) == 0:
+                return
 
-        # Skip training for StarterAdapter (it doesn't actually train)
-        if self.adapter.__name__ == 'StarterAdapter':
-            return
+            self.chooseAdapter(inplace=True)
 
-        try:
-            trainingResult = self.pilot.fit(data=self.data, stable=self.stable)
-            if trainingResult.status == 1:
-                if self.pilot.compare(self.stable):
-                    # Model improved - save with retry logic
-                    saveSuccess = False
-                    for attempt in range(3):
-                        if self.pilot.save(self.modelPath()):
-                            saveSuccess = True
-                            break
-                        if attempt < 2:
-                            warning(f"Model save attempt {attempt + 1}/3 failed, retrying...")
-                            time.sleep(5)
+            # Skip training for StarterAdapter (it doesn't actually train)
+            if self.adapter.__name__ == 'StarterAdapter':
+                return
 
-                    if saveSuccess:
-                        self.stable = copy.deepcopy(self.pilot)
-                        if self.streamUuid != DEFAULT_STREAM_UUID:
-                            info(f"Model improved and saved: {self.streamUuid[:8]}", color='green')
-                    else:
-                        if self.streamUuid != DEFAULT_STREAM_UUID:
-                            error(f"Failed to save improved model after 3 attempts for {self.streamUuid[:8]}")
-            else:
-                if self.streamUuid != DEFAULT_STREAM_UUID:
-                    warning(f'Training failed for {self.streamUuid[:8]} (status={trainingResult.status})')
-                self.failedAdapters.append(self.pilot)
-        except Exception as e:
-            # Discard the broken pilot so we don't keep retrying with bad
-            # state (e.g. a loaded model whose schema doesn't match current
-            # data). The next training tick will construct a fresh adapter
-            # and rebuild from current observations.
-            error(
-                f"Training error for {self.streamUuid[:8]}: {e} "
-                f"— resetting pilot ({self.adapter.__name__})")
             try:
-                self.pilot = self.adapter(uid=self.streamUuid)
-            except Exception as reset_err:
+                trainingResult = self.pilot.fit(data=self.data, stable=self.stable)
+                if trainingResult.status == 1:
+                    if self.pilot.compare(self.stable):
+                        # Model improved - save with retry logic
+                        saveSuccess = False
+                        for attempt in range(3):
+                            if self.pilot.save(self.modelPath()):
+                                saveSuccess = True
+                                break
+                            if attempt < 2:
+                                warning(f"Model save attempt {attempt + 1}/3 failed, retrying...")
+                                time.sleep(5)
+
+                        if saveSuccess:
+                            self.stable = copy.deepcopy(self.pilot)
+                            if self.streamUuid != DEFAULT_STREAM_UUID:
+                                info(f"Model improved and saved: {self.streamUuid[:8]}", color='green')
+                        else:
+                            if self.streamUuid != DEFAULT_STREAM_UUID:
+                                error(f"Failed to save improved model after 3 attempts for {self.streamUuid[:8]}")
+                else:
+                    if self.streamUuid != DEFAULT_STREAM_UUID:
+                        warning(f'Training failed for {self.streamUuid[:8]} (status={trainingResult.status})')
+                    self.failedAdapters.append(self.pilot)
+            except Exception as e:
+                # Discard the broken pilot so we don't keep retrying with bad
+                # state (e.g. a loaded model whose schema doesn't match current
+                # data). The next training tick will construct a fresh adapter
+                # and rebuild from current observations.
                 error(
-                    f"Failed to reset pilot for {self.streamUuid[:8]}: "
-                    f"{reset_err}")
+                    f"Training error for {self.streamUuid[:8]}: {e} "
+                    f"— resetting pilot ({self.adapter.__name__})")
+                try:
+                    self.pilot = self.adapter(uid=self.streamUuid)
+                except Exception as reset_err:
+                    error(
+                        f"Failed to reset pilot for {self.streamUuid[:8]}: "
+                        f"{reset_err}")
 
     def run(self):
         """
