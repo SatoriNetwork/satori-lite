@@ -960,25 +960,35 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     async def _networkRunEngine(self, stream_name: str, provider_pubkey: str,
                                 observation):
-        """Lite engine: predict from recent observations, echo fallback.
+        """Heavy engine: predict via the shared per-stream StreamModel.
 
-        Saves to predictions table, then publishes to the network
-        on the corresponding _pred publication stream.
+        Numeric streams run through the unified engine (StreamModel + adapters /
+        training) via predictForRelay; non-numeric streams echo the last value
+        (the engine cannot store non-numeric values). The forecast is saved to
+        the predictions table, published on the {stream}_pred publication, and
+        sent as bounty DMs -- exactly as before.
         """
         import json
-        from satorineuron.lite_engine import LiteEngine
 
-        # Fetch recent observations and run lite prediction
-        observations = await asyncio.to_thread(
-            self.networkDB.get_observations,
-            stream_name, provider_pubkey, limit=30)
-        prediction = LiteEngine().predict(observations)
+        # Non-numeric streams cannot enter the engine (StreamStore stores REAL),
+        # so short-circuit to echo before touching any StreamModel.
+        try:
+            numeric_value = float(observation.value)
+        except (TypeError, ValueError):
+            numeric_value = None
 
-        if prediction is not None:
-            value_str = prediction
-            method = 'lite'
-        else:
-            # Fallback to echo for non-numeric data
+        value_str = None
+        method = 'echo'
+        if numeric_value is not None:
+            prediction = await asyncio.to_thread(
+                self._relayPredict, stream_name, provider_pubkey,
+                observation, numeric_value)
+            if prediction is not None:
+                value_str = prediction
+                method = 'engine'
+
+        if value_str is None:
+            # Echo fallback: non-numeric stream, or engine produced no forecast.
             value = observation.value
             value_str = json.dumps(value) if not isinstance(
                 value, str) else value
@@ -1037,6 +1047,147 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(
                 f'Network: bounty DM submit failed for {stream_name}: {e}')
+
+    @staticmethod
+    def _safeEpoch(raw):
+        """Parse an observation timestamp to a float unix epoch, or None.
+
+        Bounds-checked to ~year 2000..2100 so a bad-unit timestamp (e.g.
+        milliseconds) can't pollute the engine's time-ordered history.
+        """
+        try:
+            epoch = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if 946684800 < epoch < 4102444800:
+            return epoch
+        return None
+
+    def _relayPredict(self, stream_name: str, provider_pubkey: str,
+                      observation, numeric_value: float):
+        """Run a relay observation through the shared heavy engine (sync helper).
+
+        Gets-or-creates the per-stream StreamModel (keyed by a deterministic
+        relay uuid), feeds the new observation, and returns the forecast value
+        as a string, or None if no forecast could be produced. Runs in a worker
+        thread (called via asyncio.to_thread) so the engine work never blocks the
+        event loop.
+        """
+        import pandas as pd
+        from satorineuron.relay_ids import relay_stream_ids
+
+        engine = self.ensureEngine()
+        if engine is None:
+            return None
+
+        sub_id, pub_id = relay_stream_ids(stream_name, provider_pubkey)
+        sub_uuid = sub_id.uuid
+
+        # Get-or-create under the engine lock so two concurrent observations for
+        # the same stream cannot build two models or race the central poll
+        # thread's registry mutations.
+        with self._engineLock:
+            model = engine.streamModels.get(sub_uuid)
+            if model is None:
+                model = self._createRelayModel(
+                    engine, stream_name, provider_pubkey, sub_id, pub_id)
+                if model is None:
+                    return None
+                engine.streamModels[sub_uuid] = model
+
+        epoch = self._safeEpoch(observation.timestamp)
+        if epoch is None:
+            return None
+        frame = pd.DataFrame({
+            'date_time': pd.to_datetime([epoch], unit='s', utc=True),
+            'value': [numeric_value],
+            'id': [str(observation.seq_num)],
+        })
+        return model.predictForRelay(frame)
+
+    def _createRelayModel(self, engine, stream_name: str, provider_pubkey: str,
+                          sub_id, pub_id):
+        """Create a relay StreamModel, backfilling its history once on first use."""
+        from satoriengine.veda.engine import StreamModel
+
+        sub_uuid = sub_id.uuid
+        pub_uuid = pub_id.uuid
+
+        # One-time backfill: rehydrate the engine's StreamStore from networkDB's
+        # observation ledger. Skipped on restart (StreamStore already has the
+        # history and loadDataFromServer rehydrates self.data from it).
+        try:
+            if engine.storage.getStreamRowCount(sub_uuid) == 0:
+                self._backfillRelayHistory(
+                    stream_name, provider_pubkey, sub_uuid)
+        except Exception as e:
+            logging.warning(
+                f'Network: relay backfill failed for {stream_name}: {e}')
+
+        subscriptionStream = Stream(streamId=sub_id)
+        publicationStream = Stream(streamId=pub_id, predicting=sub_id)
+        try:
+            return StreamModel.createFromServer(
+                streamUuid=sub_uuid,
+                predictionStreamUuid=pub_uuid,
+                server=self.server,
+                wallet=self.wallet,
+                subscriptionStream=subscriptionStream,
+                publicationStream=publicationStream,
+                pauseAll=engine.pause,
+                resumeAll=engine.resume,
+                storage=engine.storage,
+                sink='relay')
+        except Exception as e:
+            logging.error(
+                f'Network: failed to create relay model for {stream_name}: {e}')
+            return None
+
+    def _backfillRelayHistory(self, stream_name: str, provider_pubkey: str,
+                              sub_uuid: str):
+        """Load this stream's networkDB history into the engine's StreamStore.
+
+        networkDB stores each observation's `value` as the full observation JSON
+        envelope (not a scalar), so each row is parsed back to its numeric value.
+        Rows are sorted oldest-first (networkDB returns newest-first; the engine
+        assumes ascending time). Non-numeric rows are skipped.
+        """
+        import json
+        import pandas as pd
+        from satorilib.satori_nostr.models import DatastreamObservation
+
+        rows = self.networkDB.get_observations(
+            stream_name, provider_pubkey, limit=1_000_000)
+        records = []
+        for row in rows:
+            raw = row.get('value')
+            value = None
+            try:
+                value = float(DatastreamObservation.from_json(raw).value)
+            except Exception:
+                try:
+                    value = float(json.loads(raw).get('value'))
+                except Exception:
+                    value = None
+            if value is None:
+                continue
+            epoch = self._safeEpoch(
+                row.get('observed_at') if row.get('observed_at') is not None
+                else row.get('received_at'))
+            if epoch is None:
+                continue
+            records.append({
+                'epoch': epoch,
+                'value': value,
+                'id': str(row.get('seq_num')),
+            })
+        if not records:
+            return
+        df = pd.DataFrame(records).sort_values('epoch').reset_index(drop=True)
+        inserted = self.aiengine.storage.storeStreamData(sub_uuid, df)
+        logging.info(
+            f'Network: backfilled {inserted} rows for relay stream '
+            f'{stream_name}', color='cyan')
 
     def _networkEnsureListener(self, relay_url: str):
         """Start an observation listener for a relay if one isn't running."""
@@ -4192,9 +4343,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 logging.warning("AI Engine not initialized, skipping prediction collection", color='yellow')
                 return
 
-            # Collect predictions from all models
+            # Collect predictions from all models. Snapshot the registry (the
+            # relay path inserts models from another thread) and skip relay
+            # models -- their predictions are published to Nostr, not submitted
+            # to central. Relay models never populate _pending_prediction, so
+            # this is also belt-and-suspenders.
             predictions_collected = 0
-            for stream_uuid, model in self.aiengine.streamModels.items():
+            for stream_uuid, model in list(self.aiengine.streamModels.items()):
+                if getattr(model, 'sink', 'central') != 'central':
+                    continue
                 if hasattr(model, '_pending_prediction') and model._pending_prediction:
                     # Queue prediction in engine
                     pred = model._pending_prediction
