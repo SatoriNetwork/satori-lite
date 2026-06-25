@@ -511,9 +511,22 @@ class StreamModel:
         pauseAll: callable,
         resumeAll: callable,
         storage: EngineStorageManager = None,
+        sink: str = 'central',
     ):
-        """Factory method for creating StreamModel that uses Central Server directly"""
+        """Factory method for creating StreamModel that uses Central Server directly
+
+        ``sink`` identifies where this model's predictions go: ``'central'`` (the
+        default) means the neuron batch-submits them over HTTP; ``'relay'`` means
+        the relay path reads the value back via ``predictForRelay`` and publishes
+        it to Nostr itself (it never enters the central batch).
+        """
         streamModel = cls.__new__(cls)
+        # Serializes onDataReceived / predictForRelay against the shared training
+        # worker (which swaps self.stable/self.pilot) and against concurrent
+        # same-stream observations. Reentrant because producePrediction may recurse
+        # via fallback_prediction while the lock is held.
+        streamModel._modelLock = threading.RLock()
+        streamModel.sink = sink
         streamModel.cpu = getProcessorCount()
         streamModel.pauseAll = pauseAll
         streamModel.resumeAll = resumeAll
@@ -556,6 +569,9 @@ class StreamModel:
         resumeAll:callable,
         transferProtocol: str
     ):
+        # See createFromServer for why this lock exists.
+        self._modelLock = threading.RLock()
+        self.sink: str = 'central'
         self.cpu = getProcessorCount()
         self.pauseAll = pauseAll
         self.resumeAll = resumeAll
@@ -627,6 +643,47 @@ class StreamModel:
             info(f"No local data for stream {self.streamUuid}, starting fresh", color='yellow')
         return pd.DataFrame(columns=["date_time", "value", "id"])
 
+    def _ingestData(self, data: pd.DataFrame) -> int:
+        """Store new observations, update in-memory history, (re)choose adapter.
+
+        Shared by the central poll path (onDataReceived) and the relay path
+        (predictForRelay). Returns the number of newly stored rows. Callers hold
+        ``self._modelLock``.
+
+        Args:
+            data: DataFrame with columns [date_time (datetime64 UTC), value, id]
+        """
+        if data.empty:
+            return 0
+
+        # Build storage frame [epoch, value, id] from the datetime64 column.
+        # This is the only epoch extraction point — no string round-trips.
+        storageDf = pd.DataFrame({
+            'epoch': data['date_time'].astype('int64') // 10 ** 9,
+            'value': data['value'],
+            'id': data['id'],
+        })
+        insertedRows = self.storage.storeStreamData(self.streamUuid, storageDf)
+        if insertedRows > 0:
+            info(f"Stored {insertedRows} new rows for stream {self.streamUuid}", color='green')
+
+        # Update in-memory history — append only rows not already present.
+        new_rows = data[~data['date_time'].isin(self.data['date_time'])]
+        if not new_rows.empty:
+            self.data = pd.concat([self.data, new_rows], ignore_index=True)
+
+        # Check if adapter should be upgraded (e.g., StarterAdapter -> XgbAdapter)
+        previousAdapter = self.adapter.__name__
+        self.chooseAdapter(inplace=True)
+
+        # If upgraded from StarterAdapter to a real adapter, join the training queue
+        if previousAdapter == 'StarterAdapter' and self.adapter.__name__ != 'StarterAdapter':
+            if self.streamUuid != DEFAULT_STREAM_UUID:
+                info(f"Stream {self.streamUuid[:8]} upgraded from StarterAdapter to {self.adapter.__name__}, joining training queue", color='green')
+            self.run_forever()
+
+        return insertedRows
+
     def onDataReceived(self, data: pd.DataFrame):
         """
         Called when new data is received from Central Server.
@@ -635,42 +692,43 @@ class StreamModel:
             data: DataFrame with columns [date_time (datetime64 UTC), value, id]
         """
         try:
-            if data.empty:
-                return
+            with self._modelLock:
+                insertedRows = self._ingestData(data)
 
-            # Build storage frame [epoch, value, id] from the datetime64 column.
-            # This is the only epoch extraction point — no string round-trips.
-            storageDf = pd.DataFrame({
-                'epoch': data['date_time'].astype('int64') // 10 ** 9,
-                'value': data['value'],
-                'id': data['id'],
-            })
-            insertedRows = self.storage.storeStreamData(self.streamUuid, storageDf)
-            if insertedRows > 0:
-                info(f"Stored {insertedRows} new rows for stream {self.streamUuid}", color='green')
-
-            # Update in-memory history — append only rows not already present.
-            new_rows = data[~data['date_time'].isin(self.data['date_time'])]
-            if not new_rows.empty:
-                self.data = pd.concat([self.data, new_rows], ignore_index=True)
-
-            # Check if adapter should be upgraded (e.g., StarterAdapter -> XgbAdapter)
-            previousAdapter = self.adapter.__name__
-            self.chooseAdapter(inplace=True)
-
-            # If upgraded from StarterAdapter to a real adapter, join the training queue
-            if previousAdapter == 'StarterAdapter' and self.adapter.__name__ != 'StarterAdapter':
-                if self.streamUuid != DEFAULT_STREAM_UUID:
-                    info(f"Stream {self.streamUuid[:8]} upgraded from StarterAdapter to {self.adapter.__name__}, joining training queue", color='green')
-                self.run_forever()
-
-            # Trigger prediction when new observation arrives
-            if insertedRows > 0:
-                info(f"New observation received, triggering prediction for stream {self.streamUuid}", color='blue')
-                self.producePrediction()
+                # Trigger prediction when new observation arrives
+                if insertedRows > 0:
+                    info(f"New observation received, triggering prediction for stream {self.streamUuid}", color='blue')
+                    self.producePrediction()
 
         except Exception as e:
-            error(f"Error storing received data: {e}")  
+            error(f"Error storing received data: {e}")
+
+    def predictForRelay(self, data: pd.DataFrame) -> Union[str, None]:
+        """Relay entry point: ingest a frame and RETURN the forecast value string.
+
+        Unlike onDataReceived, this does NOT route the prediction into the central
+        batch-submission channel (``_pending_prediction``) — the relay caller
+        publishes the returned value to Nostr itself. It predicts on every call
+        (not gated on newly-stored rows) so the relay always emits one prediction
+        per observation, even when an observation collides with an existing
+        integer-second epoch in storage.
+
+        Args:
+            data: 1-row DataFrame with columns [date_time (datetime64 UTC), value, id]
+
+        Returns:
+            The forecast value as a string, or None if no forecast could be made.
+        """
+        try:
+            with self._modelLock:
+                self._ingestData(data)
+                forecast = self._runForecast(self.stable)
+                if isinstance(forecast, pd.DataFrame):
+                    return str(StreamForecast.firstPredictionOf(forecast))
+                return None
+        except Exception as e:
+            error(f"Relay prediction failed for stream {self.streamUuid}: {e}")
+            return None
 
     # TODO: Commented out for engine-neuron integration - P2P removed
     # async def p2pInit(self):
