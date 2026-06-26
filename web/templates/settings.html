@@ -1480,6 +1480,13 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({relay_url: relayUrl})
             });
+            const contentType = resp.headers.get('content-type') || '';
+            if (!contentType.includes('application/json')) {
+                if (resp.status === 401) {
+                    throw new Error('Session expired. Please log in again and retry.');
+                }
+                throw new Error('Unexpected server response while registering relay.');
+            }
             const data = await resp.json();
             if (resp.ok && (data.success || data.relay_url)) {
                 statusEl.className = 'text-success';

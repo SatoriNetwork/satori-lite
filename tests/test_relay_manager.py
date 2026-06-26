@@ -23,9 +23,20 @@ from web.app import create_app
 from web.routes import _session_vaults, set_startup
 
 
+class DummyNetworkDB:
+    def __init__(self):
+        self.relays = []
+
+    def upsert_relay(self, relay_url, user_added=False):
+        self.relays.append((relay_url, user_added))
+
+
 class DummyStartup:
     uiPort = 24601
     nostrPubkey = 'f89e11d67850764c3d7a4a2c3c81e0ec4b06aef83e74bce70df5c277d0547c74'
+
+    def __init__(self):
+        self.networkDB = DummyNetworkDB()
 
     class RelayStub:
         @staticmethod
@@ -64,6 +75,18 @@ class DummyVault:
 
 class DummyWalletManager:
     vault = DummyVault()
+
+
+def make_logged_in_client(startup=None):
+    startup = startup or DummyStartup()
+    set_startup(startup)
+    app = create_app(testing=True)
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['session_id'] = 'test-session'
+        sess['vault_open'] = True
+    _session_vaults['test-session'] = DummyWalletManager()
+    return client, startup
 
 
 def test_public_strfry_conf_has_open_write():
@@ -118,13 +141,7 @@ def test_docker_candidate_endpoints_respect_env_and_common_paths():
 
 
 def test_settings_page_renders_for_logged_in_session():
-    set_startup(DummyStartup())
-    app = create_app(testing=True)
-    client = app.test_client()
-    with client.session_transaction() as sess:
-        sess['session_id'] = 'test-session'
-        sess['vault_open'] = True
-    _session_vaults['test-session'] = DummyWalletManager()
+    client, _startup = make_logged_in_client()
     try:
         resp = client.get('/settings')
         assert resp.status_code == 200
@@ -141,3 +158,53 @@ def test_settings_page_renders_for_logged_in_session():
         assert b'relayDockerHelpBox' in resp.data
     finally:
         _session_vaults.pop('test-session', None)
+
+
+def test_register_relay_verifies_nip11_pubkey_and_stores_user_relay():
+    client, startup = make_logged_in_client()
+    try:
+        with patch('web.routes.requests.get') as get:
+            get.return_value.raise_for_status.return_value = None
+            get.return_value.json.return_value = {'pubkey': startup.nostrPubkey}
+
+            resp = client.post('/api/relay',
+                               json={'relay_url': 'wss://relay.example.com'})
+
+        assert resp.status_code == 200
+        assert resp.json['success'] is True
+        assert resp.json['relay_url'] == 'wss://relay.example.com'
+        assert startup.networkDB.relays == [('wss://relay.example.com', True)]
+        get.assert_called_once()
+        assert get.call_args.kwargs['headers']['Accept'] == 'application/nostr+json'
+    finally:
+        _session_vaults.pop('test-session', None)
+
+
+def test_register_relay_rejects_mismatched_nip11_pubkey():
+    client, startup = make_logged_in_client()
+    try:
+        with patch('web.routes.requests.get') as get:
+            get.return_value.raise_for_status.return_value = None
+            get.return_value.json.return_value = {'pubkey': '0' * 64}
+
+            resp = client.post('/api/relay',
+                               json={'relay_url': 'wss://relay.example.com'})
+
+        assert resp.status_code == 400
+        assert 'does not match' in resp.json['error']
+        assert startup.networkDB.relays == []
+    finally:
+        _session_vaults.pop('test-session', None)
+
+
+def test_api_auth_failure_returns_json_instead_of_redirect_html():
+    app = create_app(testing=True)
+    client = app.test_client()
+
+    with patch('web.routes.check_vault_file_exists', return_value=True):
+        resp = client.post('/api/relay',
+                           json={'relay_url': 'wss://relay.example.com'})
+
+    assert resp.status_code == 401
+    assert resp.is_json
+    assert resp.json['error'] == 'Authentication required'

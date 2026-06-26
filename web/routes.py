@@ -18,6 +18,7 @@ import socket
 import datetime
 import requests
 import uuid
+from urllib.parse import urlparse
 from threading import Lock
 from cryptography.fernet import Fernet
 from satorilib.config import get_api_url
@@ -355,6 +356,11 @@ def login_required(f):
     """Decorator to require login for a route."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        def api_auth_error(message):
+            if request.path.startswith('/api/'):
+                return jsonify({'error': message}), 401
+            return None
+
         # Ensure session ID exists for tracking
         if not session.get('session_id'):
             session['session_id'] = str(uuid.uuid4())
@@ -362,6 +368,9 @@ def login_required(f):
 
         # Check if user is logged in via session flag
         if not session.get('vault_open'):
+            response = api_auth_error('Authentication required')
+            if response:
+                return response
             # Not logged in - check if vault file exists
             if not check_vault_file_exists():
                 # No vault file - redirect to create password
@@ -377,6 +386,9 @@ def login_required(f):
             logger.info(f"Session vault missing for {session_id} - forcing re-login")
             session.pop('vault_open', None)
             session['logged_out'] = True  # Prevent auto-login
+            response = api_auth_error('Session expired')
+            if response:
+                return response
             return redirect(url_for('login'))
 
         # Also validate vault is actually decrypted
@@ -386,6 +398,9 @@ def login_required(f):
                 logger.info(f"Session vault not decrypted for {session_id} - forcing re-login")
                 session.pop('vault_open', None)
                 session['logged_out'] = True  # Prevent auto-login
+                response = api_auth_error('Session expired')
+                if response:
+                    return response
                 return redirect(url_for('login'))
 
         return f(*args, **kwargs)
@@ -2938,6 +2953,68 @@ def register_routes(app):
             return jsonify({'error': 'Missing relay_url'}), 400
         startup.networkDB.delete_relay(data['relay_url'])
         return jsonify({'success': True})
+
+    @app.route('/api/relay', methods=['POST'])
+    @login_required
+    def api_relay_register():
+        """Verify a relay's NIP-11 document before storing it."""
+        startup = get_startup()
+        if not startup or not hasattr(startup, 'networkDB'):
+            return jsonify({'error': 'Not ready'}), 503
+
+        data = request.get_json(force=True, silent=True) or {}
+        relay_url = (data.get('relay_url') or '').strip()
+        if not relay_url:
+            return jsonify({'error': 'relay_url required'}), 400
+        if not relay_url.startswith(('ws://', 'wss://')):
+            return jsonify({'error': 'relay_url must start with ws:// or wss://'}), 400
+
+        parsed = urlparse(relay_url)
+        if not parsed.netloc:
+            return jsonify({'error': 'relay_url must include a host'}), 400
+
+        nip11_scheme = 'https' if parsed.scheme == 'wss' else 'http'
+        nip11_url = parsed._replace(scheme=nip11_scheme).geturl()
+
+        try:
+            response = requests.get(
+                nip11_url,
+                headers={'Accept': 'application/nostr+json'},
+                timeout=10,
+            )
+            response.raise_for_status()
+            relay_info = response.json()
+        except requests.RequestException as e:
+            logger.warning(f"Relay NIP-11 request failed for {relay_url}: {e}")
+            return jsonify({'error': f'Unable to reach relay metadata: {e}'}), 400
+        except ValueError:
+            logger.warning(f"Relay NIP-11 response was not JSON for {relay_url}")
+            return jsonify({'error': 'Relay did not return valid NIP-11 JSON'}), 400
+
+        if not isinstance(relay_info, dict):
+            return jsonify({'error': 'Relay NIP-11 response must be a JSON object'}), 400
+
+        relay_pubkey = relay_info.get('pubkey') or relay_info.get('self')
+        if not relay_pubkey:
+            return jsonify({'error': 'Relay NIP-11 metadata does not include a pubkey'}), 400
+
+        expected_pubkey = getattr(startup, 'nostrPubkey', None)
+        if not expected_pubkey:
+            return jsonify({'error': 'Local Nostr pubkey is not ready'}), 503
+        if relay_pubkey.lower() != expected_pubkey.lower():
+            return jsonify({
+                'error': 'Relay pubkey does not match this neuron',
+                'relay_pubkey': relay_pubkey,
+                'expected_pubkey': expected_pubkey,
+            }), 400
+
+        startup.networkDB.upsert_relay(relay_url, user_added=True)
+        return jsonify({
+            'success': True,
+            'relay_url': relay_url,
+            'nip11_url': nip11_url,
+            'relay_pubkey': relay_pubkey,
+        })
 
     @app.route('/api/wallet/download', methods=['GET'])
     @login_required
