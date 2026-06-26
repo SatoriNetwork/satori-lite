@@ -35,8 +35,17 @@ COPY requirements.txt /Satori/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r /Satori/requirements.txt
 
+# Optional foundation-model adapter (TimesFmAdapter). CPU-only torch wheel FIRST
+# so timesfm does not pull the ~2 GB CUDA build. Hidden by the optional-import
+# guard if absent.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir timesfm==2.0.1
+
 # Set Python path - include /Satori so 'from web.app' imports work
 ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
+
+# Cache HuggingFace weights (e.g. TimesFM) under the persisted models volume.
+ENV HF_HOME="/Satori/Neuron/models/huggingface"
 
 # Working directory
 WORKDIR /Satori

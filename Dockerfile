@@ -48,10 +48,23 @@ RUN pip install --upgrade pip && \
     pip install --no-cache-dir --retries 10 --timeout 120 coincurve && \
     pip install --retries 10 --timeout 120 pytest
 
+# Optional foundation-model adapter (TimesFmAdapter). Install the CPU-only torch
+# wheel FIRST so the subsequent timesfm install sees torch>=2.0.0 satisfied and
+# does not pull the ~2 GB CUDA build. If this layer is removed, the engine simply
+# hides TimesFM from the adapter choices (optional-import guard).
+RUN pip install --no-cache-dir --retries 10 --timeout 120 \
+        torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --retries 10 --timeout 120 timesfm==2.0.1
+
 COPY tests /Satori/tests
 
 # Set Python path - satorilib package lives at /Satori/Lib/satorilib in the image.
 ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
+
+# Cache HuggingFace weights (e.g. TimesFM, ~800 MB) under the persisted models
+# volume so they survive container restarts. /Satori/Neuron/models is symlinked
+# to /Satori/models below, which the prod compose mounts from the host.
+ENV HF_HOME="/Satori/Neuron/models/huggingface"
 
 # Create symbolic links for docker-compose.yaml compatibility
 # Remove existing directories first, then create symlinks

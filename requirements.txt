@@ -5,8 +5,10 @@
 setuptools>=78.1.1
 
 # Data handling - pinned for compatibility
-numpy==1.24.0
-pandas==1.5.2
+# numpy floor is 1.26.4: required by timesfm 2.x and still numpy 1.x, so
+# pandas 1.5.3 (which breaks on numpy 2.x) stays compatible.
+numpy==1.26.4
+pandas==1.5.3
 pyarrow>=14.0.1
 fastparquet==2022.12.0
 
@@ -30,7 +32,9 @@ sktime>=0.33.1
 optuna>=4.0.0
 
 # AI Engine - Deep Learning (optional, for advanced models)
-# torch>=2.3.1  # typically installed in docker image
+# torch (CPU wheel) + timesfm==2.0.1 are installed in the Dockerfile in a
+# dedicated step AFTER this file, so timesfm does not drag in the ~2 GB CUDA
+# torch. They power the optional TimesFmAdapter (auto-hidden if unavailable).
 transformers>=4.48.0
 # prophet>=1.1.6  # has complex dependencies
 # tbats>=1.1.3

@@ -33,6 +33,13 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir --retries 10 --timeout 120 -r /tmp/requirements.txt
 
+# Optional foundation-model adapter (TimesFmAdapter). CPU-only torch wheel FIRST
+# so timesfm does not pull the ~2 GB CUDA build. Hidden by the engine's
+# optional-import guard if this layer is removed.
+RUN pip install --no-cache-dir --retries 10 --timeout 120 \
+        torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --retries 10 --timeout 120 timesfm==2.0.1
+
 # Strip debug symbols from compiled extensions to reclaim ~150-300 MB.
 RUN find /usr/local/lib/python3.10/site-packages -name '*.so' \
         -exec strip --strip-unneeded {} + 2>/dev/null || true && \
@@ -70,6 +77,9 @@ COPY engine-lite /Satori/Engine
 COPY web /Satori/web
 
 ENV PYTHONPATH="/Satori/Lib:/Satori/Neuron:/Satori/Engine:/Satori"
+
+# Cache HuggingFace weights (e.g. TimesFM) under the persisted models volume.
+ENV HF_HOME="/Satori/Neuron/models/huggingface"
 
 RUN rm -rf /Satori/Neuron/data /Satori/Neuron/models && \
     ln -s /Satori/Engine/db /Satori/Neuron/data && \
