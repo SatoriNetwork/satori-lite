@@ -15,4 +15,10 @@ try:
 except ImportError:
     XgbChronosAdapter = None
 
+# TimesFmAdapter requires torch + the timesfm package - make it optional
+try:
+    from satoriengine.veda.adapters.timesfm import TimesFmAdapter
+except ImportError:
+    TimesFmAdapter = None
+
 # from satoriengine.veda.adapters.tinytimemixer import SimpleTTMAdapter

@@ -24,7 +24,7 @@ from satorilib.server import SatoriServerClient
 # )
 from satoriengine.veda import config
 from satoriengine.veda.data import StreamForecast, validate_single_entry
-from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter, ETSAdapter
+from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter, ETSAdapter, TimesFmAdapter
 from satoriengine.veda.storage import EngineStorageManager
 
 
@@ -39,6 +39,7 @@ ADAPTER_REGISTRY = {
     'ets':     ETSAdapter,
     'xgboost': XgbAdapter,
     'starter': StarterAdapter,
+    'timesfm': TimesFmAdapter,
 }
 
 # Auto-selection order preserves the historical default (XGBoost → Starter)
@@ -83,8 +84,15 @@ def buildPreferredAdapters() -> list:
     chosen = ADAPTER_REGISTRY.get(choice)
     if chosen is None:
         return auto or [StarterAdapter]
+    # Chosen first, then the auto chain (XGBoost -> Starter) as a fallback so a
+    # stream the chosen adapter declines (e.g. TimesFM below its 350-point /
+    # 2 GB floor) lands on a real trained adapter instead of being forced back
+    # onto the chosen one by chooseAdapter's condition-agnostic fallback loop.
     result = [chosen]
-    if StarterAdapter is not None and StarterAdapter is not chosen:
+    for a in auto:
+        if a is not None and a is not chosen and a not in result:
+            result.append(a)
+    if StarterAdapter is not None and StarterAdapter not in result:
         result.append(StarterAdapter)
     return result
 
@@ -1445,9 +1453,9 @@ class StreamModel:
 
     def run_forever(self):
         '''Register stream with training queue for efficient resource management'''
-        # Skip queuing for StarterAdapter - it doesn't actually train
-        # (just uses naive predictions, no model training needed)
-        if self.adapter.__name__ == 'StarterAdapter':
+        # Skip queuing for adapters that don't actually train: StarterAdapter
+        # (naive predictions) and TimesFmAdapter (zero-shot foundation model).
+        if self.adapter.__name__ in ('StarterAdapter', 'TimesFmAdapter'):
             return
 
         # Import here to avoid circular dependency
