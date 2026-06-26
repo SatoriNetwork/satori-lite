@@ -825,6 +825,25 @@
                                 <strong style="color:var(--text-secondary);">Keep in mind:</strong> Needs time to learn. Early predictions may be less accurate until enough data builds up.
                             </div>
                         </div>
+                        <!-- Shown only when the TimesFM dependency is installed (see loadAdapter). -->
+                        <div class="mode-card" id="adapterCardTimesfm" style="display:none;" onclick="if(event.target.tagName!=='INPUT') document.getElementById('adapterTimesfm').click()">
+                            <div class="mode-head">
+                                <div>
+                                    <div class="mode-title">TimesFM <span style="font-size:0.7rem;font-weight:600;color:#b8860b;background:rgba(184,134,11,0.14);border-radius:999px;padding:0.1rem 0.5rem;vertical-align:middle;">Advanced</span></div>
+                                    <div class="mode-subtitle">Pretrained foundation model, no training</div>
+                                </div>
+                                <span class="mode-radio"></span>
+                                <input class="form-check-input" type="radio" name="adapterChoice" id="adapterTimesfm" value="timesfm">
+                            </div>
+                            <ul>
+                                <li>Forecasts immediately from a large pretrained model</li>
+                                <li>No per-stream training or warmup</li>
+                                <li>Strongest on streams with long, sub-daily history</li>
+                            </ul>
+                            <div style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border-color);font-size:0.74rem;color:var(--text-muted);">
+                                <strong style="color:var(--text-secondary);">Requirements:</strong> Needs at least 350 data points per stream and about 2 GB of RAM. Streams below that (or nodes with less RAM) automatically use XGBoost until they qualify, so you can select it safely now.
+                            </div>
+                        </div>
                     </div>
                     <div class="adapter-actions">
                         <div class="adapter-actions-buttons">
@@ -1199,10 +1218,23 @@ function updateStreamMeta(stream) {
         return;
     }
     const display = getStreamDisplayName(stream);
+    let engineLine = '';
+    if (stream.active_adapter) {
+        const running = ADAPTER_CLASS_LABELS[stream.active_adapter] || stream.active_adapter;
+        // Be honest when the chosen engine is not the one actually running this
+        // stream (e.g. TimesFM selected but the stream is below 350 points).
+        const chosenRadio = document.querySelector('input[name="adapterChoice"]:checked');
+        const chosen = chosenRadio ? chosenRadio.value : 'auto';
+        const note = (chosen === 'timesfm' && stream.active_adapter !== 'TimesFmAdapter')
+            ? ' <span class="text-muted">(until 350 points / 2 GB RAM)</span>'
+            : '';
+        engineLine = `<span>Engine <span class="mono">${running}</span>${note}</span>`;
+    }
     meta.innerHTML = `
         <span><strong>${display}</strong></span>
         <span>Stream UUID <span class="mono">${shortUuid(stream.stream_uuid)}</span></span>
         <span>Prediction UUID <span class="mono">${shortUuid(stream.prediction_stream_uuid)}</span></span>
+        ${engineLine}
     `;
 }
 
@@ -1625,8 +1657,12 @@ async function loadPerformance() {
 }
 
 // ── Prediction engine adapter ────────────────────────────
-const ADAPTER_CARDS = {ets: 'adapterCardEts', xgboost: 'adapterCardXgb'};
-const ADAPTER_LABELS = {ets: 'ETS', xgboost: 'XGBoost'};
+const ADAPTER_CARDS = {ets: 'adapterCardEts', xgboost: 'adapterCardXgb', timesfm: 'adapterCardTimesfm'};
+const ADAPTER_RADIOS = {ets: 'adapterEts', xgboost: 'adapterXgb', timesfm: 'adapterTimesfm'};
+const ADAPTER_LABELS = {ets: 'ETS', xgboost: 'XGBoost', timesfm: 'TimesFM'};
+// Maps the engine's adapter class name (active_adapter from /api/engine/streams)
+// to a friendly label, so the per-stream meta can show what is really running.
+const ADAPTER_CLASS_LABELS = {ETSAdapter: 'ETS', XgbAdapter: 'XGBoost', TimesFmAdapter: 'TimesFM', StarterAdapter: 'Starter'};
 
 function syncAdapterCardActive() {
     const selected = document.querySelector('input[name="adapterChoice"]:checked');
@@ -1638,7 +1674,7 @@ function syncAdapterCardActive() {
 
 function selectAdapter(value) {
     const resolved = value === 'auto' ? 'xgboost' : value;
-    const radio = document.getElementById({ets: 'adapterEts', xgboost: 'adapterXgb'}[resolved]);
+    const radio = document.getElementById(ADAPTER_RADIOS[resolved]);
     if (radio) radio.checked = true;
     syncAdapterCardActive();
 }
@@ -1648,6 +1684,11 @@ async function loadAdapter() {
     try {
         const resp = await fetch('/api/settings/adapter');
         const data = await resp.json();
+        // Reveal the TimesFM card only when the engine reports it as installable.
+        if (Array.isArray(data.choices) && data.choices.includes('timesfm')) {
+            const tfmCard = document.getElementById('adapterCardTimesfm');
+            if (tfmCard) tfmCard.style.display = '';
+        }
         const current = data.adapter || 'auto';
         const resolved = current === 'auto' ? 'xgboost' : current;
         selectAdapter(resolved);
@@ -1718,7 +1759,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     loadAdapter();
-    ['adapterEts', 'adapterXgb'].forEach((id) => {
+    ['adapterEts', 'adapterXgb', 'adapterTimesfm'].forEach((id) => {
         const radio = document.getElementById(id);
         if (radio) radio.addEventListener('change', syncAdapterCardActive);
     });

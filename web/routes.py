@@ -1629,6 +1629,10 @@ def register_routes(app):
                     'author': author,
                     'target': target,
                     'stream_type': 'active_model',
+                    # The adapter class actually selected for this stream right
+                    # now (may differ from the user's preferred_adapter when a
+                    # stream is too short / the node too small for that choice).
+                    'active_adapter': getattr(getattr(model, 'adapter', None), '__name__', None),
                 })
 
             predictions_24h_total = 0
