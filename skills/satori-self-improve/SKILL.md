@@ -227,6 +227,7 @@ gh pr create --repo SatoriNetwork/satori-lite --base <community-branch> \
 | API index (all endpoints) | `GET /api/index` (add `?format=md` to read)      |
 | Preview your edits' diff  | `POST /api/improve/diff`                          |
 | Submit upstream           | `POST /api/improve/submit` (auto-builds the diff) |
+| Native MCP access (opt.)  | `/Satori/mcp-server/` — same tools over MCP; see its README |
 | Repo & community branch   | `/api/index` → `self_improve.repo` / `.community_branch` |
 | In-container source       | `/Satori/Neuron`, `/Satori/Engine`, `/Satori/web`, `/Satori/Lib/satorilib` |
 | Web UI / API port         | `24601`                                          |

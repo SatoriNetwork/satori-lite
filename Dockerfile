@@ -53,6 +53,10 @@ COPY web /Satori/src/web
 COPY skills /Satori/src/skills
 RUN printf '%s' "${SATORI_GIT_SHA}" > /Satori/BUILD_SHA
 
+# MCP server source. Runs client-side (where the AI runs); shipped here for
+# discovery / docker cp. Not installed into the neuron runtime.
+COPY mcp-server /Satori/mcp-server
+
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt
 RUN pip install --upgrade pip && \
