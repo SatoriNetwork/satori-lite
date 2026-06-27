@@ -12,11 +12,19 @@ It runs **wherever your AI runs** and talks to the neuron over HTTP (default
 
 ## What it exposes
 
-**Tools**
-- `get_api_index()` — every REST endpoint the neuron exposes, grouped, plus
-  self-improvement metadata (repo, community branch, build commit). Start here.
-- `call_endpoint(path, method="GET", body=None)` — call any neuron endpoint to
-  answer a question or perform an action.
+It's a general interface to the **whole neuron**, plus the self-improvement loop.
+
+**Navigation / general use**
+- `get_api_index()` — map of every endpoint grouped by category (wallet, engine,
+  network, bounty, pool, lending, relay, …) with descriptions and
+  self-improvement metadata. Start here.
+- `find_endpoints(query)` — search endpoints by task/feature (e.g. `balance`,
+  `bounty`, `stream`, `stake`) so the agent is pointed at the right one.
+- `call_endpoint(path, method="GET", body=None)` — drive any feature by calling
+  its endpoint (balances, streams, predictions, bounties, pools, lending,
+  relays, staking, settings, …).
+
+**Self-improvement loop**
 - `preview_improvement_diff(files=None)` — preview the repo-relative diff (and
   base commit) the neuron will submit for your live edits.
 - `submit_improvement(title, description="", files=None, diff="")` — submit an
@@ -26,6 +34,32 @@ It runs **wherever your AI runs** and talks to the neuron over HTTP (default
 
 **Resource** `satori://skill` and **prompt** `self_improve` — the full
 self-improvement workflow (the same text as `GET /api/skill`).
+
+## Authentication
+
+Most neuron endpoints require an **unlocked session** (the operator decrypts the
+wallet by logging into the neuron). This server never sees or handles the vault
+password. To reach those endpoints, the operator unlocks the neuron in their
+browser and passes that session cookie to the server:
+
+```bash
+# copy the `satori_session_24601` cookie from your browser's dev tools
+export SATORI_NEURON_COOKIE='satori_session_24601=<value>'
+```
+
+Without it, public endpoints (`/api/index`, `/api/skill`, `/api/improve/*`,
+`/api/engine/status`) work, and session-gated calls return a clear
+`auth_required` result. (`SATORI_NEURON_HEADERS` can supply arbitrary extra
+headers as JSON if you prefer.)
+
+## Security
+
+Endpoints that reveal **private key material** — the wallet, vault, and
+identity (nostr) private keys, and the wallet-file download — are **hard-blocked**
+by this server and hidden from `get_api_index`, even with a valid session. An AI
+driving the neuron through MCP can use every other feature but cannot exfiltrate
+keys. The operator can still view keys directly in the neuron UI. Extend the
+block list with `SATORI_MCP_BLOCK` (comma-separated path substrings).
 
 ## Install & run
 

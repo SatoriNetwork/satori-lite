@@ -2,12 +2,22 @@
 """
 Satori Neuron — MCP server.
 
-A thin Model Context Protocol wrapper over a running neuron's REST API
-(default http://localhost:24601). It lets an MCP client (Claude Code, Claude
-Desktop, ...) discover what the neuron can do and drive the community
-self-improvement loop natively — the same capabilities as the /api/skill,
-/api/index, and /api/improve/* HTTP endpoints, exposed as MCP tools, a
-resource, and a prompt.
+A Model Context Protocol interface to a running neuron's REST API (default
+http://localhost:24601). It lets an MCP client (Claude Code, Claude Desktop,
+...) navigate and drive the neuron's ENTIRE functionality — balances, streams,
+predictions, bounties, pools, lending, relays, staking, settings — as well as
+the community self-improvement loop, exposed as MCP tools, a resource, and a
+prompt. It discovers endpoints from /api/index and directs the agent to the
+right one for each task.
+
+Auth: most neuron endpoints require an unlocked session. The operator unlocks
+the neuron in their browser (where the wallet is decrypted) and passes the
+session cookie via SATORI_NEURON_COOKIE — this server never sees or handles the
+vault password.
+
+Security: endpoints that reveal private key material (wallet / vault /
+identity-nostr private keys, the wallet-file download) are hard-blocked here and
+hidden from the index, even with a valid session. We relay everything else.
 
 Run over stdio (the default — for Claude Code / Desktop):
     pip install -r requirements.txt
@@ -27,6 +37,7 @@ print() to stdout from this process. All logging goes to stderr.
 """
 import os
 import sys
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +51,42 @@ logger = logging.getLogger("satori-mcp")
 NEURON_URL = os.environ.get("SATORI_NEURON_URL", "http://localhost:24601").rstrip("/")
 TIMEOUT = float(os.environ.get("SATORI_MCP_TIMEOUT", "30"))
 
+# Sensitive paths the MCP layer must NEVER expose, even to an authenticated
+# session — they reveal key material (wallet / vault / identity-nostr private
+# keys, the wallet file). The operator can still view these directly in the
+# neuron UI after unlocking; we just refuse to relay them to an AI. Extend with
+# SATORI_MCP_BLOCK (comma-separated substrings).
+_BLOCK_PATTERNS = [
+    "private-key", "private_key", "privatekey", "privkey",
+    "identity-private", "mnemonic", "/wallet/download",
+]
+_BLOCK_PATTERNS += [p.strip().lower() for p in
+                    os.environ.get("SATORI_MCP_BLOCK", "").split(",") if p.strip()]
+
+
+def _build_session() -> requests.Session:
+    """HTTP session carrying any operator-provided neuron auth.
+
+    Most neuron endpoints require an unlocked session. The operator unlocks the
+    neuron in their browser (decrypting the wallet there) and passes the session
+    cookie via SATORI_NEURON_COOKIE — this MCP server never sees or handles the
+    vault password.
+    """
+    s = requests.Session()
+    cookie = os.environ.get("SATORI_NEURON_COOKIE", "").strip()
+    if cookie:
+        s.headers["Cookie"] = cookie
+    extra = os.environ.get("SATORI_NEURON_HEADERS", "").strip()
+    if extra:
+        try:
+            s.headers.update(json.loads(extra))
+        except ValueError:
+            logger.warning("SATORI_NEURON_HEADERS is not valid JSON; ignoring")
+    return s
+
+
+_http = _build_session()
+
 mcp = FastMCP("satori-neuron")
 
 
@@ -47,18 +94,42 @@ def _url(path: str) -> str:
     return NEURON_URL + (path if path.startswith("/") else "/" + path)
 
 
+def _blocked(path: str) -> Optional[str]:
+    low = (path or "").lower()
+    for pat in _BLOCK_PATTERNS:
+        if pat and pat in low:
+            return pat
+    return None
+
+
 def _request(method: str, path: str,
              body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Call the neuron API; return {ok, status, json|text} or {ok: False, error}."""
+    if _blocked(path):
+        return {"ok": False, "blocked": True,
+                "error": (f"'{path}' exposes private key material and is blocked "
+                          "via MCP for safety. The operator can view it directly "
+                          "in the neuron UI.")}
     method = (method or "GET").upper()
     try:
-        resp = requests.request(
+        resp = _http.request(
             method, _url(path),
             json=body if body is not None else None,
-            timeout=TIMEOUT)
+            timeout=TIMEOUT, allow_redirects=False)
     except requests.RequestException as e:
         logger.warning("request %s %s failed: %s", method, path, e)
         return {"ok": False, "error": f"could not reach neuron at {NEURON_URL}: {e}"}
+    # Session-gated endpoints redirect to /login (or /vault-setup) when the
+    # neuron isn't unlocked — surface that clearly instead of returning HTML.
+    if resp.status_code in (301, 302, 303, 307, 308):
+        loc = resp.headers.get("Location", "")
+        if "login" in loc or "vault" in loc:
+            return {"ok": False, "status": resp.status_code, "auth_required": True,
+                    "error": ("This endpoint needs an unlocked neuron session. "
+                              "Unlock the neuron in the browser, then set "
+                              "SATORI_NEURON_COOKIE to that session cookie.")}
+        return {"ok": False, "status": resp.status_code,
+                "error": f"unexpected redirect to {loc}"}
     out: Dict[str, Any] = {"ok": resp.ok, "status": resp.status_code}
     try:
         out["json"] = resp.json()
@@ -69,26 +140,81 @@ def _request(method: str, path: str,
 
 def _text(path: str) -> str:
     try:
-        return requests.get(_url(path), timeout=TIMEOUT).text
+        return _http.get(_url(path), timeout=TIMEOUT, allow_redirects=False).text
     except requests.RequestException as e:
         return f"(could not reach neuron at {NEURON_URL}: {e})"
 
 
+def _filter_index(index: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove sensitive endpoints from an index payload so the agent is never
+    pointed at them; record what was hidden for transparency."""
+    eps = index.get("endpoints")
+    if isinstance(eps, list):
+        kept, hidden = [], []
+        for e in eps:
+            path = e.get("path", "") if isinstance(e, dict) else ""
+            if _blocked(path):
+                hidden.append(path)
+            else:
+                kept.append(e)
+        index["endpoints"] = kept
+        index["endpoint_count"] = len(kept)
+        if hidden:
+            index["hidden_for_safety"] = hidden
+            index["hidden_note"] = ("Endpoints exposing private key material are "
+                                    "hidden from MCP; the operator can use them in "
+                                    "the neuron UI.")
+    cats = index.get("categories")
+    if isinstance(cats, dict):
+        index["categories"] = {c: [p for p in paths if not _blocked(p)]
+                               for c, paths in cats.items()}
+    return index
+
+
 @mcp.tool()
 def get_api_index() -> Dict[str, Any]:
-    """List every REST endpoint this neuron exposes (grouped by category) plus
-    its self-improvement metadata (repo, community branch, build commit). Start
-    here to discover what the neuron can do."""
-    return _request("GET", "/api/index")
+    """Map of the neuron's ENTIRE functionality: every REST endpoint grouped by
+    category (wallet, engine, network, bounty, pool, lending, relay, ...) with
+    descriptions, plus self-improvement metadata (repo, community branch, build
+    commit). Start here to discover and navigate what the neuron can do.
+    Key-exposing endpoints are hidden for safety."""
+    r = _request("GET", "/api/index")
+    if r.get("ok") and isinstance(r.get("json"), dict):
+        r["json"] = _filter_index(r["json"])
+    return r
+
+
+@mcp.tool()
+def find_endpoints(query: str) -> Dict[str, Any]:
+    """Find the neuron endpoints relevant to a task or feature — searches paths,
+    categories, and descriptions. Use this to navigate the neuron's full
+    functionality, e.g. 'balance', 'send', 'bounty', 'stream', 'relay', 'pool',
+    'stake', 'delegate'. Returns the matching endpoints to call with
+    call_endpoint."""
+    r = _request("GET", "/api/index")
+    if not r.get("ok") or not isinstance(r.get("json"), dict):
+        return r
+    q = (query or "").lower()
+    matches = []
+    for e in r["json"].get("endpoints", []):
+        if not isinstance(e, dict) or _blocked(e.get("path", "")):
+            continue
+        hay = " ".join(str(e.get(k, "")) for k in
+                       ("path", "category", "description", "name")).lower()
+        if q in hay:
+            matches.append(e)
+    return {"ok": True, "query": query, "count": len(matches), "endpoints": matches}
 
 
 @mcp.tool()
 def call_endpoint(path: str, method: str = "GET",
                   body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Call any of the neuron's REST endpoints (discover them with
-    get_api_index) to answer an operator's question or perform an action. `path`
-    is like '/api/engine/streams'; `method` is GET/POST/DELETE; `body` is the
-    JSON payload for writes."""
+    """Drive ANY of the neuron's features by calling its REST endpoints (find
+    them with get_api_index / find_endpoints): balances, streams, predictions,
+    bounties, pools, lending, relays, staking, settings, and more. `path` is like
+    '/api/engine/streams'; `method` is GET/POST/DELETE; `body` is the JSON for
+    writes. Most endpoints need an unlocked neuron session (see auth note in the
+    README); endpoints that reveal private keys are blocked for safety."""
     return _request(method, path, body)
 
 
