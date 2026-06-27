@@ -262,6 +262,9 @@ def _forward_to_central(record, record_id):
         'base_sha': record.get('base_sha', ''),
         'branch': record.get('branch'),
         'files': record['files'],
+        'group_id': record.get('group_id'),
+        'group_size': record.get('group_size', 1),
+        'group_repos': record.get('group_repos'),
     }
     try:
         resp = server._makeAuthenticatedCall(
@@ -374,6 +377,10 @@ def register_self_improve_routes(app):
         now = time.time()
         description = (data.get('description') or '').strip()
         author = data.get('author') or ''
+        # One submit can span repos (e.g. neuron + satorilib). Tie the resulting
+        # PRs together with a shared group id so they can be evaluated as a unit.
+        group_id = data.get('group_id') or f"{int(now)}-{_slug(title)}"
+        group_repos = list(units.keys())
         submissions = []
         for repo, unit in units.items():
             record = {
@@ -385,6 +392,9 @@ def register_self_improve_routes(app):
                 'branch': data.get('branch'),  # None -> central picks per-repo
                 'author': author,
                 'files': unit.get('files', []),
+                'group_id': group_id,
+                'group_size': len(units),
+                'group_repos': group_repos,
                 'received_at': now,
             }
             record_id = f"{int(now)}-{_slug(repo)}-{_slug(title)}"
@@ -405,9 +415,10 @@ def register_self_improve_routes(app):
         return jsonify({
             'ok': True,
             'count': len(submissions),
+            'group_id': group_id,
             'submissions': submissions,
             'message': ('Improvement queued. The neuron opens one PR per affected '
-                        'repo after review.'),
+                        'repo after review; PRs in a group cross-reference each other.'),
         }), 202
 
     @app.route('/api/improve/status/<submission_id>', methods=['GET'])
