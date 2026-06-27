@@ -51,6 +51,10 @@ def create_app(testing=False):
     from web.routes import register_routes
     register_routes(app)
 
+    # Register self-improvement endpoints (skill, API index, diff submission)
+    from web.self_improve import register_self_improve_routes
+    register_self_improve_routes(app)
+
     return app
 
 

@@ -39,6 +39,8 @@ COPY --from=satorilib src/satorilib /Satori/Lib/satorilib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
 COPY web /Satori/web
+# Skills served by the neuron (e.g. the self-improvement skill at /api/skill)
+COPY skills /Satori/skills
 
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt

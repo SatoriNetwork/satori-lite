@@ -61,6 +61,7 @@ services:
       - ./neuron-lite:/Satori/Neuron
       - ./engine-lite:/Satori/Engine
       - ./web:/Satori/web
+      - ./skills:/Satori/skills
       - ./tests:/Satori/tests
     ports:
       - "24601:24601"
