@@ -26,6 +26,8 @@ import tempfile
 
 from flask import current_app, jsonify, request, Response
 
+from web import improve_repo
+
 logger = logging.getLogger(__name__)
 
 REPO_URL = os.environ.get(
@@ -163,7 +165,13 @@ def build_index():
             'repo': REPO_URL,
             'community_branch': COMMUNITY_BRANCH,
             'submit_endpoint': '/api/improve/submit',
+            'preview_endpoint': '/api/improve/diff',
             'source_paths_in_container': SOURCE_PATHS,
+            # The neuron builds repo-relative diffs of your live edits itself —
+            # no path translation needed — and records the base commit so they
+            # apply cleanly upstream.
+            'auto_diff': improve_repo.available(),
+            'build_sha': improve_repo.build_sha(),
         },
         'endpoint_count': len(endpoints),
         'categories': categories,
@@ -230,7 +238,7 @@ def register_self_improve_routes(app):
     def _allow_cross_origin(response):
         # Scope CORS to the public self-improvement endpoints only.
         if request.path in ('/api/skill', '/api/skill.md', '/api/index',
-                            '/api/improve/submit'):
+                            '/api/improve/submit', '/api/improve/diff'):
             response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
@@ -250,27 +258,59 @@ def register_self_improve_routes(app):
             return Response(_index_as_markdown(index), mimetype='text/markdown')
         return jsonify(index)
 
+    @app.route('/api/improve/diff', methods=['POST', 'OPTIONS'])
+    def preview_improvement_diff():
+        """Preview the repo-relative diff the neuron will submit for live edits."""
+        if request.method == 'OPTIONS':
+            return ('', 204)
+        data = request.get_json(silent=True) or {}
+        diff, changed = improve_repo.generate(data.get('files'))
+        return jsonify({
+            'base_sha': improve_repo.build_sha(),
+            'auto_diff': improve_repo.available(),
+            'files': changed,
+            'diff': diff,
+        })
+
     @app.route('/api/improve/submit', methods=['POST', 'OPTIONS'])
     def submit_improvement():
-        """Queue a unified diff for the maintainers to open as an upstream PR."""
+        """Queue an improvement for the maintainers to open as an upstream PR.
+
+        Pass just `title`/`description` and the neuron builds the diff from your
+        live edits; pass `files` (container paths) to scope it; or pass a
+        ready-made unified `diff` yourself.
+        """
         if request.method == 'OPTIONS':
             return ('', 204)
         data = request.get_json(silent=True) or {}
         title = (data.get('title') or '').strip()
+        if not title:
+            return jsonify({'ok': False, 'error': "'title' is required."}), 400
+
         diff = data.get('diff') or ''
-        if not title or not diff.strip():
-            return jsonify({
-                'ok': False,
-                'error': "Both 'title' and 'diff' (unified git diff) are required.",
-            }), 400
+        changed = data.get('files') or []
+        base_sha = improve_repo.build_sha()
+        if not diff.strip():
+            # No diff supplied — build one from the operator's live edits.
+            diff, changed = improve_repo.generate(data.get('files'))
+            if not diff.strip():
+                if improve_repo.available():
+                    hint = ('Edit files under the source tree first, then '
+                            "resubmit; or pass a unified 'diff'.")
+                else:
+                    hint = ('Auto-diff is unavailable on this neuron (no baseline '
+                            "shipped); pass a unified 'diff' instead.")
+                return jsonify({'ok': False,
+                                'error': f'No changes detected. {hint}'}), 400
 
         record = {
             'title': title,
             'description': (data.get('description') or '').strip(),
             'diff': diff,
+            'base_sha': base_sha,
             'branch': data.get('branch') or COMMUNITY_BRANCH,
             'author': data.get('author') or '',
-            'files': data.get('files') or [],
+            'files': changed,
             'received_at': time.time(),
         }
 

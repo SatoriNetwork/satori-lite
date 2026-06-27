@@ -160,48 +160,32 @@ Your edit fixed *this* neuron. To fix it for **everyone**, the change has to go
 upstream against the **community branch** (read the exact repo + branch from
 `/api/index` → `self_improve.repo` / `self_improve.community_branch`).
 
-**You do not need your own GitHub account.** The default path hands a plain diff
-to the neuron and a single maintainer-side bot opens the actual PR. The container
-is not a git repo and ships no credentials — do not try to `git push` from it.
+**You do not need your own GitHub account, and you do not translate any paths.**
+After you've edited the files in place (Step 3), just submit — the neuron diffs
+your live edits against the pristine baseline it shipped with, emits a correct
+**repo-relative** patch, and records the **base commit** so it applies cleanly
+upstream. A single maintainer-side bot opens the actual PR. The container is not
+a git repo and ships no credentials — do not try to `git push` from it.
 
-### Path A — hand the diff to the neuron (default, no GitHub account)
-
-POST a unified diff; the maintainers turn queued diffs into PRs on their side:
+### Path A — let the neuron build & submit the diff (default, no GitHub account)
 
 ```bash
+# optional: preview exactly what will be submitted (diff, files, base commit)
+curl -s -X POST http://localhost:24601/api/improve/diff | jq
+
 curl -X POST http://localhost:24601/api/improve/submit \
   -H 'Content-Type: application/json' \
-  -d @- <<'JSON'
-{
-  "title": "Short summary of the change",
-  "description": "What the operator wanted and how this delivers it.",
-  "diff": "<unified diff with REPO-RELATIVE paths — see below>"
-}
-JSON
+  -d '{"title":"Short summary","description":"What the operator wanted and how this delivers it."}'
 ```
 
-**Use repo-relative paths in the diff.** The image reorganizes the source, so
-translate container paths to repo paths or the PR won't apply:
+The neuron auto-detects every file you changed under `neuron-lite`, `engine-lite`,
+`web`, and `skills`. To scope it, pass the container paths you edited:
+`{"files":["/Satori/web/templates/dashboard.html"]}`. You can still pass your own
+`"diff":"<unified diff>"` if you'd rather build it yourself.
 
-| Edited in the container        | Path to put in the diff             |
-|--------------------------------|-------------------------------------|
-| `/Satori/Neuron/<f>`           | `neuron-lite/<f>`                   |
-| `/Satori/Engine/<f>`           | `engine-lite/<f>`                   |
-| `/Satori/web/<f>`              | `web/<f>`                           |
-| `/Satori/skills/<f>`           | `skills/<f>`                        |
-
-(Shared-library files under `/Satori/Lib/satorilib` live in the **separate**
-`satorilib` repo, not this one — flag those in your `description`.)
-
-Produce the diff with `diff -u <original> <edited>` and set the header paths to
-the repo-relative form, e.g.:
-
-```
---- a/web/templates/dashboard.html
-+++ b/web/templates/dashboard.html
-@@ ... @@
-+<button id="foo">Foo</button>
-```
+> Edits to the shared library under `/Satori/Lib/satorilib` are a **separate
+> repo** (`satorilib`) and are *not* auto-captured — call those out in your
+> `description` (or submit them as a raw `diff`).
 
 ### Path B — open the PR yourself (optional, only if you already have GitHub auth)
 
@@ -241,7 +225,8 @@ gh pr create --repo SatoriNetwork/satori-lite --base <community-branch> \
 |---------------------------|--------------------------------------------------|
 | This skill (raw)          | `GET /api/skill`                                 |
 | API index (all endpoints) | `GET /api/index` (add `?format=md` to read)      |
-| Submit a diff upstream    | `POST /api/improve/submit`                        |
+| Preview your edits' diff  | `POST /api/improve/diff`                          |
+| Submit upstream           | `POST /api/improve/submit` (auto-builds the diff) |
 | Repo & community branch   | `/api/index` → `self_improve.repo` / `.community_branch` |
 | In-container source       | `/Satori/Neuron`, `/Satori/Engine`, `/Satori/web`, `/Satori/Lib/satorilib` |
 | Web UI / API port         | `24601`                                          |
