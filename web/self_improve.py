@@ -24,6 +24,7 @@ import inspect
 import logging
 import tempfile
 
+import requests
 from flask import current_app, jsonify, request, Response
 
 from web import improve_repo
@@ -231,14 +232,70 @@ def _slug(text, limit=40):
     return slug[:limit] or 'improvement'
 
 
+def _server():
+    """The authenticated central-server client, or None if not connected."""
+    try:
+        from web.routes import get_startup
+        startup = get_startup()
+        return getattr(startup, 'server', None) if startup else None
+    except Exception as e:
+        logger.warning('self_improve: could not reach server client: %s', e)
+        return None
+
+
+def _forward_to_central(record, record_id):
+    """Best-effort: forward a queued improvement to central, which opens the PR.
+
+    Returns a dict merged into the submit response. Never raises — the local
+    copy is always kept, so a forwarding failure does not lose the submission.
+    """
+    server = _server()
+    if server is None:
+        return {'forwarded': False, 'reason': 'no central connection'}
+    payload = {
+        'local_id': record_id,
+        'title': record['title'],
+        'description': record['description'],
+        'diff': record['diff'],
+        'base_sha': record.get('base_sha', ''),
+        'branch': record['branch'],
+        'files': record['files'],
+    }
+    try:
+        resp = server._makeAuthenticatedCall(
+            function=requests.post,
+            endpoint='/api/v1/improve/submit',
+            payload=json.dumps(payload),
+            raiseForStatus=False)
+    except Exception as e:
+        logger.warning('self_improve: forward to central failed: %s', e)
+        return {'forwarded': False, 'reason': str(e)}
+    if resp is None:
+        return {'forwarded': False, 'reason': 'no response from central'}
+    if resp.status_code in (200, 201, 202):
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        central_id = data.get('id')
+        return {
+            'forwarded': True,
+            'central_id': central_id,
+            'status': data.get('status', 'queued'),
+            'status_url': f'/api/improve/status/{central_id}' if central_id is not None else None,
+        }
+    return {'forwarded': False,
+            'reason': f'central returned {resp.status_code}'}
+
+
 def register_self_improve_routes(app):
     """Attach the self-improvement endpoints to the Flask app."""
 
     @app.after_request
     def _allow_cross_origin(response):
         # Scope CORS to the public self-improvement endpoints only.
-        if request.path in ('/api/skill', '/api/skill.md', '/api/index',
-                            '/api/improve/submit', '/api/improve/diff'):
+        if (request.path in ('/api/skill', '/api/skill.md', '/api/index')
+                or request.path.startswith('/api/improve/')):
             response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
@@ -333,11 +390,30 @@ def register_self_improve_routes(app):
 
         logger.info('self_improve: queued improvement %s (%d bytes diff)',
                     record_id, len(diff))
-        return jsonify({
+        response = {
             'ok': True,
             'id': record_id,
             'message': 'Improvement queued. Maintainers will review and open a PR.',
-            'next_steps': (
-                'For a faster path, open the PR yourself against '
-                f'{REPO_URL} (base branch `{record["branch"]}`).'),
-        }), 202
+        }
+        # Forward upstream so central can open the PR (one centralized credential).
+        response.update(_forward_to_central(record, record_id))
+        return jsonify(response), 202
+
+    @app.route('/api/improve/status/<submission_id>', methods=['GET'])
+    def improvement_status(submission_id):
+        """Proxy the upstream PR status (state, PR url) of a forwarded improvement."""
+        server = _server()
+        if server is None:
+            return jsonify({'ok': False, 'error': 'no central connection'}), 503
+        try:
+            resp = server._makeAuthenticatedCall(
+                function=requests.get,
+                endpoint=f'/api/v1/improve/{submission_id}',
+                raiseForStatus=False)
+        except Exception as e:
+            logger.warning('self_improve: status proxy failed: %s', e)
+            return jsonify({'ok': False, 'error': str(e)}), 502
+        if resp is None:
+            return jsonify({'ok': False, 'error': 'no response from central'}), 502
+        return Response(resp.text, status=resp.status_code,
+                        mimetype='application/json')
