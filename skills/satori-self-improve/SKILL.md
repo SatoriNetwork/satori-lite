@@ -75,6 +75,28 @@ Use `/api/index` to find the right endpoint instead of guessing.
 
 ---
 
+## Reuse before you build (do this before writing any code)
+
+If the request needs a code change, **first check whether someone already
+proposed it.** Don't reinvent a fix that's already an open pull request.
+
+1. **Search open proposals:** `GET /api/improve/open?q=<keywords>` (optionally
+   `&repo=satori-lite|satorilib`). Results are ordered by how many operators have
+   already adopted them — popularity is a strong signal it works.
+2. **Evaluate a candidate:** `GET /api/improve/proposal/<id>` returns its diff,
+   files, and PR url. Read the diff and the PR discussion and judge whether it
+   actually solves the operator's need.
+3. **If it fits, adopt it instead of writing your own:** apply that proposal's
+   diff to the live code (Step 3) so the operator gets it now, before it's
+   merged. Then **record the adoption:** `POST /api/improve/adopt/<id>`. That
+   increments the proposal's distinct-adopter count and notes it on the PR, so
+   maintainers can see which unmerged proposals are broadly useful and merge the
+   best ones sooner.
+
+Only if nothing suitable exists do you build a new change and submit it (Step 4).
+
+---
+
 ## Step 2 — Find the container and its source
 
 Only needed when the request requires a code change.

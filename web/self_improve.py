@@ -293,6 +293,24 @@ def _forward_to_central(record, record_id):
             'reason': f'central returned {resp.status_code}'}
 
 
+def _proxy_central(method, endpoint, payload=None):
+    """Proxy a wallet-authenticated call to central, returning a Flask response."""
+    server = _server()
+    if server is None:
+        return jsonify({'ok': False, 'error': 'no central connection'}), 503
+    try:
+        resp = server._makeAuthenticatedCall(
+            function=method, endpoint=endpoint,
+            payload=(json.dumps(payload) if payload is not None else None),
+            raiseForStatus=False)
+    except Exception as e:
+        logger.warning('self_improve: central proxy failed (%s): %s', endpoint, e)
+        return jsonify({'ok': False, 'error': str(e)}), 502
+    if resp is None:
+        return jsonify({'ok': False, 'error': 'no response from central'}), 502
+    return Response(resp.text, status=resp.status_code, mimetype='application/json')
+
+
 def register_self_improve_routes(app):
     """Attach the self-improvement endpoints to the Flask app."""
 
@@ -421,21 +439,28 @@ def register_self_improve_routes(app):
                         'repo after review; PRs in a group cross-reference each other.'),
         }), 202
 
+    @app.route('/api/improve/open', methods=['GET'])
+    def improvement_open():
+        """Browse existing OPEN proposals (unmerged PRs) to reuse before building.
+        Forwards `q`/`repo`/`limit` query params to central."""
+        qs = request.query_string.decode()
+        endpoint = '/api/v1/improve/open' + (f'?{qs}' if qs else '')
+        return _proxy_central(requests.get, endpoint)
+
+    @app.route('/api/improve/proposal/<proposal_id>', methods=['GET'])
+    def improvement_proposal(proposal_id):
+        """Full detail of an open proposal (incl. its diff) so the AI can evaluate it."""
+        return _proxy_central(requests.get, f'/api/v1/improve/{proposal_id}')
+
+    @app.route('/api/improve/adopt/<proposal_id>', methods=['POST', 'OPTIONS'])
+    def improvement_adopt(proposal_id):
+        """Record that this operator applied an open proposal locally (popularity)."""
+        if request.method == 'OPTIONS':
+            return ('', 204)
+        return _proxy_central(requests.post, f'/api/v1/improve/{proposal_id}/adopt',
+                              payload={})
+
     @app.route('/api/improve/status/<submission_id>', methods=['GET'])
     def improvement_status(submission_id):
         """Proxy the upstream PR status (state, PR url) of a forwarded improvement."""
-        server = _server()
-        if server is None:
-            return jsonify({'ok': False, 'error': 'no central connection'}), 503
-        try:
-            resp = server._makeAuthenticatedCall(
-                function=requests.get,
-                endpoint=f'/api/v1/improve/{submission_id}',
-                raiseForStatus=False)
-        except Exception as e:
-            logger.warning('self_improve: status proxy failed: %s', e)
-            return jsonify({'ok': False, 'error': str(e)}), 502
-        if resp is None:
-            return jsonify({'ok': False, 'error': 'no response from central'}), 502
-        return Response(resp.text, status=resp.status_code,
-                        mimetype='application/json')
+        return _proxy_central(requests.get, f'/api/v1/improve/{submission_id}')

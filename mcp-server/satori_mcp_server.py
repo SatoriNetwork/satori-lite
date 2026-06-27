@@ -40,6 +40,7 @@ import sys
 import json
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import requests
 from mcp.server.fastmcp import FastMCP
@@ -247,6 +248,37 @@ def improvement_status(submission_id: str) -> Dict[str, Any]:
     """Check the status (and pull-request URL, once open) of a submitted
     improvement by its id."""
     return _request("GET", f"/api/improve/status/{submission_id}")
+
+
+@mcp.tool()
+def search_improvements(query: str = "", repo: str = "") -> Dict[str, Any]:
+    """REUSE BEFORE YOU BUILD. Search existing OPEN proposals (unmerged PRs from
+    the community) that may already solve the operator's need, ordered by how many
+    operators have adopted them. Always check here before writing a new change.
+    Filter by `query` (matches title/description/files) and/or `repo`."""
+    params = []
+    if query:
+        params.append("q=" + quote(query))
+    if repo:
+        params.append("repo=" + quote(repo))
+    path = "/api/improve/open" + ("?" + "&".join(params) if params else "")
+    return _request("GET", path)
+
+
+@mcp.tool()
+def get_proposal(proposal_id: str) -> Dict[str, Any]:
+    """Full detail of an open proposal — its diff, files, PR url, and adopter
+    count — so you can evaluate whether to reuse it instead of building anew."""
+    return _request("GET", f"/api/improve/proposal/{proposal_id}")
+
+
+@mcp.tool()
+def adopt_improvement(proposal_id: str) -> Dict[str, Any]:
+    """Record that you applied an existing open proposal on this neuron locally.
+    Call this after applying the proposal's diff (so the operator gets it now,
+    before merge). It bumps the proposal's distinct-adopter count — the signal
+    that tells maintainers which unmerged proposals are broadly useful."""
+    return _request("POST", f"/api/improve/adopt/{proposal_id}")
 
 
 @mcp.resource("satori://skill")
