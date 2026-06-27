@@ -173,6 +173,7 @@ def build_index():
             # apply cleanly upstream.
             'auto_diff': improve_repo.available(),
             'build_sha': improve_repo.build_sha(),
+            'repos': improve_repo.repos(),
         },
         'endpoint_count': len(endpoints),
         'categories': categories,
@@ -257,8 +258,9 @@ def _forward_to_central(record, record_id):
         'title': record['title'],
         'description': record['description'],
         'diff': record['diff'],
+        'repo': record.get('repo', 'satori-lite'),
         'base_sha': record.get('base_sha', ''),
-        'branch': record['branch'],
+        'branch': record.get('branch'),
         'files': record['files'],
     }
     try:
@@ -317,25 +319,24 @@ def register_self_improve_routes(app):
 
     @app.route('/api/improve/diff', methods=['POST', 'OPTIONS'])
     def preview_improvement_diff():
-        """Preview the repo-relative diff the neuron will submit for live edits."""
+        """Preview the per-repo diffs the neuron will submit for your live edits."""
         if request.method == 'OPTIONS':
             return ('', 204)
         data = request.get_json(silent=True) or {}
-        diff, changed = improve_repo.generate(data.get('files'))
+        per_repo = improve_repo.generate(data.get('files'))
         return jsonify({
-            'base_sha': improve_repo.build_sha(),
             'auto_diff': improve_repo.available(),
-            'files': changed,
-            'diff': diff,
+            'repos': per_repo,  # {repo: {diff, files, base_sha}}
         })
 
     @app.route('/api/improve/submit', methods=['POST', 'OPTIONS'])
     def submit_improvement():
-        """Queue an improvement for the maintainers to open as an upstream PR.
+        """Queue an improvement; the neuron opens one PR per affected repo.
 
-        Pass just `title`/`description` and the neuron builds the diff from your
-        live edits; pass `files` (container paths) to scope it; or pass a
-        ready-made unified `diff` yourself.
+        Pass just `title`/`description` and the neuron builds the diff(s) from
+        your live edits — routing each to the correct repo (satori-lite for the
+        neuron, satorilib for the shared library). Pass `files` (container paths)
+        to scope it, or a ready-made unified `diff` (+ optional `repo`) yourself.
         """
         if request.method == 'OPTIONS':
             return ('', 204)
@@ -344,13 +345,15 @@ def register_self_improve_routes(app):
         if not title:
             return jsonify({'ok': False, 'error': "'title' is required."}), 400
 
-        diff = data.get('diff') or ''
-        changed = data.get('files') or []
-        base_sha = improve_repo.build_sha()
-        if not diff.strip():
-            # No diff supplied — build one from the operator's live edits.
-            diff, changed = improve_repo.generate(data.get('files'))
-            if not diff.strip():
+        # One unit of work per repo: either an explicit diff, or auto-built diffs.
+        if (data.get('diff') or '').strip():
+            repo = data.get('repo') or 'satori-lite'
+            units = {repo: {'diff': data['diff'],
+                            'files': data.get('files') or [],
+                            'base_sha': data.get('base_sha') or improve_repo.build_sha(repo)}}
+        else:
+            units = improve_repo.generate(data.get('files'))
+            if not units:
                 if improve_repo.available():
                     hint = ('Edit files under the source tree first, then '
                             "resubmit; or pass a unified 'diff'.")
@@ -360,17 +363,6 @@ def register_self_improve_routes(app):
                 return jsonify({'ok': False,
                                 'error': f'No changes detected. {hint}'}), 400
 
-        record = {
-            'title': title,
-            'description': (data.get('description') or '').strip(),
-            'diff': diff,
-            'base_sha': base_sha,
-            'branch': data.get('branch') or COMMUNITY_BRANCH,
-            'author': data.get('author') or '',
-            'files': changed,
-            'received_at': time.time(),
-        }
-
         out_dir = _improvements_dir()
         if out_dir is None:
             logger.error('self_improve: no writable improvements dir')
@@ -379,25 +371,44 @@ def register_self_improve_routes(app):
                 'error': 'No writable location to store the submission on this neuron.',
             }), 500
 
-        record_id = f"{int(record['received_at'])}-{_slug(title)}"
-        out_path = os.path.join(out_dir, f"{record_id}.json")
-        try:
-            with open(out_path, 'w', encoding='utf-8') as f:
-                json.dump(record, f, indent=2)
-        except OSError as e:
-            logger.error('self_improve: failed to store submission: %s', e)
-            return jsonify({'ok': False, 'error': f'Failed to store submission: {e}'}), 500
+        now = time.time()
+        description = (data.get('description') or '').strip()
+        author = data.get('author') or ''
+        submissions = []
+        for repo, unit in units.items():
+            record = {
+                'title': title,
+                'description': description,
+                'diff': unit['diff'],
+                'repo': repo,
+                'base_sha': unit.get('base_sha', ''),
+                'branch': data.get('branch'),  # None -> central picks per-repo
+                'author': author,
+                'files': unit.get('files', []),
+                'received_at': now,
+            }
+            record_id = f"{int(now)}-{_slug(repo)}-{_slug(title)}"
+            try:
+                with open(os.path.join(out_dir, f"{record_id}.json"), 'w',
+                          encoding='utf-8') as f:
+                    json.dump(record, f, indent=2)
+            except OSError as e:
+                logger.error('self_improve: failed to store submission: %s', e)
+                return jsonify({'ok': False,
+                                'error': f'Failed to store submission: {e}'}), 500
+            logger.info('self_improve: queued %s for repo=%s (%d bytes diff)',
+                        record_id, repo, len(unit['diff']))
+            entry = {'id': record_id, 'repo': repo, 'files': record['files']}
+            entry.update(_forward_to_central(record, record_id))
+            submissions.append(entry)
 
-        logger.info('self_improve: queued improvement %s (%d bytes diff)',
-                    record_id, len(diff))
-        response = {
+        return jsonify({
             'ok': True,
-            'id': record_id,
-            'message': 'Improvement queued. Maintainers will review and open a PR.',
-        }
-        # Forward upstream so central can open the PR (one centralized credential).
-        response.update(_forward_to_central(record, record_id))
-        return jsonify(response), 202
+            'count': len(submissions),
+            'submissions': submissions,
+            'message': ('Improvement queued. The neuron opens one PR per affected '
+                        'repo after review.'),
+        }), 202
 
     @app.route('/api/improve/status/<submission_id>', methods=['GET'])
     def improvement_status(submission_id):

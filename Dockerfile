@@ -53,6 +53,13 @@ COPY web /Satori/src/web
 COPY skills /Satori/src/skills
 RUN printf '%s' "${SATORI_GIT_SHA}" > /Satori/BUILD_SHA
 
+# Baseline + build commit for the shared library (a separate repo). Lets the
+# neuron diff edits to /Satori/Lib/satorilib and route them to the satorilib
+# repo. CI should pass --build-arg SATORILIB_GIT_SHA=<satorilib HEAD>.
+ARG SATORILIB_GIT_SHA=""
+COPY --from=satorilib src/satorilib /Satori/src-lib/src/satorilib
+RUN printf '%s' "${SATORILIB_GIT_SHA}" > /Satori/SATORILIB_BUILD_SHA
+
 # MCP server source. Runs client-side (where the AI runs); shipped here for
 # discovery / docker cp. Not installed into the neuron runtime.
 COPY mcp-server /Satori/mcp-server

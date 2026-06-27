@@ -183,9 +183,13 @@ The neuron auto-detects every file you changed under `neuron-lite`, `engine-lite
 `{"files":["/Satori/web/templates/dashboard.html"]}`. You can still pass your own
 `"diff":"<unified diff>"` if you'd rather build it yourself.
 
-> Edits to the shared library under `/Satori/Lib/satorilib` are a **separate
-> repo** (`satorilib`) and are *not* auto-captured — call those out in your
-> `description` (or submit them as a raw `diff`).
+> Multi-repo: the neuron container holds two repos — the neuron itself
+> (`satori-lite`: `/Satori/Neuron`, `/Satori/Engine`, `/Satori/web`,
+> `/Satori/skills`) and the shared library (`satorilib`:
+> `/Satori/Lib/satorilib`). The neuron auto-detects which repo each edit belongs
+> to and **opens a separate PR per repo** to the correct repository — you don't
+> route anything. (`POST /api/improve/submit` returns one entry per repo in
+> `submissions`.)
 
 ### Path B — open the PR yourself (optional, only if you already have GitHub auth)
 

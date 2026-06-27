@@ -1,190 +1,216 @@
 """
-Generate repo-relative diffs of an operator's live edits for the self-improvement
-flow.
+Generate repo-relative diffs of an operator's live edits for self-improvement.
 
-The running neuron's source is reorganized inside the image (`neuron-lite/` lands
-at `/Satori/Neuron`, `engine-lite/` at `/Satori/Engine`, `web/` at `/Satori/web`,
-`skills/` at `/Satori/skills`). To propose a change upstream we need a unified
-diff expressed in *repo* coordinates (`web/...`, `neuron-lite/...`) that applies
-against a known commit.
+The neuron container holds source from **two** repos, reorganized:
 
-This module produces exactly that, in pure Python, by diffing the live runtime
-files against a **pristine baseline** shipped in the image at `/Satori/src` (repo
-layout). The container->repo path mapping and the build commit live here — tested
-code — so the external AI never has to translate paths or pick a base: it just
-edits files and submits.
+  /Satori/Neuron        <- satori-lite : neuron-lite/
+  /Satori/Engine        <- satori-lite : engine-lite/
+  /Satori/web           <- satori-lite : web/
+  /Satori/skills        <- satori-lite : skills/
+  /Satori/Lib/satorilib <- satorilib   : src/satorilib/
 
-No git is required at runtime; the diff is `git apply`-compatible so the
-maintainer side can apply it directly.
+An edit must become a pull request to the **right** repository. This module
+diffs the live runtime files against pristine baselines shipped in the image,
+groups the changes by repo, and emits one `git apply`-compatible, repo-relative
+diff per repo (each with that repo's build commit as the base). The external AI
+never has to translate paths or pick a repo — it just edits files and submits;
+central routes each diff to its repo.
 """
 import os
 import difflib
+from typing import Any, Dict, List, Optional
 
-# Runtime directory in the container -> its directory name in the repo.
-RUNTIME_TO_REPO = {
-    '/Satori/Neuron': 'neuron-lite',
-    '/Satori/Engine': 'engine-lite',
-    '/Satori/web': 'web',
-    '/Satori/skills': 'skills',
+# Baseline roots (overridable for tests / non-default layouts).
+SATORI_BASELINE = os.environ.get("SATORI_BASELINE_DIR", "/Satori/src")
+SATORILIB_BASELINE = os.environ.get(
+    "SATORILIB_BASELINE_DIR", "/Satori/src-lib/src/satorilib")
+
+# container runtime dir -> {repo, repo-relative prefix, pristine baseline dir}
+SOURCES: List[Dict[str, str]] = [
+    {"runtime": "/Satori/Neuron", "repo": "satori-lite", "prefix": "neuron-lite",
+     "baseline": os.path.join(SATORI_BASELINE, "neuron-lite")},
+    {"runtime": "/Satori/Engine", "repo": "satori-lite", "prefix": "engine-lite",
+     "baseline": os.path.join(SATORI_BASELINE, "engine-lite")},
+    {"runtime": "/Satori/web", "repo": "satori-lite", "prefix": "web",
+     "baseline": os.path.join(SATORI_BASELINE, "web")},
+    {"runtime": "/Satori/skills", "repo": "satori-lite", "prefix": "skills",
+     "baseline": os.path.join(SATORI_BASELINE, "skills")},
+    {"runtime": "/Satori/Lib/satorilib", "repo": "satorilib", "prefix": "src/satorilib",
+     "baseline": SATORILIB_BASELINE},
+]
+
+SKIP_DIR_NAMES = {"__pycache__", ".git", "node_modules", ".pytest_cache", ".mypy_cache"}
+SKIP_SUFFIXES = (".pyc", ".pyo", ".so", ".log", ".joblib")
+
+# repo -> (env var, [file fallbacks]) for the build commit the diff applies against
+_BUILD_SHA = {
+    "satori-lite": ("SATORI_BUILD_SHA", ["/Satori/BUILD_SHA"]),
+    "satorilib": ("SATORILIB_BUILD_SHA", ["/Satori/SATORILIB_BUILD_SHA"]),
 }
 
-# Pristine copy of the source (repo layout) shipped in the image.
-BASELINE_DIR = os.environ.get('SATORI_BASELINE_DIR', '/Satori/src')
 
-SKIP_DIR_NAMES = {'__pycache__', '.git', 'node_modules', '.pytest_cache', '.mypy_cache'}
-SKIP_SUFFIXES = ('.pyc', '.pyo', '.so', '.log', '.joblib')
-
-
-def build_sha():
-    """The commit this image was built from, so diffs apply against the right base."""
-    env = os.environ.get('SATORI_BUILD_SHA')
-    if env and env.strip():
-        return env.strip()
-    for path in ('/Satori/BUILD_SHA', os.path.join(BASELINE_DIR, 'BUILD_SHA')):
+def build_sha(repo: str = "satori-lite") -> str:
+    """The commit `repo`'s image was built from, so its diff applies cleanly."""
+    env_key, files = _BUILD_SHA.get(repo, (None, []))
+    if env_key:
+        v = os.environ.get(env_key)
+        if v and v.strip():
+            return v.strip()
+    for path in files:
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 sha = f.read().strip()
                 if sha:
                     return sha
         except OSError:
             continue
-    return ''
+    return ""
 
 
-def available():
-    """True if a baseline is present (diff generation is possible)."""
-    return os.path.isdir(BASELINE_DIR)
+def available() -> bool:
+    """True if at least one baseline is present (diff generation possible)."""
+    return any(os.path.isdir(s["baseline"]) for s in SOURCES)
 
 
-def container_to_repo(container_path):
-    """Map an absolute container path to its repo-relative path, or None."""
+def repos() -> List[str]:
+    """Distinct repos this neuron can propose changes to."""
+    seen = []
+    for s in SOURCES:
+        if s["repo"] not in seen:
+            seen.append(s["repo"])
+    return seen
+
+
+def _source_for(container_path: str) -> Optional[Dict[str, str]]:
     p = os.path.normpath(container_path)
-    for runtime_dir, repo_dir in RUNTIME_TO_REPO.items():
-        rd = os.path.normpath(runtime_dir)
-        if p == rd:
-            return repo_dir
-        if p.startswith(rd + os.sep):
-            rel = os.path.relpath(p, rd)
-            return f'{repo_dir}/{rel}'.replace(os.sep, '/')
+    for s in SOURCES:
+        rd = os.path.normpath(s["runtime"])
+        if p == rd or p.startswith(rd + os.sep):
+            return s
     return None
 
 
-def _repo_to_runtime(repo_rel):
-    head, _, rest = repo_rel.partition('/')
-    for runtime_dir, repo_dir in RUNTIME_TO_REPO.items():
-        if repo_dir == head:
-            return os.path.join(runtime_dir, rest) if rest else runtime_dir
-    return None
-
-
-def _baseline_of(repo_rel):
-    return os.path.join(BASELINE_DIR, repo_rel)
+def container_to_repo(container_path: str):
+    """(repo, repo-relative path) for an absolute container path, or (None, None)."""
+    s = _source_for(container_path)
+    if not s:
+        return None, None
+    p, rd = os.path.normpath(container_path), os.path.normpath(s["runtime"])
+    if p == rd:
+        return s["repo"], s["prefix"]
+    rel = os.path.relpath(p, rd).replace(os.sep, "/")
+    return s["repo"], f'{s["prefix"]}/{rel}'
 
 
 def _iter_files(root):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
         for fn in filenames:
-            if fn.endswith(SKIP_SUFFIXES):
-                continue
-            yield os.path.join(dirpath, fn)
+            if not fn.endswith(SKIP_SUFFIXES):
+                yield os.path.join(dirpath, fn)
 
 
 def _bytes_differ(a, b):
     try:
-        with open(a, 'rb') as fa, open(b, 'rb') as fb:
+        with open(a, "rb") as fa, open(b, "rb") as fb:
             return fa.read() != fb.read()
     except OSError:
         return True
 
 
 def _read_lines(path):
-    """Text lines for diffing, or None if missing/binary."""
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             return f.read().splitlines()
     except (OSError, UnicodeDecodeError):
         return None
 
 
-def _status_of(repo_rel):
-    base_exists = os.path.exists(_baseline_of(repo_rel))
-    rt = _repo_to_runtime(repo_rel)
-    rt_exists = bool(rt) and os.path.exists(rt)
-    if not base_exists and rt_exists:
-        return 'added'
-    if base_exists and not rt_exists:
-        return 'deleted'
-    return 'modified'
+def _status(baseline_file, runtime_file):
+    be, re_ = os.path.exists(baseline_file), os.path.exists(runtime_file)
+    if not be and re_:
+        return "added"
+    if be and not re_:
+        return "deleted"
+    return "modified"
 
 
-def detect_changes():
-    """All edits vs baseline, as a list of (repo_rel, status)."""
-    changes = []
-    for runtime_dir, repo_dir in RUNTIME_TO_REPO.items():
-        if os.path.isdir(runtime_dir):
-            for rt in _iter_files(runtime_dir):
-                rel = os.path.relpath(rt, runtime_dir).replace(os.sep, '/')
-                repo_rel = f'{repo_dir}/{rel}'
-                base = _baseline_of(repo_rel)
-                if not os.path.exists(base):
-                    changes.append((repo_rel, 'added'))
-                elif _bytes_differ(base, rt):
-                    changes.append((repo_rel, 'modified'))
-        base_root = _baseline_of(repo_dir)
-        if os.path.isdir(base_root):
-            for bf in _iter_files(base_root):
-                rel = os.path.relpath(bf, base_root).replace(os.sep, '/')
-                rt = os.path.join(runtime_dir, rel)
-                if not os.path.exists(rt):
-                    changes.append((f'{repo_dir}/{rel}', 'deleted'))
-    return changes
-
-
-def _file_block(repo_rel, status):
-    base_lines = [] if status == 'added' else _read_lines(_baseline_of(repo_rel))
-    cur_lines = [] if status == 'deleted' else _read_lines(_repo_to_runtime(repo_rel))
+def _file_block(repo_rel, status, baseline_file, runtime_file):
+    base_lines = [] if status == "added" else _read_lines(baseline_file)
+    cur_lines = [] if status == "deleted" else _read_lines(runtime_file)
     if base_lines is None or cur_lines is None:
-        return None  # binary or unreadable — skip
-    fromfile = '/dev/null' if status == 'added' else f'a/{repo_rel}'
-    tofile = '/dev/null' if status == 'deleted' else f'b/{repo_rel}'
+        return None  # binary / unreadable — skip
+    fromfile = "/dev/null" if status == "added" else f"a/{repo_rel}"
+    tofile = "/dev/null" if status == "deleted" else f"b/{repo_rel}"
     body = list(difflib.unified_diff(
-        base_lines, cur_lines, fromfile=fromfile, tofile=tofile, lineterm=''))
+        base_lines, cur_lines, fromfile=fromfile, tofile=tofile, lineterm=""))
     if not body:
         return None
-    head = [f'diff --git a/{repo_rel} b/{repo_rel}']
-    if status == 'added':
-        head.append('new file mode 100644')
-    elif status == 'deleted':
-        head.append('deleted file mode 100644')
-    return '\n'.join(head + body)
+    head = [f"diff --git a/{repo_rel} b/{repo_rel}"]
+    if status == "added":
+        head.append("new file mode 100644")
+    elif status == "deleted":
+        head.append("deleted file mode 100644")
+    return "\n".join(head + body)
 
 
-def generate(container_paths=None):
+def _changes_for_source(s):
+    out = []
+    runtime, baseline, prefix = s["runtime"], s["baseline"], s["prefix"]
+    if os.path.isdir(runtime):
+        for rt in _iter_files(runtime):
+            rel = os.path.relpath(rt, runtime).replace(os.sep, "/")
+            bf = os.path.join(baseline, rel)
+            if not os.path.exists(bf):
+                out.append((f"{prefix}/{rel}", "added", bf, rt))
+            elif _bytes_differ(bf, rt):
+                out.append((f"{prefix}/{rel}", "modified", bf, rt))
+    if os.path.isdir(baseline):
+        for bf in _iter_files(baseline):
+            rel = os.path.relpath(bf, baseline).replace(os.sep, "/")
+            rt = os.path.join(runtime, rel)
+            if not os.path.exists(rt):
+                out.append((f"{prefix}/{rel}", "deleted", bf, rt))
+    return out
+
+
+def generate(container_paths: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
+    """Build per-repo diffs of the live edits.
+
+    container_paths: optional absolute container paths to scope to; if None,
+    auto-detect every changed file under the known source dirs.
+
+    Returns {repo: {"diff": str, "files": [repo_rel, ...], "base_sha": str}} —
+    one entry per repo that has changes (empty dict if none / no baseline).
     """
-    Build a git-apply-compatible, repo-relative unified diff of the live edits.
-
-    container_paths: optional list of absolute container paths to scope the diff.
-    If None, every changed file under the known source dirs is auto-detected.
-
-    Returns (diff_text, changed_repo_paths). ('', []) if no baseline or no changes.
-    """
-    if not available():
-        return '', []
+    by_repo: Dict[str, list] = {}
     if container_paths:
-        items = []
         for cp in container_paths:
-            repo_rel = container_to_repo(cp)
-            if repo_rel:
-                items.append((repo_rel, _status_of(repo_rel)))
+            s = _source_for(cp)
+            if not s:
+                continue
+            p, rd = os.path.normpath(cp), os.path.normpath(s["runtime"])
+            if p == rd:
+                continue
+            rel = os.path.relpath(p, rd).replace(os.sep, "/")
+            bf = os.path.join(s["baseline"], rel)
+            by_repo.setdefault(s["repo"], []).append(
+                (f'{s["prefix"]}/{rel}', _status(bf, p), bf, p))
     else:
-        items = detect_changes()
+        for s in SOURCES:
+            ch = _changes_for_source(s)
+            if ch:
+                by_repo.setdefault(s["repo"], []).extend(ch)
 
-    blocks, changed = [], []
-    for repo_rel, status in items:
-        block = _file_block(repo_rel, status)
-        if block:
-            blocks.append(block)
-            changed.append(repo_rel)
-    diff = ('\n'.join(blocks) + '\n') if blocks else ''
-    return diff, changed
+    result: Dict[str, Dict[str, Any]] = {}
+    for repo, items in by_repo.items():
+        blocks, files = [], []
+        for repo_rel, status, bf, rt in items:
+            block = _file_block(repo_rel, status, bf, rt)
+            if block:
+                blocks.append(block)
+                files.append(repo_rel)
+        if blocks:
+            result[repo] = {"diff": "\n".join(blocks) + "\n",
+                            "files": files, "base_sha": build_sha(repo)}
+    return result
