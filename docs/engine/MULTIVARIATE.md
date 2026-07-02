@@ -106,7 +106,9 @@ needed to build the training matrix.
 - Require a minimum overlap of valid aligned pairs (e.g. 30) so short overlaps
   do not produce lucky correlations.
 - Keep peers with |corr| >= a floor (e.g. 0.15), take top K (default 5) by
-  |corr|.
+  |corr|. Also EXCLUDE the degenerate ends: NaN correlation (constant /
+  zero-variance peers) and near-duplicates (|corr| > 0.995, usually the same
+  real-world series under another uuid; see section 5.5).
 - Reselect periodically (e.g. after every 25 new target rows), not on every
   fit; cache the selected peer set with the saved model so restarts do not
   churn features.
@@ -597,6 +599,46 @@ exactly the batching pattern recommended in `timesfm/README.md` section 5.
   direct prediction-of-prediction loops; using other nodes' raw observations
   is safe because observations are ground truth, not model output.
 
+### 5.5 Edge cases and failure modes
+
+The engine's existing safety net, verified in code: when an adapter's
+`predict` returns None, `_runForecast` returns None (`engine.py:1154`),
+`producePrediction` raises internally and catches it, and
+`fallback_prediction()` (`engine.py:1215`) trains a fresh `StarterAdapter`
+inline and ships its prediction instead. **A prediction is always produced**;
+every edge case below only decides how gracefully we get there.
+
+**Selection edge cases**
+
+| Case | What happens | Handling |
+|---|---|---|
+| **Zero correlated peers found** (cycled through every candidate, nothing passes the corr floor) | `condition()` cannot see correlation cheaply, so the adapter can be selected and then fail to fit. Chain: `fit` returns `TrainingResult(-1)` -> no head is ever built -> `predict` returns None -> engine ships a Starter fallback prediction. The training queue re-queues the fit after `trainingDelay`, so it retries as the store grows and reselection sees new candidates. | Already safe end-to-end; the stream behaves like a univariate Starter stream until peers appear. Optional optimization: skip re-fitting until the store has gained rows since the last "no peers" failure, to avoid re-loading 50 candidate histories for a guaranteed failure. |
+| Near-duplicate peer (corr ~ 1.0: same series under central + relay uuids, or republished) | Training-time `p{k}_next` (actual) nearly equals the label, so the head learns to just copy that feature; at inference it degenerates into a TimesFM wrapper. No crash, but wasted peer slots and misleading fit error. | Exclude \|corr\| > 0.995 in `selectPeers` (section 3.2); the walk-forward backtest (real forecast substitution) exposes any that slip through. |
+| Constant / zero-variance peer (e.g. stablecoin) | Pearson correlation is NaN (zero std). | Treat NaN corr as excluded; never propagate NaN into ranking. |
+| All peers slower than the target (daily peer, 10-min target) | Aligned peer deltas are almost always zero -> low delta-correlation. | Naturally filtered by the corr floor; no special code. |
+| Selected peers all go dead after fit | Their features decay to the staleness fallback (NaN -> 0.0), which the head saw in training; prediction quality degrades toward lags-only. If the next reselection finds no replacements, fit fails and the last stable head keeps serving. | Existing staleness + reselection machinery; no new code. |
+
+**Data-quality edge cases**
+
+| Case | What happens | Handling |
+|---|---|---|
+| Zero or near-zero values | Pct-change features divide by ~0 -> inf. | Clamp infinities (mirror `clearoutInfinities` in the XGB preprocess) and use epsilon-guarded denominators in `features.py`. |
+| Duplicate timestamps within a peer | `merge_asof` requires sorted unique keys. | Collapse duplicates first (`groupby.mean`, the `xgbDataPreprocess` pattern). |
+| Peer timestamps in the future (publisher clock skew) | `merge_asof` backward would treat skewed "future" rows as available at time t: lookahead leakage from bad clocks. | Drop peer rows with `observed_at > now + small tolerance` at load time. |
+| Extreme outliers / poisoned values | Peers are UNTRUSTED third-party publishers in a decentralized network; a malicious or broken one can inject extreme values to distort other nodes' models. | Winsorize peer features to rolling quantiles in `features.py`; erratic streams also lose correlation and rotate out at reselection. Head regularization (shallow trees) bounds the damage of any single feature. |
+
+**Runtime edge cases**
+
+| Case | What happens | Handling |
+|---|---|---|
+| TimesFM fails to load / OOM / import missing | `_ensureModel()` returns None. | Per-peer last-value forecasts (naive-covariate mode); adapter keeps working. |
+| TimesFM returns NaN/inf for a peer | Would poison the inference row. | Validate per-peer forecast; non-finite -> last aligned value for that peer. |
+| Head prediction is non-finite | Would ship garbage. | Return None -> engine's Starter fallback chain (above). |
+| Corrupt model file on disk | joblib load raises. | `load()` catches, returns None -> clean retrain (same as schema mismatch). |
+| Saved peer uuid vanished from the store | Aligned column is all-NaN. | Becomes 0.0 features (known regime); next reselection replaces the peer. |
+| Feature columns drift between saved head and new peer set | Head and `feature_columns` are always persisted together and only change inside `fit`. | `predict` asserts the inference row's columns match the persisted `feature_columns`; mismatch -> None -> fallback. |
+| Fresh node, empty store | No candidates at all. | `condition()` returns 0.0 before any of this runs; univariate chain serves. |
+
 ---
 
 ## 6. Roadmap
@@ -607,7 +649,9 @@ opt-in until it proves itself.
 1. **Pure functions first.** `features.py` + `heads.py` with unit checks:
    leakage assertions (every `_delta` input at row t observed <= t; `_next`
    columns equal the substitution target), staleness-tolerance behavior,
-   correlation-on-deltas vs levels.
+   correlation-on-deltas vs levels, and the section 5.5 data-quality guards
+   (NaN corr, inf clamping, near-duplicate exclusion, duplicate timestamps,
+   future-timestamp drop, winsorization).
 2. **Adapter + wiring.** Rewrite the stub, fix the `__init__.py` bug, registry
    entry, config keys, `count_streams_with_min_rows`. Lifecycle checks:
    `copy.deepcopy(fitted_adapter)` works, joblib save -> load round trip,
