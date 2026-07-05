@@ -193,6 +193,15 @@ class StreamStore:
                 "SELECT COUNT(*) FROM observations WHERE stream_uuid = ?",
                 (stream_uuid,)).fetchone()[0]
 
+    def count_streams_with_min_rows(self, min_rows: int) -> int:
+        """Number of distinct streams that have at least ``min_rows``
+        stored observations."""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM (SELECT stream_uuid FROM observations "
+                "GROUP BY stream_uuid HAVING COUNT(*) >= ?)",
+                (min_rows,)).fetchone()[0]
+
     def stream_uuids(self) -> list[str]:
         """All stream UUIDs that have stored data."""
         with self._lock:
