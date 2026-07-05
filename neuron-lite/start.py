@@ -399,6 +399,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkEnsureChannelOpenListener(relay_url)
             self._networkEnsureSettlementListener(relay_url)
             self._networkEnsureTombstoneListener(relay_url)
+            obs_task = self._networkListeners.get(relay_url)
+            if not (obs_task and not obs_task.done()):
+                self._networkListeners[relay_url] = asyncio.ensure_future(
+                    self._networkListen(relay_url))
             asyncio.ensure_future(
                 self._channelPublishStaleTombstones(relay_url))
             return client
