@@ -234,3 +234,97 @@ def inferenceRow(frame: pd.DataFrame) -> pd.DataFrame:
     """
     featCols = [c for c in frame.columns if c not in ('date_time', 'y')]
     return frame[featCols].iloc[[-1]].reset_index(drop=True)
+
+
+# --------------------------------------------------------------------------- #
+# tfm_delta (opt-in TimesFM-on-target feature, Jordan-1 section 2)
+# --------------------------------------------------------------------------- #
+#
+# These stay in features.py to keep the feature schema in one place, but --
+# like everything else here -- they import NO torch / timesfm. The TimesFM
+# model is reached only through the ``forecaster`` callable the adapter injects
+# (adapter wraps ``TimesFmAdapter._ensureModel`` under its inference lock), so
+# this module remains a pure, independently-testable feature layer.
+
+
+def tfmDelta(forecast, level) -> float:
+    """Convert a raw TimesFM point forecast to delta form ``(forecast-level)/level``.
+
+    Epsilon-guarded against a (near-)zero denominator; non-finite forecast, a
+    (near-)zero level, or any conversion failure -> ``0.0``. Accepts a scalar
+    or a sequence (the horizon slice of a batched forecast row -> element 0).
+    """
+    try:
+        f = forecast[0] if isinstance(forecast, (list, tuple, np.ndarray)) else forecast
+        f = float(f)
+        lvl = float(level)
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+    if not np.isfinite(f) or abs(lvl) <= _EPS:
+        return 0.0
+    d = (f - lvl) / lvl
+    return float(d) if np.isfinite(d) else 0.0
+
+
+def tfmDeltaForRows(
+    target_values,
+    cache: dict,
+    min_context: int = 32,
+    forecaster=None,
+) -> dict:
+    """Complete the ``{row_index: tfm_delta}`` cache for the target level series.
+
+    Args:
+        target_values: the aligned frame's target LEVEL column; the index of a
+            value is its row position (0-based), which keys the cache.
+        cache: the existing ``{row_index: float}`` cache. Never mutated; a
+            superset copy is returned.
+        min_context: rows with index < this get ``0.0`` and are never forecast
+            (Jordan-1 section 2, default 32).
+        forecaster: injected ``forecaster(inputs: list[list[float]], horizon:
+            int) -> list[list[float]]`` callable. ``None`` (TimesFM unavailable)
+            -> every uncached row becomes ``0.0``.
+
+    For every row ``t >= min_context`` not already in ``cache``: context =
+    ``target_values[0 .. t]`` inclusive, all batched into ONE ``forecaster(...,
+    horizon=1)`` call. Each forecast is converted with :func:`tfmDelta`
+    (``(f - values[t]) / values[t]``). A failed call, wrong-length result, or a
+    non-finite forecast -> ``0.0`` for that row.
+
+    Determinism (Jordan-1 section 2): TimesFM zero-shot is deterministic given a
+    fixed context, and ``context[0..t]`` is a stable prefix as history grows, so
+    a cached ``tfm_delta[t]`` is never recomputed -- each retrain only forecasts
+    newly-accumulated rows.
+    """
+    values = [float(v) for v in np.asarray(target_values, dtype=float)]
+    n = len(values)
+    result = dict(cache)
+
+    # Sub-context rows: 0.0, never forecast. A row's index is fixed, so a row
+    # that is < min_context now stays < min_context forever -> stable.
+    for t in range(min(max(min_context, 0), n)):
+        result.setdefault(t, 0.0)
+
+    pending = [t for t in range(max(min_context, 0), n) if t not in result]
+    if not pending:
+        return result
+
+    if forecaster is None:
+        for t in pending:
+            result[t] = 0.0
+        return result
+
+    contexts = [values[:t + 1] for t in pending]
+    try:
+        forecasts = forecaster(contexts, 1)
+    except Exception:
+        forecasts = None
+
+    if forecasts is None or len(forecasts) != len(pending):
+        for t in pending:
+            result[t] = 0.0
+        return result
+
+    for t, fc in zip(pending, forecasts):
+        result[t] = tfmDelta(fc, values[t])
+    return result
