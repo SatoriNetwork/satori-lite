@@ -21,4 +21,10 @@ try:
 except ImportError:
     TimesFmAdapter = None
 
+# MultivariateAdapter requires xgboost (via heads.py) - make it optional
+try:
+    from satoriengine.veda.adapters.multivariate import MultivariateAdapter
+except ImportError:
+    MultivariateAdapter = None
+
 # from satoriengine.veda.adapters.tinytimemixer import SimpleTTMAdapter

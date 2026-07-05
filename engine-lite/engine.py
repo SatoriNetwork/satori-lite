@@ -24,7 +24,7 @@ from satorilib.server import SatoriServerClient
 # )
 from satoriengine.veda import config
 from satoriengine.veda.data import StreamForecast, validate_single_entry
-from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter, ETSAdapter, TimesFmAdapter
+from satoriengine.veda.adapters import ModelAdapter, StarterAdapter, XgbAdapter, XgbChronosAdapter, ETSAdapter, TimesFmAdapter, MultivariateAdapter
 from satoriengine.veda.storage import EngineStorageManager
 
 
@@ -36,10 +36,11 @@ from satoriengine.veda.storage import EngineStorageManager
 # user-visible choices below. xgb-chronos is intentionally not exposed yet —
 # enable it by adding it back to the registry once torch is shipped.
 ADAPTER_REGISTRY = {
-    'ets':     ETSAdapter,
-    'xgboost': XgbAdapter,
-    'starter': StarterAdapter,
-    'timesfm': TimesFmAdapter,
+    'ets':          ETSAdapter,
+    'xgboost':      XgbAdapter,
+    'starter':      StarterAdapter,
+    'timesfm':      TimesFmAdapter,
+    'multivariate': MultivariateAdapter,
 }
 
 # Auto-selection order preserves the historical default (XGBoost → Starter)
