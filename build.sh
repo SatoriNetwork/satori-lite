@@ -12,13 +12,28 @@
 #   ./build.sh push latest dev  # Push multiple tags
 #   ./build.sh push all         # Push :latest + :slim + satorineuron:p2p & :latest
 #
+# Environment overrides:
+#   NO_CACHE=1         Force a full rebuild (--no-cache)
+#   PLATFORMS=...      Target platforms (default: linux/amd64,linux/arm64)
+#   STRFRY_JOBS=N      Parallel jobs for the strfry C++ compile
+#                      (default: nproc capped at 4 - the cap keeps peak RAM
+#                      sane on 8GB Docker Desktop laptops)
+#   REGISTRY_CACHE=0   Disable the Docker Hub layer cache (push mode only)
+#
 
 set -e
 
 # Configuration
 IMAGE_NAME="satorinet/satori-lite"
-PLATFORMS="linux/amd64,linux/arm64"
+NEURON_IMAGE="satorinet/satorineuron"
+PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 BUILDER_NAME="multiarch"
+
+# Parallel jobs for the strfry compile (see Dockerfile ARG STRFRY_MAKE_JOBS).
+DETECTED_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+[ "$DETECTED_CORES" -gt 4 ] && DETECTED_CORES=4
+STRFRY_JOBS="${STRFRY_JOBS:-$DETECTED_CORES}"
+BUILD_ARGS="--build-arg STRFRY_MAKE_JOBS=$STRFRY_JOBS"
 
 # Colors
 GREEN='\033[0;32m'
@@ -43,6 +58,7 @@ PUSH_MODE=false
 PUSH_ALL=false
 TAGS=""
 TAG_LIST=""
+HAS_LATEST=false
 
 if [ "$1" = "push" ]; then
     PUSH_MODE=true
@@ -58,11 +74,27 @@ fi
 if [ $# -eq 0 ]; then
     TAGS="-t ${IMAGE_NAME}:latest"
     TAG_LIST="latest"
+    HAS_LATEST=true
 else
     for tag in "$@"; do
         TAGS="$TAGS -t ${IMAGE_NAME}:$tag"
         [ -n "$TAG_LIST" ] && TAG_LIST="$TAG_LIST, $tag" || TAG_LIST="$tag"
+        [ "$tag" = "latest" ] && HAS_LATEST=true
     done
+fi
+
+# "push all" publishes satorineuron:p2p/:latest as mirrors of satori-lite:latest.
+# Tag them directly on the main build - one push publishes every repo at once,
+# instead of a separate imagetools copy that re-uploads all blobs cross-repo
+# (measured at ~14 min). Force :latest into the tag set so the neuron tags
+# always mirror THIS build, never a stale :latest already on Docker Hub.
+if [ "$PUSH_ALL" = true ]; then
+    if [ "$HAS_LATEST" = false ]; then
+        TAGS="$TAGS -t ${IMAGE_NAME}:latest"
+        TAG_LIST="$TAG_LIST, latest"
+    fi
+    TAGS="$TAGS -t ${NEURON_IMAGE}:p2p -t ${NEURON_IMAGE}:latest"
+    TAG_LIST="$TAG_LIST, satorineuron:p2p, satorineuron:latest"
 fi
 
 if [ "$PUSH_MODE" = true ]; then
@@ -72,16 +104,33 @@ else
     echo -e "${YELLOW}[INFO]${NC} Mode: Local build only"
 fi
 echo -e "${GREEN}[INFO]${NC} Tags: $TAG_LIST"
+echo -e "${GREEN}[INFO]${NC} strfry compile jobs: $STRFRY_JOBS"
 
 # Build (satorilib is provided as a named build context so the Dockerfile can COPY --from=satorilib)
 CACHE_ARG=""
 [ "${NO_CACHE:-0}" = "1" ] && CACHE_ARG="--no-cache"
 
+# Registry-backed layer cache (push mode only). Survives builder recreation /
+# machine reboots, which wipe the local buildx cache and otherwise force a
+# full multi-hour arm64 recompile. Kept in :buildcache* tags on Docker Hub;
+# ignore-error so a cache-export hiccup never fails the image push itself.
+CACHE_FROM_MAIN=""; CACHE_TO_MAIN=""
+CACHE_FROM_SLIM=""; CACHE_TO_SLIM=""
+if [ "$PUSH_MODE" = true ] && [ "${REGISTRY_CACHE:-1}" = "1" ]; then
+    CACHE_FROM_MAIN="--cache-from type=registry,ref=${IMAGE_NAME}:buildcache"
+    CACHE_TO_MAIN="--cache-to type=registry,ref=${IMAGE_NAME}:buildcache,mode=max,ignore-error=true"
+    CACHE_FROM_SLIM="--cache-from type=registry,ref=${IMAGE_NAME}:buildcache-slim --cache-from type=registry,ref=${IMAGE_NAME}:buildcache"
+    CACHE_TO_SLIM="--cache-to type=registry,ref=${IMAGE_NAME}:buildcache-slim,mode=max,ignore-error=true"
+fi
+
 if [ "$PUSH_MODE" = true ]; then
     docker buildx build \
         --platform "$PLATFORMS" \
         --build-context satorilib=../satorilib \
+        $BUILD_ARGS \
         $CACHE_ARG \
+        $CACHE_FROM_MAIN \
+        $CACHE_TO_MAIN \
         $TAGS \
         --push \
         .
@@ -89,6 +138,7 @@ else
     echo -e "${YELLOW}[INFO]${NC} Loading into local Docker (current platform only)..."
     docker buildx build \
         --build-context satorilib=../satorilib \
+        $BUILD_ARGS \
         $CACHE_ARG \
         $TAGS \
         --load \
@@ -101,7 +151,8 @@ echo -e "${GREEN}  Build Complete!${NC}"
 echo -e "${GREEN}======================================${NC}"
 echo ""
 
-# Handle "push all" - build slim variant + create satorineuron tags
+# Handle "push all" - the satorineuron tags were already pushed with the main
+# build above; only the slim variant remains.
 if [ "$PUSH_ALL" = true ]; then
     echo -e "${BLUE}======================================${NC}"
     echo -e "${BLUE}  Building and pushing slim variant${NC}"
@@ -111,26 +162,14 @@ if [ "$PUSH_ALL" = true ]; then
     docker buildx build \
         --platform "$PLATFORMS" \
         --build-context satorilib=../satorilib \
+        $BUILD_ARGS \
         $CACHE_ARG \
+        $CACHE_FROM_SLIM \
+        $CACHE_TO_SLIM \
         -f Dockerfile.slim \
         -t "${IMAGE_NAME}:slim" \
         --push \
         .
-
-    echo ""
-    echo -e "${BLUE}======================================${NC}"
-    echo -e "${BLUE}  Creating satorineuron tags${NC}"
-    echo -e "${BLUE}======================================${NC}"
-    echo ""
-
-    SOURCE_IMAGE="${IMAGE_NAME}:latest"
-    NEURON_IMAGE="satorinet/satorineuron"
-
-    echo -e "${GREEN}[INFO]${NC} Creating ${NEURON_IMAGE}:p2p from ${SOURCE_IMAGE}..."
-    docker buildx imagetools create -t "${NEURON_IMAGE}:p2p" "${SOURCE_IMAGE}"
-
-    echo -e "${GREEN}[INFO]${NC} Creating ${NEURON_IMAGE}:latest from ${SOURCE_IMAGE}..."
-    docker buildx imagetools create -t "${NEURON_IMAGE}:latest" "${SOURCE_IMAGE}"
 
     echo ""
     echo -e "${GREEN}======================================${NC}"

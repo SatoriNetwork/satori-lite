@@ -2,8 +2,11 @@
 FROM python:3.10-slim
 
 # System dependencies
+# Kept byte-identical to Dockerfile.slim's builder stage so buildx's layer
+# cache is shared between the `latest` and `slim` builds instead of
+# reinstalling packages and recompiling strfry twice.
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
         ca-certificates \
         build-essential \
         cmake \
@@ -15,17 +18,45 @@ RUN apt-get update && \
         libssl-dev \
         libzstd-dev \
         zlib1g-dev && \
-    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Build a glibc-compatible strfry binary for the embedded relay runtime.
-RUN git clone --depth 1 https://github.com/hoytech/strfry.git /tmp/strfry && \
+# Kept byte-identical to Dockerfile.slim's builder stage (see note above).
+# STRFRY_REF pins the strfry version (branch or tag) for reproducible builds.
+# STRFRY_MAKE_JOBS defaults to 2 to keep peak RAM under the 8GB Docker
+# Desktop default; build.sh raises it based on available cores.
+ARG STRFRY_REF=master
+ARG STRFRY_MAKE_JOBS=2
+RUN git clone --depth 1 --branch ${STRFRY_REF} https://github.com/hoytech/strfry.git /tmp/strfry && \
     cd /tmp/strfry && \
     git submodule update --init && \
     make setup-golpe && \
-    make -j2 && \
+    make -j${STRFRY_MAKE_JOBS} && \
     cp /tmp/strfry/strfry /usr/local/bin/strfry && \
+    strip /usr/local/bin/strfry && \
     rm -rf /tmp/strfry
+
+# Shared requirements install. Kept byte-identical (same COPY destination,
+# same RUN command) to Dockerfile.slim's builder stage so this layer is
+# also served from cache on the second build.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --retries 10 --timeout 120 -r /tmp/requirements.txt
+
+# Optional foundation-model adapter (TimesFmAdapter). Install the CPU-only torch
+# wheel FIRST so the subsequent timesfm install sees torch>=2.0.0 satisfied and
+# does not pull the ~2 GB CUDA build. If this layer is removed, the engine simply
+# hides TimesFM from the adapter choices (optional-import guard).
+# Kept byte-identical to Dockerfile.slim's builder stage (see note above).
+RUN pip install --no-cache-dir --retries 10 --timeout 120 \
+        torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --retries 10 --timeout 120 timesfm==2.0.1
+
+# --- everything below is specific to the full (non-slim) image ---
+
+# Test runner for in-image test runs. (coincurve, the ETH address derivation
+# dependency, is already pinned in requirements.txt - no separate install.)
+RUN pip install --no-cache-dir --retries 10 --timeout 120 pytest
 
 # Create directory structure
 RUN mkdir -p /Satori/Lib /Satori/Engine /Satori/Neuron /Satori/Neuron/satorineuron/web
@@ -39,23 +70,6 @@ COPY --from=satorilib src/satorilib /Satori/Lib/satorilib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
 COPY web /Satori/web
-
-# Copy requirements and install
-COPY requirements.txt /Satori/requirements.txt
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --retries 10 --timeout 120 -r /Satori/requirements.txt && \
-    # Ensure ETH address derivation dependency is available at runtime.
-    pip install --no-cache-dir --retries 10 --timeout 120 coincurve && \
-    pip install --retries 10 --timeout 120 pytest
-
-# Optional foundation-model adapter (TimesFmAdapter). Install the CPU-only torch
-# wheel FIRST so the subsequent timesfm install sees torch>=2.0.0 satisfied and
-# does not pull the ~2 GB CUDA build. If this layer is removed, the engine simply
-# hides TimesFM from the adapter choices (optional-import guard).
-RUN pip install --no-cache-dir --retries 10 --timeout 120 \
-        torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir --retries 10 --timeout 120 timesfm==2.0.1
-
 COPY tests /Satori/tests
 
 # Set Python path - satorilib package lives at /Satori/Lib/satorilib in the image.

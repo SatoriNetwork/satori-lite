@@ -19,12 +19,18 @@ RUN apt-get update && \
         zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Build strfry. -j2 keeps peak RAM under the 8GB Docker Desktop default.
-RUN git clone --depth 1 https://github.com/hoytech/strfry.git /tmp/strfry && \
+# Build strfry. Kept byte-identical to Dockerfile's strfry step so buildx
+# shares the compiled layer between the latest and slim builds.
+# STRFRY_REF pins the strfry version (branch or tag) for reproducible builds.
+# STRFRY_MAKE_JOBS defaults to 2 to keep peak RAM under the 8GB Docker
+# Desktop default; build.sh raises it based on available cores.
+ARG STRFRY_REF=master
+ARG STRFRY_MAKE_JOBS=2
+RUN git clone --depth 1 --branch ${STRFRY_REF} https://github.com/hoytech/strfry.git /tmp/strfry && \
     cd /tmp/strfry && \
     git submodule update --init && \
     make setup-golpe && \
-    make -j2 && \
+    make -j${STRFRY_MAKE_JOBS} && \
     cp /tmp/strfry/strfry /usr/local/bin/strfry && \
     strip /usr/local/bin/strfry && \
     rm -rf /tmp/strfry
