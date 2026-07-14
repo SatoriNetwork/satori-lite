@@ -5,6 +5,7 @@ from satorilib import logging
 from satorilib.wallet.evrmore.wallet import EvrmoreWallet
 from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.electrumx.electrumx import Electrumx
+from satorilib.wallet.cryptolock import WALLET_CRYPTO_LOCK
 from satorineuron import config
 from satorineuron.common.structs import ConnectionTo
 
@@ -47,7 +48,9 @@ class WalletManager:
         WalletManager.performMigrationBackup("wallet")
         WalletManager.performMigrationBackup("vault")
         manager = WalletManager()
-        manager.setup(walletPath, vaultPath, vaultPassword, createVault, cachePath, peersCache, updateConnectionStatus, persistent)
+        # setup() builds the wallet/vault keys via native crypto; serialize it.
+        with WALLET_CRYPTO_LOCK:
+            manager.setup(walletPath, vaultPath, vaultPassword, createVault, cachePath, peersCache, updateConnectionStatus, persistent)
         return manager
 
     @staticmethod
@@ -221,25 +224,27 @@ class WalletManager:
         password: Union[str, None] = None,
         create: bool = False,
     ) -> Union[EvrmoreWallet, None]:
-        if isinstance(self._vault, EvrmoreWallet):
-            # SECURITY FIX: Always close and re-decrypt with provided password
-            # This prevents bypassing password validation when vault is already decrypted
-            self._vault.close()
-            self._vault.open(password)
-            return self._vault
+        with WALLET_CRYPTO_LOCK:
+            if isinstance(self._vault, EvrmoreWallet):
+                # SECURITY FIX: Always close and re-decrypt with provided password
+                # This prevents bypassing password validation when vault is already decrypted
+                self._vault.close()
+                self._vault.open(password)
+                return self._vault
 
-        # Use stored vault path, or default if not set
-        vaultPath = self._vaultPath or config.walletPath('vault.yaml')
-        return self._initializeVault(
-            vaultPath,
-            self._cachePath,
-            self._peersCache,
-            password=password,
-            create=create
-        )
+            # Use stored vault path, or default if not set
+            vaultPath = self._vaultPath or config.walletPath('vault.yaml')
+            return self._initializeVault(
+                vaultPath,
+                self._cachePath,
+                self._peersCache,
+                password=password,
+                create=create
+            )
 
     def closeVault(self) -> Union[EvrmoreWallet, None]:
         """Close the vault, reopen it without decrypting it."""
-        if isinstance(self._vault, EvrmoreWallet):
-            self._vault.close()
-        return self._vault
+        with WALLET_CRYPTO_LOCK:
+            if isinstance(self._vault, EvrmoreWallet):
+                self._vault.close()
+            return self._vault

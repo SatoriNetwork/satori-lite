@@ -715,11 +715,14 @@ class NeuronCLI:
             # Prepare for transaction
             console_print()
             console_print("Preparing transaction...")
-            wallet.getReadyToSend(balance=True, save=True)
+            # Build/sign uses native crypto; serialize the whole prep+send.
+            from satorineuron.init.wallet import WALLET_CRYPTO_LOCK
+            with WALLET_CRYPTO_LOCK:
+                wallet.getReadyToSend(balance=True, save=True)
 
-            # Send transaction
-            console_print("Sending transaction...")
-            txid = wallet.satoriTransaction(amount=amount, address=address)
+                # Send transaction
+                console_print("Sending transaction...")
+                txid = wallet.satoriTransaction(amount=amount, address=address)
 
             return f"\nTransaction successful!\nTransaction ID: {txid}"
 
@@ -830,11 +833,14 @@ class NeuronCLI:
             # Prepare for transaction
             console_print()
             console_print("Preparing transaction...")
-            vault.getReadyToSend(balance=True, save=True)
+            # Build/sign uses native crypto; serialize the whole prep+send.
+            from satorineuron.init.wallet import WALLET_CRYPTO_LOCK
+            with WALLET_CRYPTO_LOCK:
+                vault.getReadyToSend(balance=True, save=True)
 
-            # Send transaction
-            console_print("Sending transaction...")
-            txid = vault.satoriTransaction(amount=amount, address=address)
+                # Send transaction
+                console_print("Sending transaction...")
+                txid = vault.satoriTransaction(amount=amount, address=address)
 
             return f"\nTransaction successful!\nTransaction ID: {txid}"
 

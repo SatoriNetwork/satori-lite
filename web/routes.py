@@ -999,8 +999,10 @@ def register_routes(app):
                             # Generate challenge (timestamp)
                             challenge = str(time.time())
 
-                            # Sign with wallet
-                            signature = wallet.sign(message=challenge)
+                            # Sign with wallet (native crypto: serialize)
+                            from satorineuron.init.wallet import WALLET_CRYPTO_LOCK
+                            with WALLET_CRYPTO_LOCK:
+                                signature = wallet.sign(message=challenge)
                             if isinstance(signature, bytes):
                                 signature = signature.decode('utf-8')
 
@@ -1291,19 +1293,22 @@ def register_routes(app):
                 return jsonify({'error': 'Invalid amount'}), 400
 
         try:
+            from satorineuron.init.wallet import WALLET_CRYPTO_LOCK
             wallet = wallet_manager.wallet
-            # Get ready to send
-            wallet.get()
-            wallet.getReadyToSend()
+            # Build/sign uses native crypto; serialize the whole prep+send.
+            with WALLET_CRYPTO_LOCK:
+                # Get ready to send
+                wallet.get()
+                wallet.getReadyToSend()
 
-            # typicalNeuronTransaction handles both direct (has EVR) and
-            # indirect (no EVR, uses Mundo) paths, including sweep
-            result = wallet.typicalNeuronTransaction(
-                amount=amount if not sweep else 0,
-                address=address,
-                sweep=sweep,
-                requestSimplePartialFn=_mundoRequestSimplePartial,
-                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
+                # typicalNeuronTransaction handles both direct (has EVR) and
+                # indirect (no EVR, uses Mundo) paths, including sweep
+                result = wallet.typicalNeuronTransaction(
+                    amount=amount if not sweep else 0,
+                    address=address,
+                    sweep=sweep,
+                    requestSimplePartialFn=_mundoRequestSimplePartial,
+                    broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
 
             if hasattr(result, 'success') and hasattr(result, 'msg'):
                 if result.success and result.msg and len(result.msg) == 64:
@@ -1345,19 +1350,22 @@ def register_routes(app):
                 return jsonify({'error': 'Invalid amount'}), 400
 
         try:
+            from satorineuron.init.wallet import WALLET_CRYPTO_LOCK
             vault = wallet_manager.vault
-            # Get ready to send
-            vault.get()
-            vault.getReadyToSend()
+            # Build/sign uses native crypto; serialize the whole prep+send.
+            with WALLET_CRYPTO_LOCK:
+                # Get ready to send
+                vault.get()
+                vault.getReadyToSend()
 
-            # typicalNeuronTransaction handles both direct (has EVR) and
-            # indirect (no EVR, uses Mundo) paths, including sweep
-            result = vault.typicalNeuronTransaction(
-                amount=amount if not sweep else 0,
-                address=address,
-                sweep=sweep,
-                requestSimplePartialFn=_mundoRequestSimplePartial,
-                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
+                # typicalNeuronTransaction handles both direct (has EVR) and
+                # indirect (no EVR, uses Mundo) paths, including sweep
+                result = vault.typicalNeuronTransaction(
+                    amount=amount if not sweep else 0,
+                    address=address,
+                    sweep=sweep,
+                    requestSimplePartialFn=_mundoRequestSimplePartial,
+                    broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
 
             if hasattr(result, 'success') and hasattr(result, 'msg'):
                 if result.success and result.msg and len(result.msg) == 64:
@@ -1412,13 +1420,15 @@ def register_routes(app):
                     'error': f'Insufficient balance: have {vault.balance.amount}, need {total}'
                 }), 400
 
-            # Prepare and send
-            vault.getReadyToSend()
-            txhash = vault.satoriDistribution(
-                amountByAddress=payments,
-                memo='Lender rewards',
-                broadcast=True
-            )
+            # Prepare and send (native crypto: serialize)
+            from satorineuron.init.wallet import WALLET_CRYPTO_LOCK
+            with WALLET_CRYPTO_LOCK:
+                vault.getReadyToSend()
+                txhash = vault.satoriDistribution(
+                    amountByAddress=payments,
+                    memo='Lender rewards',
+                    broadcast=True
+                )
 
             # Validate txhash
             if txhash and isinstance(txhash, str) and len(txhash) == 64:
