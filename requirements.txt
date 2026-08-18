@@ -64,7 +64,11 @@ marshmallow>=3.22.0
 # Networking
 requests>=2.32.0
 websockets>=15.0.0
-nostr-sdk>=0.44.0
+# 0.45 is a FLOOR, not a preference: satorilib's nostr client was migrated to
+# the 0.45 API on 2026-08-18 and no longer runs on 0.44.x. Neuron reaches Nostr
+# through satorilib rather than directly, so it has no call sites of its own to
+# change, but it must not resolve the SDK below what satorilib needs.
+nostr-sdk>=0.45.0
 docker>=7.1.0
 
 # Web UI
