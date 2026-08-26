@@ -555,9 +555,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if already_scored:
                 return
 
-            try:
-                observed_value = float(raw_value)
-            except (TypeError, ValueError):
+            observed_value = self._numericObservationValue(raw_value)
+            if observed_value is None:
                 logging.warning(
                     f'Bounty: skipping score for {stream_name} seq={seq_num} '
                     f'— non-numeric observation value')
@@ -975,11 +974,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         import json
 
         # Non-numeric streams cannot enter the engine (StreamStore stores REAL),
-        # so short-circuit to echo before touching any StreamModel.
-        try:
-            numeric_value = float(observation.value)
-        except (TypeError, ValueError):
-            numeric_value = None
+        # so short-circuit to echo before touching any StreamModel. Bridge
+        # streams carry an object rather than a scalar; the helper unwraps it.
+        numeric_value = self._numericObservationValue(observation.value)
 
         value_str = None
         method = 'echo'
@@ -1051,6 +1048,43 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(
                 f'Network: bounty DM submit failed for {stream_name}: {e}')
+
+    @staticmethod
+    def _numericObservationValue(value):
+        """Coerce an observation's value to a float for the engine, or None.
+
+        Ordinary streams carry a scalar: a number, or its string form.
+
+        Streams published by the Base bridge carry an object instead, because
+        one observation describes an on-chain write:
+
+            {"chainId": 84532, "streamId": 1, "block": 45772737,
+             "round": 41373, "raw": "1"}
+
+        For those, `raw` is authoritative: an int256 rendered as a string,
+        signed (negatives occur) and wider than a float can hold exactly. A
+        converted `value` is present only when a real conversion existed (a
+        Uniswap tick turned into a price) and is preferred when it is, since
+        it is the economically meaningful number. Its ABSENCE means "no
+        conversion was available", NOT zero, so zero is never substituted.
+
+        Magnitudes above 2**53 lose integer exactness on the way to float.
+        That is inherent to the engine, which stores REAL, and is accepted:
+        forecasting cares about relative precision, not the last few digits.
+        """
+        if isinstance(value, dict):
+            if value.get('value') is not None:
+                candidate = value.get('value')
+            elif value.get('raw') is not None:
+                candidate = value.get('raw')
+            else:
+                return None
+        else:
+            candidate = value
+        try:
+            return float(candidate)
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _safeEpoch(raw):
@@ -1167,10 +1201,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             raw = row.get('value')
             value = None
             try:
-                value = float(DatastreamObservation.from_json(raw).value)
+                value = self._numericObservationValue(
+                    DatastreamObservation.from_json(raw).value)
             except Exception:
+                value = None
+            if value is None:
                 try:
-                    value = float(json.loads(raw).get('value'))
+                    value = self._numericObservationValue(
+                        json.loads(raw).get('value'))
                 except Exception:
                     value = None
             if value is None:

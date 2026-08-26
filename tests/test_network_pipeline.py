@@ -733,3 +733,150 @@ class TestEndToEnd:
         pub = next(p for p in pubs if p['stream_name'] == 'sensor')
         assert pub['last_seq_num'] == 1
         assert pub['last_published_at'] is not None
+
+
+# ── TestBridgeObservationValues ──────────────────────────────────────
+
+class TestBridgeObservationValues:
+    """Base bridge streams carry an OBJECT as the observation value.
+
+    Ordinary streams carry a scalar ('42000'). The Base bridge publishes one
+    object per on-chain write:
+
+        {"chainId": 84532, "streamId": 1, "block": 45772737,
+         "round": 41373, "raw": "1"}
+
+    Before _numericObservationValue existed, float() on that dict raised and
+    every bridge observation silently took the echo path: stored correctly,
+    never predicted on.
+    """
+
+    @staticmethod
+    def _bridge(raw='1', value=None):
+        v = {'chainId': 84532, 'streamId': 1,
+             'block': 45772737, 'round': 41373, 'raw': raw}
+        if value is not None:
+            v['value'] = value
+        return v
+
+    # -- the helper itself --
+
+    def test_plain_string_scalar_unchanged(self):
+        assert StartupDag._numericObservationValue('42000') == 42000.0
+
+    def test_plain_number_scalar_unchanged(self):
+        assert StartupDag._numericObservationValue(99.5) == 99.5
+
+    def test_non_numeric_scalar_is_none(self):
+        assert StartupDag._numericObservationValue('sunny') is None
+        assert StartupDag._numericObservationValue(None) is None
+
+    def test_bridge_object_uses_raw(self):
+        assert StartupDag._numericObservationValue(self._bridge(raw='1')) == 1.0
+
+    def test_bridge_object_prefers_converted_value(self):
+        """value is the economically meaningful number when a conversion existed."""
+        v = self._bridge(raw='201360', value='3421.77')
+        assert StartupDag._numericObservationValue(v) == 3421.77
+
+    def test_missing_value_falls_back_to_raw_not_zero(self):
+        """Absent 'value' means no conversion existed. It must NOT become 0."""
+        v = self._bridge(raw='7')
+        assert 'value' not in v
+        assert StartupDag._numericObservationValue(v) == 7.0
+
+    def test_zero_value_is_a_real_zero(self):
+        """value=0 is a legitimate reading, distinct from value absent."""
+        assert StartupDag._numericObservationValue(
+            self._bridge(raw='5', value=0)) == 0.0
+
+    def test_zero_raw_is_a_real_zero(self):
+        assert StartupDag._numericObservationValue(self._bridge(raw='0')) == 0.0
+
+    def test_negative_raw(self):
+        """int256 is signed; negatives occur."""
+        assert StartupDag._numericObservationValue(
+            self._bridge(raw='-42')) == -42.0
+
+    def test_raw_wider_than_float64(self):
+        """int256 exceeds 2**53. Must convert, not crash."""
+        big = str(2 ** 200)
+        out = StartupDag._numericObservationValue(self._bridge(raw=big))
+        assert out == pytest.approx(float(big))
+
+    def test_object_without_raw_or_value_is_none(self):
+        assert StartupDag._numericObservationValue(
+            {'chainId': 84532, 'round': 41373}) is None
+
+    def test_object_with_garbage_raw_is_none(self):
+        assert StartupDag._numericObservationValue(
+            self._bridge(raw='0xdeadbeef')) is None
+
+    # -- the ingest path --
+
+    def _setup(self, harness, stream='satori-84532-1', pub='bridgepub'):
+        harness.networkDB.subscribe(
+            {'stream_name': stream, 'nostr_pubkey': pub}, 'wss://r1')
+        harness.networkDB.add_publication(
+            f'{stream}_pred',
+            source_stream_name=stream,
+            source_provider_pubkey=pub)
+
+    def test_bridge_observation_reaches_engine_not_echo(self, harness):
+        """The regression this whole change exists for."""
+        self._setup(harness)
+        seen = {}
+
+        def fake_predict(stream_name, provider_pubkey, observation, numeric):
+            seen['numeric'] = numeric
+            return '0.5'
+
+        harness._relayPredict = fake_predict
+        obs = DatastreamObservation(
+            stream_name='satori-84532-1',
+            timestamp=1787313600,
+            value=self._bridge(raw='1'),
+            seq_num=1)
+        asyncio.run(harness._networkRunEngine(
+            'satori-84532-1', 'bridgepub', obs))
+
+        # the engine was reached, and got the unwrapped number
+        assert seen.get('numeric') == 1.0
+        # the stored prediction is the engine's forecast, not an echoed object
+        preds = harness.networkDB.get_predictions(
+            'satori-84532-1', 'bridgepub')
+        assert len(preds) == 1
+        assert preds[0]['value'] == '0.5'
+
+    def test_ordinary_scalar_stream_still_works(self, harness):
+        """Regression guard: scalar streams behave exactly as before."""
+        self._setup(harness, stream='btc-price', pub='pub123')
+        seen = {}
+
+        def fake_predict(stream_name, provider_pubkey, observation, numeric):
+            seen['numeric'] = numeric
+            return '43000'
+
+        harness._relayPredict = fake_predict
+        obs = DatastreamObservation(
+            stream_name='btc-price', timestamp=int(time.time()),
+            value='42000', seq_num=1)
+        asyncio.run(harness._networkRunEngine('btc-price', 'pub123', obs))
+
+        assert seen.get('numeric') == 42000.0
+        preds = harness.networkDB.get_predictions('btc-price', 'pub123')
+        assert preds[0]['value'] == '43000'
+
+    def test_unparseable_object_still_echoes(self, harness):
+        """No raw, no value: cannot predict, must fall back to echo safely."""
+        self._setup(harness, stream='weird', pub='pub9')
+        harness._relayPredict = lambda *a, **k: pytest.fail(
+            'engine must not be reached for an unparseable value')
+        obs = DatastreamObservation(
+            stream_name='weird', timestamp=int(time.time()),
+            value={'chainId': 84532}, seq_num=1)
+        asyncio.run(harness._networkRunEngine('weird', 'pub9', obs))
+
+        preds = harness.networkDB.get_predictions('weird', 'pub9')
+        assert len(preds) == 1
+        assert json.loads(preds[0]['value']) == {'chainId': 84532}
