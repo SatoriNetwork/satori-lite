@@ -87,9 +87,14 @@ provider_pubkey)` matches on both, and `provider_pubkey` is compared against
 the **event's author**, so anything signed by a different key is dropped in
 `_networkListen` (`start.py:944`).
 
-Current key: `472e6f687cafa1412e62ac33852379795a8b0710ffd3b543aad65f6db104dd1d`
-(npub `1guhx76ru47s5ztnz4sec2gme09dgkpcsllfm2sa26e0kmvgym5wspmqr86`). The npub
-and hex round trip exactly.
+Current key: `8ddb04208aaf271fd70b397a7aa7ac79b95f4dcdcf9b6e22b64c9d3f90a8c777`
+(npub `13hdsggy24un3l4ct89a84fav0xu47nwde7dkug4kfjwnly9gcamsl4vd5s`).
+
+This is the **permanent publisher**, generated 2026-08-26 and held in the
+bridge's deployment env. An earlier draft of this document recorded
+`472e6f68…` — that was a throwaway used to test the bridge, its private half
+was exposed in a terminal, and nothing should pin it. Any subscription row
+created against it must be updated.
 
 Two consequences worth recording:
 
@@ -108,17 +113,26 @@ The original design assumed the bridge would run its own relay that central
 had never heard of, and added a pinned connection path to reach it. That work
 is **not needed**.
 
-A neuron already connects to every relay central advertises. Verified live:
+A neuron already connects to every relay central advertises. The four rows in
+the local DB (all `user_added=0`, meaning they came from central):
 
 ```
-ws://satorian.satorinet.io:7777
-ws://testnet.satorinet.io:7171
-ws://testnet.satorinet.io:7777      <- natural home for Base Sepolia
-wss://satori-home.net-hub.de
+ws://satorian.satorinet.io:7777     <- resolves, answers NIP-11 ("Satori Public Relay")
+ws://testnet.satorinet.io:7171      <- NXDOMAIN
+ws://testnet.satorinet.io:7777      <- NXDOMAIN
+wss://satori-home.net-hub.de        <- resolves (IPv6)
 ```
 
-All four have `user_added=0`, meaning they came from central. If the bridge
-publishes to any of them, the existing machinery does the whole job:
+**`testnet.satorinet.io` no longer exists in DNS** — checked against Cloudflare's
+public resolver (Status 3, NXDOMAIN) on 2026-08-27, not just a local cache. It
+was live as recently as April (central's relay-watcher logs reference it), so
+these are stale directory entries: central's list can hold dead relays, and a
+row in the DB is not evidence a host answers. The natural home for Base Sepolia
+streams is therefore **`ws://satorian.satorinet.io:7777`**, the one
+central-advertised relay verified up.
+
+If the bridge publishes to a live one of them, the existing machinery does the
+whole job:
 
 1. `_networkReconcile` connects to central's relays (`start.py:4117`).
 2. `_networkConnect` starts `_networkListen` on each (`start.py:402`).
@@ -186,7 +200,11 @@ three places that each did their own `float()`:
 It prefers the converted `value` when present and falls back to `raw`. An
 absent `value` means no conversion existed and is never treated as zero,
 because publishing a fabricated zero into a price stream would poison every
-subscriber scoring against it.
+subscriber scoring against it. One refinement since the first cut: when the
+raw number is a **tick** (`unit: "tick"`) and no converted value came with it,
+the helper refuses it rather than falling back — a tick is the logarithm of a
+price, and mixing raw ticks with converted prices in one series would corrupt
+the model the moment the bridge's RPC config changed. Such observations echo.
 
 Verified with 15 tests covering zero, negative, absent value, garbage and
 magnitudes above 2^53, and against real testnet data: all five rounds of
@@ -195,30 +213,24 @@ magnitudes above 2^53, and against real testnet data: all five rounds of
 
 ## Remaining work
 
-### 1. Idempotency on (stream_name, round)
+### 1. Idempotency on (stream_name, round) — ✅ DONE
 
-Redelivery and restarts republish, per the publisher's spec. `save_observation`
-(`network_db.py:585`) dedupes on `event_id`, or on `(stream_name,
-provider_pubkey, seq_num)`. `round` lives inside the value object where
-nothing looks at it, so a republished round with a fresh event id and a bumped
-sequence slips past both guards and reaches the engine as a genuine new
-observation.
+Implemented as designed: a nullable `round` column (try/ALTER migration, so
+existing databases keep their rows), populated from the value object on the
+single ingest path, deduped on `(stream_name, provider_pubkey, round)` when
+not null and checked before the event-id and seq guards. Ordinary streams pass
+no round and behave exactly as before. Covered by `TestRoundDedupe` and an
+ingest-path replay test.
 
-Add a nullable `round` column following the migration pattern at
-`network_db.py:288`, populate it when the value object carries one, and dedupe
-on `(stream_name, provider_pubkey, round)` when it is not null. Existing
-streams are unaffected because round stays null for them.
+### 2. Staleness on the derived streams — ✅ RESOLVED (bridge side)
 
-### 2. Staleness on the derived streams
-
-Cadence is a **minimum, not a schedule**, but `DatastreamMetadata.is_likely_active`
-reads it as a schedule and returns false past 1.5x cadence. The base stream is
-safe because its cadence is null, which returns true unconditionally. The 14
-day, 3 month and 1 year roll ups can be judged dead while perfectly healthy,
-which sends reconcile hunting them on other relays.
-
-Note `mark_stale` only flags and never deactivates, so the impact is a 24 hour
-re hunt cooldown rather than a lost subscription.
+The analysis was right: cadence on these streams is a **minimum, not a
+schedule**, and `is_likely_active` reads `cadence_seconds` as a schedule. The
+fix landed where the mismatch was created: the bridge no longer emits
+`cadence_seconds` at all (the on-chain floor still travels in
+`metadata.derivedCadenceRounds` for anyone who wants it). Null cadence means
+`is_likely_active` returns true unconditionally, same as every other Satori
+stream, so no neuron-side guard is needed.
 
 ### 3. Indexer backfill (optional)
 
@@ -266,8 +278,10 @@ prediction line reading `(engine)` and **not** `(echo)`, followed by a
 
 ## Open questions for the bridge author
 
-1. **Publish to `ws://testnet.satorinet.io:7777`.** Central already advertises
-   it and neurons are already connected, so no relay needs standing up and no
+1. **Publish to `ws://satorian.satorinet.io:7777`.** Central already
+   advertises it, neurons are already connected, and it is the only
+   central-advertised relay that currently resolves (`testnet.satorinet.io`
+   is NXDOMAIN — see the relay section). No relay needs standing up and no
    neuron code changes. See the caveat about NIP-65 registration above.
 2. **Are the values binary by nature?** Stream 1 reads 0, 0, 1, 0, 0. The
    engine is a regression stack scored by MAE, which handles a 0/1 series
