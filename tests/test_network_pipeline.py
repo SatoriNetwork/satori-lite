@@ -880,3 +880,25 @@ class TestBridgeObservationValues:
         preds = harness.networkDB.get_predictions('weird', 'pub9')
         assert len(preds) == 1
         assert json.loads(preds[0]['value']) == {'chainId': 84532}
+
+
+    # -- ticks: labelled, unconverted, and never a value --
+
+    def test_unconverted_tick_is_not_a_number(self):
+        """A tick is the logarithm of a price. Feeding tick 213397 into the
+        same series that later carries price 540.44 mixes two bases; the
+        helper must refuse it and let the observation echo."""
+        v = self._bridge(raw='213397')
+        v['unit'] = 'tick'
+        assert StartupDag._numericObservationValue(v) is None
+
+    def test_converted_tick_uses_the_price(self):
+        v = self._bridge(raw='213397', value=540.44)
+        v['unit'] = 'tick'
+        assert StartupDag._numericObservationValue(v) == 540.44
+
+    def test_raw_unit_streams_unaffected_by_tick_guard(self):
+        v = self._bridge(raw='7')
+        v['unit'] = 'raw'
+        assert StartupDag._numericObservationValue(v) == 7.0
+

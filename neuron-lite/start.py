@@ -1066,7 +1066,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         converted `value` is present only when a real conversion existed (a
         Uniswap tick turned into a price) and is preferred when it is, since
         it is the economically meaningful number. Its ABSENCE means "no
-        conversion was available", NOT zero, so zero is never substituted.
+        conversion was available", NOT zero, so zero is never substituted —
+        and when the raw number is a tick (`unit: "tick"`) with no converted
+        value, it is rejected outright rather than fed through as if it were
+        one.
 
         Magnitudes above 2**53 lose integer exactness on the way to float.
         That is inherent to the engine, which stores REAL, and is accepted:
@@ -1075,6 +1078,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if isinstance(value, dict):
             if value.get('value') is not None:
                 candidate = value.get('value')
+            elif value.get('unit') == 'tick':
+                # A tick is the LOGARITHM of a price (1.0001^tick), not a
+                # value. The bridge labels it and omits `value` precisely when
+                # it could not convert — feeding the raw tick to a model that
+                # later sees converted prices on the same stream would mix two
+                # bases in one series (tick 213397 vs price 540.44). Refuse it;
+                # the observation echoes instead.
+                return None
             elif value.get('raw') is not None:
                 candidate = value.get('raw')
             else:
