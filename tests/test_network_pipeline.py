@@ -880,3 +880,107 @@ class TestBridgeObservationValues:
         preds = harness.networkDB.get_predictions('weird', 'pub9')
         assert len(preds) == 1
         assert json.loads(preds[0]['value']) == {'chainId': 84532}
+
+
+# ── TestRoundDedupe ──────────────────────────────────────────────────
+
+class TestRoundDedupe:
+    """Idempotency on (stream_name, provider_pubkey, round).
+
+    A bridge restart republishes a round re-signed with a fresh
+    `created_at`, so the event id is new; if the bridge also bumps
+    seq_num, both older dedupe guards miss. The on-chain round inside
+    the value object is the only stable key, so `save_observation`
+    rejects a repeated round and the engine is never re-run on it.
+    """
+
+    @staticmethod
+    def _bridge_obs(round_num, seq_num, event_id,
+                    stream='satori-84532-1', pubkey='bridgepub'):
+        return InboundObservation(
+            stream_name=stream,
+            nostr_pubkey=pubkey,
+            observation=DatastreamObservation(
+                stream_name=stream,
+                timestamp=round_num * 43200,
+                value={'chainId': 84532, 'streamId': 1,
+                       'block': 45772737, 'round': round_num, 'raw': '1'},
+                seq_num=seq_num),
+            event_id=event_id)
+
+    def _setup(self, harness, stream='satori-84532-1', pubkey='bridgepub',
+               predicting=False):
+        harness.networkDB.subscribe(
+            {'stream_name': stream, 'nostr_pubkey': pubkey}, 'wss://r1')
+        if predicting:
+            harness.networkDB.add_publication(
+                f'{stream}_pred',
+                source_stream_name=stream,
+                source_provider_pubkey=pubkey)
+
+    def test_republished_round_rejected_and_engine_not_rerun(self, harness):
+        """Fresh event id + bumped seq, same round: one row, one engine run."""
+        self._setup(harness, predicting=True)
+        engine_calls = []
+
+        async def fake_engine(stream_name, provider_pubkey, observation):
+            engine_calls.append(observation.seq_num)
+
+        harness._networkRunEngine = fake_engine
+        asyncio.run(harness._networkProcessObservation(
+            self._bridge_obs(round_num=41373, seq_num=1, event_id='ev1')))
+        asyncio.run(harness._networkProcessObservation(
+            self._bridge_obs(round_num=41373, seq_num=2, event_id='ev2')))
+
+        rows = harness.networkDB.get_observations(
+            'satori-84532-1', 'bridgepub')
+        assert len(rows) == 1
+        assert engine_calls == [1]
+
+    def test_distinct_rounds_both_insert(self, harness):
+        self._setup(harness)
+        asyncio.run(harness._networkProcessObservation(
+            self._bridge_obs(round_num=41373, seq_num=1, event_id='ev1')))
+        asyncio.run(harness._networkProcessObservation(
+            self._bridge_obs(round_num=41374, seq_num=2, event_id='ev2')))
+        rows = harness.networkDB.get_observations(
+            'satori-84532-1', 'bridgepub')
+        assert len(rows) == 2
+
+    def test_same_round_on_different_streams_both_insert(self, harness):
+        """The round key is scoped per stream, not global."""
+        self._setup(harness, stream='satori-84532-1')
+        self._setup(harness, stream='satori-84532-2')
+        asyncio.run(harness._networkProcessObservation(
+            self._bridge_obs(41373, 1, 'ev1', stream='satori-84532-1')))
+        asyncio.run(harness._networkProcessObservation(
+            self._bridge_obs(41373, 1, 'ev2', stream='satori-84532-2')))
+        assert len(harness.networkDB.get_observations(
+            'satori-84532-1', 'bridgepub')) == 1
+        assert len(harness.networkDB.get_observations(
+            'satori-84532-2', 'bridgepub')) == 1
+
+    def test_scalar_streams_unaffected(self, harness):
+        """Ordinary streams have no round; both observations insert."""
+        harness.networkDB.subscribe(
+            {'stream_name': 'btc-price', 'nostr_pubkey': 'pub123'},
+            'wss://r1')
+        for seq, ev in ((1, 'ev1'), (2, 'ev2')):
+            obs = InboundObservation(
+                stream_name='btc-price', nostr_pubkey='pub123',
+                observation=DatastreamObservation(
+                    stream_name='btc-price', timestamp=int(time.time()),
+                    value='42000', seq_num=seq),
+                event_id=ev)
+            asyncio.run(harness._networkProcessObservation(obs))
+        assert len(harness.networkDB.get_observations(
+            'btc-price', 'pub123')) == 2
+
+    def test_direct_save_rejects_repeated_round(self, harness):
+        """The guard also holds at the DB layer, independent of the caller."""
+        assert harness.networkDB.save_observation(
+            's', 'p', value='{}', event_id='e1',
+            seq_num=1, observed_at=1, round_num=7) is True
+        assert harness.networkDB.save_observation(
+            's', 'p', value='{}', event_id='e2',
+            seq_num=2, observed_at=1, round_num=7) is False

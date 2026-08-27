@@ -102,7 +102,8 @@ class NetworkDB:
                 observed_at INTEGER,
                 received_at INTEGER NOT NULL,
                 value TEXT,
-                event_id TEXT
+                event_id TEXT,
+                round_num INTEGER
             )
         """)
         conn.execute("""
@@ -231,6 +232,16 @@ class NetworkDB:
                 "ALTER TABLE observations ADD COLUMN seq_num INTEGER")
             conn.execute(
                 "ALTER TABLE observations ADD COLUMN observed_at INTEGER")
+        # Migration: add round_num to observations (existing DBs).
+        # Bridge streams carry an on-chain round inside the value object;
+        # a republished round arrives with a fresh event id and a bumped
+        # seq_num, so neither existing dedupe guard catches it. NULL for
+        # every non-bridge observation, so nothing else changes.
+        try:
+            conn.execute("SELECT round_num FROM observations LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute(
+                "ALTER TABLE observations ADD COLUMN round_num INTEGER")
         # Migration: track what the subscriber has paid for (Fix F)
         try:
             conn.execute("SELECT last_paid_seq FROM subscriptions LIMIT 1")
@@ -584,9 +595,13 @@ class NetworkDB:
 
     def save_observation(self, stream_name: str, provider_pubkey: str,
                          value: str = None, event_id: str = None,
-                         seq_num: int = None, observed_at: int = None) -> bool:
-        """Record a received observation. Skips duplicates by event_id or seq_num.
-        Returns True if a new row was inserted, False if skipped as duplicate."""
+                         seq_num: int = None, observed_at: int = None,
+                         round_num: int = None) -> bool:
+        """Record a received observation. Skips duplicates by event_id,
+        seq_num, or round_num (bridge streams: a republished on-chain round
+        arrives with a fresh event id and a bumped seq, so the round is the
+        only stable key). Returns True if a new row was inserted, False if
+        skipped as duplicate."""
         conn = self._get_conn()
         if event_id:
             existing = conn.execute(
@@ -600,13 +615,19 @@ class NetworkDB:
                 (stream_name, provider_pubkey, seq_num)).fetchone()
             if existing:
                 return False
+        if round_num is not None:
+            existing = conn.execute(
+                "SELECT 1 FROM observations WHERE stream_name = ? AND provider_pubkey = ? AND round_num = ?",
+                (stream_name, provider_pubkey, round_num)).fetchone()
+            if existing:
+                return False
         conn.execute("""
             INSERT INTO observations
                 (stream_name, provider_pubkey, seq_num, observed_at,
-                 received_at, value, event_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 received_at, value, event_id, round_num)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (stream_name, provider_pubkey, seq_num, observed_at,
-              int(time.time()), value, event_id))
+              int(time.time()), value, event_id, round_num))
         conn.commit()
         return True
 

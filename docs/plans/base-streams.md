@@ -1,8 +1,8 @@
 # Base Data Streams over Nostr
 
-**Date:** 2026-08-26
-**Status:** Environment and value handling complete (branch `base-streams`,
-commit `fcbee0c`); waiting on the bridge to publish its first events
+**Date:** 2026-08-26 (updated 2026-08-27)
+**Status:** Code complete on the neuron side (branch `base-streams`); waiting
+on the bridge to publish its first events to a relay central advertises
 
 
 ## Summary
@@ -195,44 +195,48 @@ magnitudes above 2^53, and against real testnet data: all five rounds of
 
 ## Remaining work
 
-### 1. Idempotency on (stream_name, round)
+Code-complete on the neuron side. The finish line is observational: one live
+kind 34601 from the publisher key producing a prediction line that reads
+`(engine)` in the logs. Everything below is either done, dropped with a
+verified reason, or deferred with a trigger.
 
-Redelivery and restarts republish, per the publisher's spec. `save_observation`
-(`network_db.py:585`) dedupes on `event_id`, or on `(stream_name,
-provider_pubkey, seq_num)`. `round` lives inside the value object where
-nothing looks at it, so a republished round with a fresh event id and a bumped
-sequence slips past both guards and reaches the engine as a genuine new
-observation.
+### Idempotency on (stream_name, round): DONE
 
-Add a nullable `round` column following the migration pattern at
-`network_db.py:288`, populate it when the value object carries one, and dedupe
-on `(stream_name, provider_pubkey, round)` when it is not null. Existing
-streams are unaffected because round stays null for them.
+Redelivery and restarts republish, per the publisher's spec. A republished
+round arrives re signed with a fresh `created_at`, hence a fresh event id,
+and possibly a bumped sequence, so both older dedupe guards missed it and the
+engine trained on duplicate rows at the same epoch.
 
-### 2. Staleness on the derived streams
+Implemented as: a nullable `round_num` column on `observations` (migration
+follows the existing try SELECT pattern), a third guard in `save_observation`
+on `(stream_name, provider_pubkey, round_num)` when not null, and one
+extraction in `_networkProcessObservation` that reads `value['round']` when
+the value is a dict. Null for every non bridge observation, so ordinary
+streams are untouched. Five tests cover the republish rejection (engine not
+re run), distinct rounds, the per stream scoping of the key, scalar streams,
+and the DB layer guard directly.
 
-Cadence is a **minimum, not a schedule**, but `DatastreamMetadata.is_likely_active`
-reads it as a schedule and returns false past 1.5x cadence. The base stream is
-safe because its cadence is null, which returns true unconditionally. The 14
-day, 3 month and 1 year roll ups can be judged dead while perfectly healthy,
-which sends reconcile hunting them on other relays.
+### Staleness on the derived streams: DROPPED, cosmetic
 
-Note `mark_stale` only flags and never deactivates, so the impact is a 24 hour
-re hunt cooldown rather than a lost subscription.
+Cadence is a minimum but `is_likely_active` reads it as a schedule, so the
+roll ups can be flagged stale while healthy. Verified that this changes
+nothing that matters: `mark_stale` only sets `stale_since` and never touches
+`active`, and the listener filter `is_subscribed` checks only `active`. A
+stale flagged stream keeps ingesting and keeps predicting. The entire cost is
+a UI badge and a cheap re hunt every 24 hours. Not worth code.
 
-### 3. Indexer backfill (optional)
+### Indexer backfill: DEFERRED, and deferral is free
 
 Kind 34601 is parameterized replaceable, so a relay holds only the latest
-observation per stream and offline time is lost. This is **not special to
-these streams**: it is true of every Satori Nostr stream. What is new is that
-this publisher has an indexer to recover from.
-
-`GET /streams/:id/values?fromBlock=N` at `https://app.satorinet.io/api`
-(verified live). Mirror the idiom at `start.py:1971`: a nested sync function
-using `_requests.get(..., timeout=15)`, `raise_for_status()` and `.json()`,
-called through `await asyncio.to_thread(...)`. Push results through
-`_networkProcessObservation` so dedupe, storage and the engine path behave
-identically to live delivery.
+observation and offline time is lost from Nostr. This is true of every Satori
+stream; what is new is that this publisher has an archive to recover from.
+Because the indexer is a **full archive** (`fromBlock=0` returns everything
+since the first round), backfill written later recovers exactly what backfill
+written now would, so nothing is lost by waiting. Write it when data volume
+makes it matter: one small function fetching
+`GET /streams/:id/values?fromBlock=N` (idiom at `start.py:1971`) and feeding
+rows through `_networkProcessObservation`, where the round dedupe above
+already makes it idempotent.
 
 The indexer returns `oldValue` and `newValue` while the Nostr payload carries
 `raw`. Confirm the mapping against real events rather than assuming it.

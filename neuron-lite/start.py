@@ -494,6 +494,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """
         obs_json = (obs.observation.to_json()
                     if obs.observation else None)
+        # Bridge streams carry the on-chain round inside the value object.
+        # It is the only stable dedupe key across republishes (a bridge
+        # restart re-signs with a fresh event id and a bumped seq_num).
+        obs_round = None
+        if obs.observation and isinstance(obs.observation.value, dict):
+            r = obs.observation.value.get('round')
+            if isinstance(r, int):
+                obs_round = r
         is_new = await asyncio.to_thread(
             self.networkDB.save_observation,
             obs.stream_name,
@@ -501,7 +509,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             obs_json,
             obs.event_id,
             obs.observation.seq_num if obs.observation else None,
-            obs.observation.timestamp if obs.observation else None)
+            obs.observation.timestamp if obs.observation else None,
+            obs_round)
         # Run engine only if this is a new observation (not a duplicate)
         if is_new and obs.observation:
             predicting = await asyncio.to_thread(
