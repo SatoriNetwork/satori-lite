@@ -526,3 +526,83 @@ class TestCrossTable:
         assert len(db.get_observations('eth-price', 'abc')) == 1
         assert len(db.get_predictions('btc-price', 'abc')) == 1
         assert len(db.get_predictions('eth-price', 'abc')) == 0
+
+
+# ── Round dedupe (bridge streams) ────────────────────────────────────
+
+
+class TestRoundDedupe:
+    """Bridge streams key idempotency on the on-chain round.
+
+    A bridge restart republishes the same round under a FRESH event id and a
+    BUMPED seq_num — both existing guards pass, so without the round check the
+    replay reaches the engine as a genuine new observation.
+    """
+
+    def test_same_round_fresh_event_and_seq_is_a_duplicate(self, db):
+        assert db.save_observation(
+            'satori-84532-1', 'bridgepub', '{"raw":"1"}',
+            'evt-a', seq_num=1, round_num=41373) is True
+        # the replay: same round, everything about the delivery different
+        assert db.save_observation(
+            'satori-84532-1', 'bridgepub', '{"raw":"1"}',
+            'evt-b', seq_num=7, round_num=41373) is False
+        assert len(db.get_observations('satori-84532-1', 'bridgepub')) == 1
+
+    def test_distinct_rounds_both_land(self, db):
+        assert db.save_observation(
+            'satori-84532-1', 'bridgepub', '{"raw":"0"}',
+            'e1', seq_num=1, round_num=41373) is True
+        assert db.save_observation(
+            'satori-84532-1', 'bridgepub', '{"raw":"1"}',
+            'e2', seq_num=2, round_num=41374) is True
+        assert len(db.get_observations('satori-84532-1', 'bridgepub')) == 2
+
+    def test_round_is_scoped_to_stream_and_publisher(self, db):
+        """Round 41373 on stream 1 and round 41373 on stream 2 are different
+        observations; so are the same round from two publishers."""
+        assert db.save_observation(
+            'satori-84532-1', 'bridgepub', '{"raw":"1"}',
+            'e1', seq_num=1, round_num=41373) is True
+        assert db.save_observation(
+            'satori-84532-2', 'bridgepub', '{"raw":"1"}',
+            'e2', seq_num=1, round_num=41373) is True
+        assert db.save_observation(
+            'satori-84532-1', 'otherpub', '{"raw":"1"}',
+            'e3', seq_num=1, round_num=41373) is True
+
+    def test_ordinary_streams_unaffected(self, db):
+        """No round passed: exactly the pre-existing behaviour, including that
+        rows without event ids or seqs are never deduped against each other."""
+        assert db.save_observation('btc-price', 'abc', '100') is True
+        assert db.save_observation('btc-price', 'abc', '100') is True
+
+    def test_migration_adds_round_to_an_existing_db(self, tmp_path):
+        """An existing database (no round column) must migrate on open, keep
+        its rows, and dedupe from then on."""
+        import sqlite3 as sql
+        path = str(tmp_path / 'old.db')
+        conn = sql.connect(path)
+        conn.execute("""
+            CREATE TABLE observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stream_name TEXT NOT NULL,
+                provider_pubkey TEXT NOT NULL,
+                seq_num INTEGER,
+                observed_at INTEGER,
+                received_at INTEGER NOT NULL,
+                value TEXT,
+                event_id TEXT
+            )
+        """)
+        conn.execute(
+            "INSERT INTO observations (stream_name, provider_pubkey, seq_num,"
+            " received_at, value, event_id) VALUES ('s', 'p', 1, 0, 'v', 'e0')")
+        conn.commit()
+        conn.close()
+        db2 = NetworkDB(path)  # module-level import, same as every other test
+        assert len(db2.get_observations('s', 'p')) == 1, 'existing rows kept'
+        assert db2.save_observation(
+            's', 'p', 'v2', 'e1', seq_num=2, round_num=41373) is True
+        assert db2.save_observation(
+            's', 'p', 'v2', 'e2', seq_num=3, round_num=41373) is False

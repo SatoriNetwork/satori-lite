@@ -102,7 +102,8 @@ class NetworkDB:
                 observed_at INTEGER,
                 received_at INTEGER NOT NULL,
                 value TEXT,
-                event_id TEXT
+                event_id TEXT,
+                round INTEGER
             )
         """)
         conn.execute("""
@@ -285,6 +286,17 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE channels ADD COLUMN utxo_checked_at INTEGER NOT NULL DEFAULT 0")
+        # Migration: add round to observations (existing DBs). Only bridge
+        # streams populate it: one on-chain write is one round, and the round
+        # is the protocol's clock, so it is the natural idempotency key. Event
+        # ids and seq_nums are publisher-side bookkeeping — a bridge restart
+        # can republish the same round under a fresh event id and a bumped
+        # seq, which slips both existing guards. Stays NULL for ordinary
+        # streams, which are unaffected.
+        try:
+            conn.execute("SELECT round FROM observations LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE observations ADD COLUMN round INTEGER")
         # Migration: add offset_seconds to data_sources (existing DBs)
         # Backfill existing rows with random offsets so sources don't all
         # fire at offset 0 simultaneously.
@@ -584,10 +596,25 @@ class NetworkDB:
 
     def save_observation(self, stream_name: str, provider_pubkey: str,
                          value: str = None, event_id: str = None,
-                         seq_num: int = None, observed_at: int = None) -> bool:
-        """Record a received observation. Skips duplicates by event_id or seq_num.
-        Returns True if a new row was inserted, False if skipped as duplicate."""
+                         seq_num: int = None, observed_at: int = None,
+                         round_num: int = None) -> bool:
+        """Record a received observation. Skips duplicates by event_id, seq_num,
+        or — for bridge streams, which carry one — the on-chain round.
+        Returns True if a new row was inserted, False if skipped as duplicate.
+
+        Round is checked FIRST because it is the only one of the three that is
+        a property of the data rather than of the delivery: a bridge restart
+        republishes the same round under a fresh event id and a bumped seq_num,
+        which passes both other guards and would reach the engine as a genuine
+        new observation. Ordinary streams pass no round and behave as before.
+        """
         conn = self._get_conn()
+        if round_num is not None:
+            existing = conn.execute(
+                "SELECT 1 FROM observations WHERE stream_name = ? AND provider_pubkey = ? AND round = ?",
+                (stream_name, provider_pubkey, round_num)).fetchone()
+            if existing:
+                return False
         if event_id:
             existing = conn.execute(
                 "SELECT 1 FROM observations WHERE event_id = ?",
@@ -603,10 +630,10 @@ class NetworkDB:
         conn.execute("""
             INSERT INTO observations
                 (stream_name, provider_pubkey, seq_num, observed_at,
-                 received_at, value, event_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 received_at, value, event_id, round)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (stream_name, provider_pubkey, seq_num, observed_at,
-              int(time.time()), value, event_id))
+              int(time.time()), value, event_id, round_num))
         conn.commit()
         return True
 

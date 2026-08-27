@@ -902,3 +902,32 @@ class TestBridgeObservationValues:
         v['unit'] = 'raw'
         assert StartupDag._numericObservationValue(v) == 7.0
 
+    # -- replay across the whole ingest path --
+
+    def test_republished_round_does_not_reach_the_engine_twice(self, harness):
+        """The failure the round column exists for: a bridge restart republishes
+        round 41373 with a fresh event id and a bumped seq_num, which passes
+        the event_id and seq_num guards. It must be dropped as a duplicate."""
+        self._setup(harness)
+        calls = []
+
+        def fake_predict(stream_name, provider_pubkey, observation, numeric):
+            calls.append(numeric)
+            return '0.5'
+
+        harness._relayPredict = fake_predict
+
+        def inbound(event_id, seq):
+            return types.SimpleNamespace(
+                stream_name='satori-84532-1', nostr_pubkey='bridgepub',
+                event_id=event_id,
+                observation=DatastreamObservation(
+                    stream_name='satori-84532-1', timestamp=1787313600,
+                    value=self._bridge(raw='1'), seq_num=seq))
+
+        asyncio.run(harness._networkProcessObservation(inbound('evt-a', 1)))
+        asyncio.run(harness._networkProcessObservation(inbound('evt-b', 7)))
+
+        assert len(calls) == 1, 'the replayed round must not re-run the engine'
+        obs = harness.networkDB.get_observations('satori-84532-1', 'bridgepub')
+        assert len(obs) == 1
