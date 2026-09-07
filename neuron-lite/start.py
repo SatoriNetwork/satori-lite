@@ -4428,7 +4428,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     )
                     predictions_collected += 1
                     # Clear the pending prediction
-                    model._pending_prediction = None
+                    del model._pending_prediction
 
             if predictions_collected > 0:
                 logging.info(f"Collected {predictions_collected} predictions from models", color='cyan')

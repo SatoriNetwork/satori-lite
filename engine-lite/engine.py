@@ -1096,15 +1096,14 @@ class StreamModel:
                 # The neuron will call engine.queuePrediction() after observation processing
                 debug(f"Prediction ready for batching: {stream_name} = {predictionValue}")
                 # Store in instance variable for neuron to collect
-                if not hasattr(self, '_pending_prediction'):
-                    self._pending_prediction = {
-                        'stream_uuid': self.streamUuid,
-                        'stream_name': stream_name,
-                        'value': predictionValue,
-                        't1_value': getattr(self, '_t1_value', None),
-                        'observed_at': observationTime,
-                        'hash': observationHash
-                    }
+                self._pending_prediction = {
+                    'stream_uuid': self.streamUuid,
+                    'stream_name': stream_name,
+                    'value': predictionValue,
+                    't1_value': getattr(self, '_t1_value', None),
+                    'observed_at': observationTime,
+                    'hash': observationHash
+                }
             else:
                 # Legacy: immediate publish
                 topic = self.publicationStream.streamId.jsonId
