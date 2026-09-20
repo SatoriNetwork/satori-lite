@@ -2036,11 +2036,12 @@
             </p>
         </div>
         <div class="dash-hero-meta">
-            <span class="dash-meta-pill" id="dashHeroSatoriPill">
+            <!-- Balances now live in MetaMask (Base migration); pills hidden. -->
+            <span class="dash-meta-pill" id="dashHeroSatoriPill" style="display:none;">
                 <i class="material-icons">savings</i>
                 <strong id="dashHeroSatori">-</strong> SATORIEVR
             </span>
-            <span class="dash-meta-pill" id="dashHeroEvrPill">
+            <span class="dash-meta-pill" id="dashHeroEvrPill" style="display:none;">
                 <i class="material-icons">bolt</i>
                 <strong id="dashHeroEvr">-</strong> EVR
             </span>
@@ -2179,6 +2180,63 @@
             </div>
         </div>
 
+        <!-- MetaMask / Base Card -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="base" draggable="true">
+            <div class="card h-100 d-flex flex-column">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">account_balance</i>
+                        SATORI on Base &amp; MetaMask
+                    </h5>
+                    <span class="text-muted drag-handle" title="Drag to reorder">
+                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                    </span>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3" style="font-size: 12px;">
+                        Satori rewards are moving to the SATORI token on Base. Your vault key
+                        <em>is</em> your Base wallet &mdash; import it into MetaMask to see your
+                        balance and claim. Your neuron keeps working exactly as before.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label">Your Base Address</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace" id="baseAddress" readonly placeholder="Loading..." style="font-size:0.8rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseAddress')" title="Copy">
+                                <i class="material-icons align-middle">content_copy</i>
+                            </button>
+                        </div>
+                        <div class="form-text text-muted" style="font-size:0.72rem;">Derived from your vault key &mdash; this is where your Base rewards land.</div>
+                    </div>
+                    <button class="btn btn-primary w-100 mb-3" onclick="addSatoriToMetaMask()" id="addToMetaMaskBtn">
+                        <i class="material-icons align-middle me-1">add_circle_outline</i>
+                        Add SATORI token to MetaMask
+                    </button>
+                    <div id="metaMaskStatus" class="small mb-3" style="display:none;"></div>
+                    <div class="text-center">
+                        <p id="showBaseKeyBtn" class="text-danger mb-2" style="cursor: pointer;" onclick="toggleBaseKey()">
+                            <i class="material-icons align-middle" style="font-size: 18px;">visibility</i>
+                            Show private key for MetaMask import
+                        </p>
+                        <div id="baseKeySection" style="display: none;">
+                            <p class="text-muted mb-2" style="cursor: pointer;" onclick="toggleBaseKey()">
+                                <i class="material-icons align-middle" style="font-size: 18px;">visibility_off</i>
+                                Hide private key
+                            </p>
+                            <div class="alert alert-warning" style="word-break: break-all;">
+                                <small><strong>Base private key (hex):</strong> import this into MetaMask &mdash; never share it.</small><br>
+                                <code id="basePrivateKey">Loading...</code>
+                            </div>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="copyBaseKey()">
+                                <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                                Copy private key
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Send SATORI Card -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="send" draggable="true">
             <div class="card h-100">
@@ -2202,13 +2260,13 @@
                                 <div class="form-check">
                                     <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
                                     <label class="form-check-label" for="sendFromVault">
-                                        Vault <small class="text-muted" id="vaultBalanceLabel">(--)</small>
+                                        Vault <small class="text-muted" id="vaultBalanceLabel" style="display:none;">(--)</small>
                                     </label>
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
                                     <label class="form-check-label" for="sendFromWallet">
-                                        Wallet (Identity) <small class="text-muted" id="walletBalanceLabel">(--)</small>
+                                        Wallet (Identity) <small class="text-muted" id="walletBalanceLabel" style="display:none;">(--)</small>
                                     </label>
                                 </div>
                             </div>
@@ -2243,8 +2301,8 @@
             </div>
         </div>
 
-        <!-- Balance Section -->
-        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="balance" draggable="true">
+        <!-- Balance Section (hidden: balances now live in MetaMask, Base migration) -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="balance" draggable="true" style="display:none;">
             <div class="card h-100 d-flex flex-column">
                 <div class="card-header card-header-3col">
                     <h5 class="mb-0">
@@ -3478,6 +3536,99 @@
             } else {
                 document.getElementById('identityNostrPubkey').value = 'Not available';
             }
+        }
+    }
+
+    // ── Base / MetaMask ──────────────────────────────────────────
+    // The vault key is the Base wallet: `/wallet/base` returns the vault's EVM
+    // address (where rewards land) and the 0x-hex key MetaMask imports, plus
+    // the SATORI-on-Base token + network params for wallet_watchAsset.
+    let baseTokenInfo = null;
+    let _baseKeyLoaded = null;
+
+    async function loadBaseIdentity() {
+        const result = await apiCall('/wallet/base');
+        const addrEl = document.getElementById('baseAddress');
+        if (!addrEl) return;
+        if (result && result.base_address) {
+            addrEl.value = result.base_address;
+            baseTokenInfo = result.token || null;
+            _baseKeyLoaded = result.private_key || null;
+        } else {
+            addrEl.value = 'Unavailable';
+        }
+    }
+
+    function toggleBaseKey() {
+        const section = document.getElementById('baseKeySection');
+        const btn = document.getElementById('showBaseKeyBtn');
+        if (section.style.display === 'none' || !section.style.display) {
+            document.getElementById('basePrivateKey').textContent = _baseKeyLoaded || 'Unavailable';
+            section.style.display = 'block';
+            btn.style.display = 'none';
+        } else {
+            section.style.display = 'none';
+            btn.style.display = 'block';
+        }
+    }
+
+    function copyBaseKey() {
+        const value = document.getElementById('basePrivateKey').textContent;
+        if (value && value !== 'Loading...' && value !== 'Unavailable') {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(value)
+                    .then(() => showToast('Private key copied to clipboard'))
+                    .catch(() => showToast('Failed to copy private key', true));
+            } else {
+                showToast('Clipboard not available (needs HTTPS or localhost)', true);
+            }
+        } else {
+            showToast('No private key to copy', true);
+        }
+    }
+
+    async function addSatoriToMetaMask() {
+        const status = document.getElementById('metaMaskStatus');
+        const show = (msg, ok) => {
+            status.style.display = 'block';
+            status.textContent = msg;
+            status.className = 'small mb-3 ' + (ok ? 'text-success' : 'text-danger');
+        };
+        if (!window.ethereum) {
+            show('MetaMask not detected. Install the MetaMask browser extension, then reload this page.', false);
+            return;
+        }
+        const t = baseTokenInfo;
+        if (!t) { show('Token info still loading — try again in a moment.', false); return; }
+        try {
+            // Make sure the Base network is present and selected before adding the token.
+            try {
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: t.chainIdHex }],
+                });
+            } catch (switchErr) {
+                if (switchErr && switchErr.code === 4902) {
+                    await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                            chainId: t.chainIdHex,
+                            chainName: t.chainName,
+                            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+                            rpcUrls: [t.rpcUrl],
+                            blockExplorerUrls: [t.explorerUrl],
+                        }],
+                    });
+                } else { throw switchErr; }
+            }
+            await window.ethereum.request({
+                method: 'wallet_watchAsset',
+                params: { type: 'ERC20', options: {
+                    address: t.address, symbol: t.symbol, decimals: t.decimals } },
+            });
+            show('SATORI added to MetaMask on ' + t.chainName + '. Your balance shows there.', true);
+        } catch (err) {
+            show('MetaMask request failed: ' + (err && err.message ? err.message : err), false);
         }
     }
 
@@ -6086,6 +6237,7 @@
             // Health check disabled to reduce API load
             // checkHealth();
             loadWalletAddresses();
+            loadBaseIdentity();  // Base/EVM address + token info for MetaMask
             loadAllBalances();  // Load both stake and live balances from ElectrumX
             loadRewardAddress();
             // Staking/pool API calls moved to dedicated Stake Management page

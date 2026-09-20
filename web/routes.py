@@ -24,6 +24,22 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
+# The Satori ERC-20 on Base and its network params, for MetaMask import
+# (wallet_addEthereumChain + wallet_watchAsset). Defaults to Base Sepolia
+# (the live deployment); env-overridable for the eventual mainnet flip.
+# Contract source: Satori/contract/satori/deployments/baseSepolia.json.
+BASE_TOKEN_INFO = {
+    'address': os.environ.get(
+        'BASE_SATORI_TOKEN', '0xc9166f739dE68e5E611bAF47364f641D671b6D5a'),
+    'symbol': 'SATORI',
+    'decimals': 18,
+    'chainIdHex': os.environ.get('BASE_CHAIN_ID_HEX', '0x14a34'),  # 84532
+    'chainName': os.environ.get('BASE_CHAIN_NAME', 'Base Sepolia'),
+    'rpcUrl': os.environ.get('BASE_RPC_URL', 'https://sepolia.base.org'),
+    'explorerUrl': os.environ.get(
+        'BASE_EXPLORER_URL', 'https://sepolia.basescan.org'),
+}
+
 from web.balance_cache import get_balance_snapshot, get_wallet_balance
 
 
@@ -1261,6 +1277,34 @@ def register_routes(app):
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         return jsonify({'error': 'Identity wallet not initialized'}), 500
+
+    @app.route('/api/wallet/base')
+    @login_required
+    def api_wallet_base():
+        """The vault key as its Base/EVM identity, for import into MetaMask.
+
+        The vault's Evrmore key and its EVM key are the same secp256k1 keypair,
+        so `ethAddress` is the address central keys the Merkle reward tree by
+        (derived from the vault pubkey) and `private_key` is the 0x-hex form
+        MetaMask imports. Requires a decrypted vault (login_required)."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            vault = wallet_manager.vault
+            return jsonify({
+                'base_address': vault.ethAddress,
+                'private_key': vault.account.key.to_0x_hex(),
+                'token': BASE_TOKEN_INFO,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/base/token-info')
+    @login_required
+    def api_wallet_base_token_info():
+        """Base token + network parameters for MetaMask (add-network / watchAsset)."""
+        return jsonify(BASE_TOKEN_INFO)
 
     @app.route('/api/wallet/send-from-wallet', methods=['POST'])
     @login_required
