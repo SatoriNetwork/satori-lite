@@ -2218,6 +2218,44 @@
             </div>
         </div>
 
+        <!-- Claim Airdrop Card -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="airdrop" draggable="true">
+            <div class="card h-100 d-flex flex-column">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">card_giftcard</i>
+                        Claim Airdrop
+                    </h5>
+                    <div class="card-header-actions">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAirdrop(true)" title="Refresh">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                        </button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="text-muted" style="font-size: 12px;">Vested &amp; claimable now</div>
+                        <div><strong id="airdropClaimable" style="font-size: 1.8rem;">–</strong> <span class="text-muted">SATORI</span></div>
+                        <div class="text-muted" style="font-size: 11px;">
+                            allocated <span id="airdropAllocation">–</span> · already claimed <span id="airdropClaimed">–</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary w-100" id="airdropBtn" onclick="doClaimAirdrop()">
+                        <i class="material-icons align-middle me-1">card_giftcard</i>
+                        Claim Airdrop
+                    </button>
+                    <div id="airdropStatus" class="small mt-3" style="display:none;"></div>
+                    <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
+                        Your airdrop vests over time; you can claim the vested portion whenever.
+                        The neuron claims for you with your vault key (needs a little ETH for gas).
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <!-- MetaMask / Base Card -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="base" draggable="true">
             <div class="card h-100 d-flex flex-column">
@@ -3722,6 +3760,58 @@
             }
         } catch (e) {
             show('Claim failed: ' + e, false);
+        } finally {
+            btn.innerHTML = orig;
+            btn.disabled = false;
+        }
+    }
+
+    // ── Claim Airdrop (neuron claims with the vault key; no proof needed) ─
+    async function loadAirdrop(force) {
+        const el = document.getElementById('airdropClaimable');
+        if (!el) return;
+        try {
+            const r = await apiCall('/wallet/base/airdrop');
+            const btn = document.getElementById('airdropBtn');
+            if (r && !r.error) {
+                el.textContent = _fmtSatori(r.claimable);
+                document.getElementById('airdropAllocation').textContent = _fmtSatori(r.allocation);
+                document.getElementById('airdropClaimed').textContent = _fmtSatori(r.claimed);
+                if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
+            } else {
+                el.textContent = '–';
+                if (btn) btn.disabled = true;
+            }
+        } catch (e) {
+            el.textContent = '–';
+        }
+    }
+
+    async function doClaimAirdrop() {
+        const status = document.getElementById('airdropStatus');
+        const btn = document.getElementById('airdropBtn');
+        const show = (msg, ok) => {
+            status.style.display = 'block';
+            status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
+            status.innerHTML = msg;
+        };
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="material-icons align-middle me-1">hourglass_empty</i> Claiming…';
+        try {
+            const r = await apiCall('/wallet/base/airdrop/claim', 'POST');
+            if (r && r.success) {
+                const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
+                    ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+                const url = explorer + '/tx/' + r.txhash;
+                show('Claimed ' + _fmtSatori(r.claimed) + ' SATORI from the airdrop. '
+                    + '<a href="' + url + '" target="_blank" rel="noopener">View transaction</a>', true);
+                loadAirdrop(true);
+            } else {
+                show((r && r.error) ? r.error : 'Airdrop claim failed', false);
+            }
+        } catch (e) {
+            show('Airdrop claim failed: ' + e, false);
         } finally {
             btn.innerHTML = orig;
             btn.disabled = false;
@@ -6335,6 +6425,7 @@
             loadWalletAddresses();
             loadBaseIdentity();  // Base/EVM address + token info for MetaMask
             loadClaimable();  // Base reward claim amount
+            loadAirdrop();  // Base airdrop claim amount
             loadAllBalances();  // Load both stake and live balances from ElectrumX
             loadRewardAddress();
             // Staking/pool API calls moved to dedicated Stake Management page

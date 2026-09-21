@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_RPC_URL = "https://sepolia.base.org"
 DEFAULT_MERKLE = "0xbA81c904b533C1B0e006c35A46bee74F75239AFA"  # Base Sepolia SatoriMerkle
+DEFAULT_REWARDS = "0xA9528eE52c4B0A18406BD7cbaA03cA9A000a9Dc7"  # Base Sepolia SatoriRewards
 
 MERKLE_ABI = [
     {
@@ -45,32 +46,62 @@ MERKLE_ABI = [
     },
 ]
 
+REWARDS_ABI = [
+    {
+        "name": "claimAirdrop",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [],
+        "outputs": [],
+    },
+    {
+        "name": "claimableAirdrop",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "user", "type": "address"}],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "name": "airdropAllocation",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "", "type": "address"}],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+    {
+        "name": "airdropClaimed",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "", "type": "address"}],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+]
+
 
 class BaseClaimer:
-    """Reads claim state and submits claimMerkle on Base."""
+    """Reads claim state and submits claims on Base — the Merkle reward drop
+    (claimMerkle, needs a proof from central) and the airdrop (claimAirdrop, no
+    proof; the contract computes vesting)."""
 
-    def __init__(self, rpc_url: str = None, merkle_address: str = None):
+    def __init__(self, rpc_url: str = None, merkle_address: str = None,
+                 rewards_address: str = None):
         from web3 import Web3
 
         self.rpc_url = rpc_url or os.getenv("BASE_RPC_URL", DEFAULT_RPC_URL)
         self.merkle_address = Web3.to_checksum_address(
             merkle_address or os.getenv("BASE_SATORI_MERKLE", DEFAULT_MERKLE)
         )
+        self.rewards_address = Web3.to_checksum_address(
+            rewards_address or os.getenv("BASE_SATORI_REWARDS", DEFAULT_REWARDS)
+        )
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
         self.contract = self.w3.eth.contract(address=self.merkle_address, abi=MERKLE_ABI)
+        self.rewards = self.w3.eth.contract(address=self.rewards_address, abi=REWARDS_ABI)
 
-    def already_minted(self, address: str) -> int:
-        """Wei already minted to `address` through the Merkle channel."""
-        from web3 import Web3
-        return int(self.contract.functions.alreadyMintedTo(
-            Web3.to_checksum_address(address)).call())
-
-    def claim(self, private_key: str, lifetime_entitlement: int, proof: List[str]) -> str:
-        """Submit claimMerkle(lifetimeEntitlement, proof) signed by `private_key`
-        (the vault key). Mints the delta over what's already been claimed to
-        msg.sender. Returns the tx hash. Raises on send/revert (e.g. no gas)."""
+    def _send(self, private_key: str, fn) -> str:
+        """Build, sign (with the vault key), send and confirm a contract call.
+        Returns the 0x tx hash. Raises on send/revert (e.g. no gas)."""
         account = self.w3.eth.account.from_key(private_key)
-        fn = self.contract.functions.claimMerkle(int(lifetime_entitlement), list(proof))
         gas_price = self.w3.eth.gas_price
         tx = fn.build_transaction({
             "from": account.address,
@@ -85,5 +116,35 @@ class BaseClaimer:
         h = txhash.hex()
         h = h if h.startswith("0x") else "0x" + h
         if receipt.status != 1:
-            raise RuntimeError(f"claim transaction reverted: {h}")
+            raise RuntimeError(f"transaction reverted: {h}")
         return h
+
+    # ---- Merkle reward drop ------------------------------------------------
+    def already_minted(self, address: str) -> int:
+        """Wei already minted to `address` through the Merkle channel."""
+        from web3 import Web3
+        return int(self.contract.functions.alreadyMintedTo(
+            Web3.to_checksum_address(address)).call())
+
+    def claim(self, private_key: str, lifetime_entitlement: int, proof: List[str]) -> str:
+        """Submit claimMerkle(lifetimeEntitlement, proof) signed by the vault
+        key. Mints the delta over what's already been claimed to msg.sender."""
+        return self._send(private_key, self.contract.functions.claimMerkle(
+            int(lifetime_entitlement), list(proof)))
+
+    # ---- Airdrop -----------------------------------------------------------
+    def airdrop_status(self, address: str) -> dict:
+        """{allocation, claimed, claimable} in wei for `address`. `claimable` is
+        the vested-and-unclaimed amount (the contract applies the vest curve)."""
+        from web3 import Web3
+        a = Web3.to_checksum_address(address)
+        return {
+            "allocation": int(self.rewards.functions.airdropAllocation(a).call()),
+            "claimed": int(self.rewards.functions.airdropClaimed(a).call()),
+            "claimable": int(self.rewards.functions.claimableAirdrop(a).call()),
+        }
+
+    def claim_airdrop(self, private_key: str) -> str:
+        """Submit claimAirdrop() signed by the vault key. Mints the vested,
+        unclaimed airdrop to msg.sender. No proof needed."""
+        return self._send(private_key, self.rewards.functions.claimAirdrop())

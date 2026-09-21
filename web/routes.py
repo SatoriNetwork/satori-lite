@@ -1379,6 +1379,57 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/wallet/base/airdrop')
+    @login_required
+    def api_wallet_base_airdrop():
+        """Airdrop claim status: total allocation, already claimed, and what is
+        currently vested-and-claimable (the contract computes vesting)."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            from satorineuron.base_claim import BaseClaimer
+            address = wallet_manager.vault.ethAddress
+            s = BaseClaimer().airdrop_status(address)
+            WEI = 10 ** 18
+            return jsonify({
+                'address': address,
+                'allocation_wei': str(s['allocation']),
+                'claimed_wei': str(s['claimed']),
+                'claimable_wei': str(s['claimable']),
+                'allocation': s['allocation'] / WEI,
+                'claimed': s['claimed'] / WEI,
+                'claimable': s['claimable'] / WEI,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/base/airdrop/claim', methods=['POST'])
+    @login_required
+    def api_wallet_base_airdrop_claim():
+        """Claim the neuron's vested airdrop: submit claimAirdrop() signed with
+        the vault key. No proof needed — the contract computes vesting. Needs a
+        little ETH on the user's Base address for gas."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            from satorineuron.base_claim import BaseClaimer
+            vault = wallet_manager.vault
+            claimer = BaseClaimer()
+            status = claimer.airdrop_status(vault.ethAddress)
+            if status['claimable'] <= 0:
+                return jsonify({'error': 'Nothing to claim from the airdrop right now.'}), 400
+            txhash = claimer.claim_airdrop(vault.account.key.to_0x_hex())
+            return jsonify({
+                'success': True,
+                'txhash': txhash,
+                'claimed_wei': str(status['claimable']),
+                'claimed': status['claimable'] / 10 ** 18,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/wallet/send-from-wallet', methods=['POST'])
     @login_required
     def api_wallet_send_from_wallet():
