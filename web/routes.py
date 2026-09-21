@@ -24,23 +24,35 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
-# The Satori ERC-20 on Base and its network params, for MetaMask import
-# (wallet_addEthereumChain + wallet_watchAsset). Defaults to Base Sepolia
-# (the live deployment); env-overridable for the eventual mainnet flip.
-# Contract source: Satori/contract/satori/deployments/baseSepolia.json.
-BASE_TOKEN_INFO = {
-    'address': os.environ.get(
-        'BASE_SATORI_TOKEN', '0xc9166f739dE68e5E611bAF47364f641D671b6D5a'),
-    'symbol': 'SATORI',
-    'decimals': 18,
-    'chainIdHex': os.environ.get('BASE_CHAIN_ID_HEX', '0x14a34'),  # 84532
-    'chainName': os.environ.get('BASE_CHAIN_NAME', 'Base Sepolia'),
-    'rpcUrl': os.environ.get('BASE_RPC_URL', 'https://sepolia.base.org'),
-    'explorerUrl': os.environ.get(
-        'BASE_EXPLORER_URL', 'https://sepolia.basescan.org'),
-}
-
 from web.balance_cache import get_balance_snapshot, get_wallet_balance
+
+
+def _base_token_info() -> dict:
+    """The Satori ERC-20 on Base + network params for MetaMask
+    (wallet_addEthereumChain + wallet_watchAsset), from the single-source config
+    (satorineuron.base_config → central), so a redeploy needs no neuron change."""
+    from satorineuron.base_config import base_config
+    cfg = base_config()
+    return {
+        'address': cfg['token'],
+        'symbol': cfg.get('symbol', 'SATORI'),
+        'decimals': cfg.get('decimals', 18),
+        'chainIdHex': hex(int(cfg['chainId'])),
+        'chainName': cfg.get('chainName', 'Base'),
+        'rpcUrl': cfg['rpcUrl'],
+        'explorerUrl': cfg.get('explorerUrl', ''),
+    }
+
+
+def _base_claimer():
+    """A BaseClaimer wired to the current Base addresses (single-source config)."""
+    from satorineuron.base_claim import BaseClaimer
+    from satorineuron.base_config import base_config
+    cfg = base_config()
+    return BaseClaimer(
+        rpc_url=cfg['rpcUrl'],
+        merkle_address=cfg['merkle'],
+        rewards_address=cfg['rewards'])
 
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
@@ -1295,7 +1307,7 @@ def register_routes(app):
             return jsonify({
                 'base_address': vault.ethAddress,
                 'private_key': vault.account.key.to_0x_hex(),
-                'token': BASE_TOKEN_INFO,
+                'token': _base_token_info(),
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500
@@ -1304,7 +1316,7 @@ def register_routes(app):
     @login_required
     def api_wallet_base_token_info():
         """Base token + network parameters for MetaMask (add-network / watchAsset)."""
-        return jsonify(BASE_TOKEN_INFO)
+        return jsonify(_base_token_info())
 
     def _fetch_base_proof(address):
         """Fetch this address's Merkle proof from central. Returns the entry
@@ -1328,11 +1340,10 @@ def register_routes(app):
         if not (wallet_manager and wallet_manager.vault):
             return jsonify({'error': 'Vault not initialized'}), 500
         try:
-            from satorineuron.base_claim import BaseClaimer
             address = wallet_manager.vault.ethAddress
             entry = _fetch_base_proof(address)
             total = int(entry['amountWei']) if entry else 0
-            claimed = BaseClaimer().already_minted(address)
+            claimed = _base_claimer().already_minted(address)
             claimable = max(0, total - claimed)
             WEI = 10 ** 18
             return jsonify({
@@ -1358,13 +1369,12 @@ def register_routes(app):
         if not (wallet_manager and wallet_manager.vault):
             return jsonify({'error': 'Vault not initialized'}), 500
         try:
-            from satorineuron.base_claim import BaseClaimer
             vault = wallet_manager.vault
             address = vault.ethAddress
             entry = _fetch_base_proof(address)
             if not entry:
                 return jsonify({'error': 'Nothing to claim yet — your address is not in the current drop.'}), 400
-            claimer = BaseClaimer()
+            claimer = _base_claimer()
             total = int(entry['amountWei'])
             claimed = claimer.already_minted(address)
             if total <= claimed:
@@ -1388,9 +1398,8 @@ def register_routes(app):
         if not (wallet_manager and wallet_manager.vault):
             return jsonify({'error': 'Vault not initialized'}), 500
         try:
-            from satorineuron.base_claim import BaseClaimer
             address = wallet_manager.vault.ethAddress
-            s = BaseClaimer().airdrop_status(address)
+            s = _base_claimer().airdrop_status(address)
             WEI = 10 ** 18
             return jsonify({
                 'address': address,
@@ -1414,9 +1423,8 @@ def register_routes(app):
         if not (wallet_manager and wallet_manager.vault):
             return jsonify({'error': 'Vault not initialized'}), 500
         try:
-            from satorineuron.base_claim import BaseClaimer
             vault = wallet_manager.vault
-            claimer = BaseClaimer()
+            claimer = _base_claimer()
             status = claimer.airdrop_status(vault.ethAddress)
             if status['claimable'] <= 0:
                 return jsonify({'error': 'Nothing to claim from the airdrop right now.'}), 400

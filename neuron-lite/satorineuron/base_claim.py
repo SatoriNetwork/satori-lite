@@ -10,14 +10,9 @@ little ETH on Base. If it has none, the send fails with a clear error.
 """
 
 import logging
-import os
 from typing import List
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_RPC_URL = "https://sepolia.base.org"
-DEFAULT_MERKLE = "0xbA81c904b533C1B0e006c35A46bee74F75239AFA"  # Base Sepolia SatoriMerkle
-DEFAULT_REWARDS = "0xA9528eE52c4B0A18406BD7cbaA03cA9A000a9Dc7"  # Base Sepolia SatoriRewards
 
 MERKLE_ABI = [
     {
@@ -83,17 +78,14 @@ class BaseClaimer:
     (claimMerkle, needs a proof from central) and the airdrop (claimAirdrop, no
     proof; the contract computes vesting)."""
 
-    def __init__(self, rpc_url: str = None, merkle_address: str = None,
-                 rewards_address: str = None):
+    def __init__(self, rpc_url: str, merkle_address: str, rewards_address: str):
+        """Addresses are injected (from satorineuron.base_config) so nothing here
+        hardcodes a deployment — a Base redeploy changes only central's config."""
         from web3 import Web3
 
-        self.rpc_url = rpc_url or os.getenv("BASE_RPC_URL", DEFAULT_RPC_URL)
-        self.merkle_address = Web3.to_checksum_address(
-            merkle_address or os.getenv("BASE_SATORI_MERKLE", DEFAULT_MERKLE)
-        )
-        self.rewards_address = Web3.to_checksum_address(
-            rewards_address or os.getenv("BASE_SATORI_REWARDS", DEFAULT_REWARDS)
-        )
+        self.rpc_url = rpc_url
+        self.merkle_address = Web3.to_checksum_address(merkle_address)
+        self.rewards_address = Web3.to_checksum_address(rewards_address)
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
         self.contract = self.w3.eth.contract(address=self.merkle_address, abi=MERKLE_ABI)
         self.rewards = self.w3.eth.contract(address=self.rewards_address, abi=REWARDS_ABI)
