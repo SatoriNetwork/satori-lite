@@ -1306,6 +1306,79 @@ def register_routes(app):
         """Base token + network parameters for MetaMask (add-network / watchAsset)."""
         return jsonify(BASE_TOKEN_INFO)
 
+    def _fetch_base_proof(address):
+        """Fetch this address's Merkle proof from central. Returns the entry
+        dict ({amountWei, amount, proof, root}) on 200, None on 404 (not in the
+        current drop), or raises on any other/central-unreachable error."""
+        api_url = current_app.config.get('SATORI_API_URL', get_api_url())
+        resp = requests.get(f"{api_url}/api/v1/merkle/proof/{address}", timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 404:
+            return None
+        raise RuntimeError(f"central returned {resp.status_code} for proof")
+
+    @app.route('/api/wallet/base/claimable')
+    @login_required
+    def api_wallet_base_claimable():
+        """How much this neuron can claim on Base: total lifetime entitlement
+        (from central's published drop) minus what's already been minted
+        on-chain."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            from satorineuron.base_claim import BaseClaimer
+            address = wallet_manager.vault.ethAddress
+            entry = _fetch_base_proof(address)
+            total = int(entry['amountWei']) if entry else 0
+            claimed = BaseClaimer().already_minted(address)
+            claimable = max(0, total - claimed)
+            WEI = 10 ** 18
+            return jsonify({
+                'address': address,
+                'total_wei': str(total),
+                'claimed_wei': str(claimed),
+                'claimable_wei': str(claimable),
+                'total': total / WEI,
+                'claimed': claimed / WEI,
+                'claimable': claimable / WEI,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/base/claim', methods=['POST'])
+    @login_required
+    def api_wallet_base_claim():
+        """Claim the neuron's Base rewards: fetch the proof from central and
+        submit claimMerkle signed with the vault key. The neuron holds the key
+        (it signs predictions), so it claims for itself. Needs a little ETH on
+        the user's Base address for gas."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            from satorineuron.base_claim import BaseClaimer
+            vault = wallet_manager.vault
+            address = vault.ethAddress
+            entry = _fetch_base_proof(address)
+            if not entry:
+                return jsonify({'error': 'Nothing to claim yet — your address is not in the current drop.'}), 400
+            claimer = BaseClaimer()
+            total = int(entry['amountWei'])
+            claimed = claimer.already_minted(address)
+            if total <= claimed:
+                return jsonify({'error': 'Nothing to claim — you are already up to date.'}), 400
+            txhash = claimer.claim(vault.account.key.to_0x_hex(), total, entry['proof'])
+            return jsonify({
+                'success': True,
+                'txhash': txhash,
+                'claimed_wei': str(total - claimed),
+                'claimed': (total - claimed) / 10 ** 18,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/wallet/send-from-wallet', methods=['POST'])
     @login_required
     def api_wallet_send_from_wallet():

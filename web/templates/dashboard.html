@@ -2180,6 +2180,44 @@
             </div>
         </div>
 
+        <!-- Claim SATORI Rewards Card -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="claim" draggable="true">
+            <div class="card h-100 d-flex flex-column">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">redeem</i>
+                        Claim SATORI Rewards
+                    </h5>
+                    <div class="card-header-actions">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadClaimable(true)" title="Refresh">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                        </button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="text-muted" style="font-size: 12px;">Claimable now</div>
+                        <div><strong id="claimClaimable" style="font-size: 1.8rem;">–</strong> <span class="text-muted">SATORI</span></div>
+                        <div class="text-muted" style="font-size: 11px;">
+                            earned <span id="claimTotal">–</span> · already claimed <span id="claimClaimed">–</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary w-100" id="claimBtn" onclick="doClaim()">
+                        <i class="material-icons align-middle me-1">redeem</i>
+                        Claim
+                    </button>
+                    <div id="claimStatus" class="small mt-3" style="display:none;"></div>
+                    <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
+                        The neuron claims for you with your vault key. Your Base address needs a
+                        little ETH for gas.
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <!-- MetaMask / Base Card -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="base" draggable="true">
             <div class="card h-100 d-flex flex-column">
@@ -3629,6 +3667,64 @@
             show('SATORI added to MetaMask on ' + t.chainName + '. Your balance shows there.', true);
         } catch (err) {
             show('MetaMask request failed: ' + (err && err.message ? err.message : err), false);
+        }
+    }
+
+    // ── Claim SATORI rewards (neuron claims with the vault key) ──────────
+    function _fmtSatori(n) {
+        return (typeof n === 'number')
+            ? n.toLocaleString(undefined, { maximumFractionDigits: 8 })
+            : (n == null ? '–' : n);
+    }
+
+    async function loadClaimable(force) {
+        const el = document.getElementById('claimClaimable');
+        if (!el) return;
+        try {
+            const r = await apiCall('/wallet/base/claimable');
+            const btn = document.getElementById('claimBtn');
+            if (r && !r.error) {
+                el.textContent = _fmtSatori(r.claimable);
+                document.getElementById('claimTotal').textContent = _fmtSatori(r.total);
+                document.getElementById('claimClaimed').textContent = _fmtSatori(r.claimed);
+                if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
+            } else {
+                el.textContent = '–';
+                if (btn) btn.disabled = true;
+            }
+        } catch (e) {
+            el.textContent = '–';
+        }
+    }
+
+    async function doClaim() {
+        const status = document.getElementById('claimStatus');
+        const btn = document.getElementById('claimBtn');
+        const show = (msg, ok) => {
+            status.style.display = 'block';
+            status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
+            status.innerHTML = msg;
+        };
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="material-icons align-middle me-1">hourglass_empty</i> Claiming…';
+        try {
+            const r = await apiCall('/wallet/base/claim', 'POST');
+            if (r && r.success) {
+                const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
+                    ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+                const url = explorer + '/tx/' + r.txhash;
+                show('Claimed ' + _fmtSatori(r.claimed) + ' SATORI. '
+                    + '<a href="' + url + '" target="_blank" rel="noopener">View transaction</a>', true);
+                loadClaimable(true);
+            } else {
+                show((r && r.error) ? r.error : 'Claim failed', false);
+            }
+        } catch (e) {
+            show('Claim failed: ' + e, false);
+        } finally {
+            btn.innerHTML = orig;
+            btn.disabled = false;
         }
     }
 
@@ -6238,6 +6334,7 @@
             // checkHealth();
             loadWalletAddresses();
             loadBaseIdentity();  // Base/EVM address + token info for MetaMask
+            loadClaimable();  // Base reward claim amount
             loadAllBalances();  // Load both stake and live balances from ElectrumX
             loadRewardAddress();
             // Staking/pool API calls moved to dedicated Stake Management page
