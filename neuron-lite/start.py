@@ -78,6 +78,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
+        self._baseDirections: dict = {}  # base streamId -> latest on-chain direction (1 up / 2 down)
+        self._basePredictThread = None
         self._channelListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelSettlementListeners: dict = {}  # relay_url -> asyncio.Task
@@ -177,6 +179,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             target=self._runNetworkClient,
             daemon=True)
         self.networkThread.start()
+        self._startBasePredictLoop()
 
     def _runNetworkClient(self):
         """Background thread entry: runs asyncio event loop with crash recovery."""
@@ -971,6 +974,92 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(
                 f'Network: listener stopped on {relay_url}: {e}')
 
+    # ── On-chain (Base) prediction ──────────────────────────────────────
+    def _basePredictEnabled(self) -> bool:
+        return bool(config.get().get('predict base on-chain', False))
+
+    def _recordBaseDirection(self, stream_name, forecast, latest):
+        """Record the latest UP/DOWN for a base stream (satori-<chainId>-<streamId>)
+        so the daily on-chain predictor can submit it. In-memory; refreshed each
+        observation. No-op for non-base streams / other chains."""
+        try:
+            from satorineuron.base_predict import parse_base_stream, direction_from
+            from satorineuron.base_config import base_config
+            parsed = parse_base_stream(stream_name)
+            if not parsed:
+                return
+            chain_id, stream_id = parsed
+            if chain_id != int(base_config().get('chainId', 0)):
+                return
+            self._baseDirections[stream_id] = direction_from(forecast, latest)
+        except Exception as e:
+            logging.debug(f'base direction record skipped for {stream_name}: {e}')
+
+    def submitBasePredictions(self):
+        """Once per round: if enabled and the vault is unlocked, submit ONE
+        batched on-chain prediction for all base streams we have a direction for.
+        Skips (returns None) if disabled, vault locked, nothing to predict, or we
+        already predicted this round. Signs with the vault key; needs gas ETH."""
+        if not self._basePredictEnabled():
+            return None
+        if not self._baseDirections:
+            return None
+        try:
+            from satorineuron.base_predict import BasePredictor, build_requests
+            from satorineuron.base_config import base_config
+            cfg = base_config()
+            # Vault must be unlocked to sign (skip-if-locked, per design).
+            try:
+                vault = self.vault
+                address = vault.ethAddress
+                private_key = vault.account.key.to_0x_hex()
+            except Exception:
+                logging.info('base predict: vault locked, skipping this round', color='yellow')
+                return None
+            predictor = BasePredictor(
+                rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'], games_address=cfg['games'])
+            if predictor.already_predicted(address):
+                logging.info('base predict: already predicted this round', color='cyan')
+                return None
+            requests = build_requests(dict(self._baseDirections), predictor)
+            if not requests:
+                return None
+            txhash = predictor.predict(private_key, requests)
+            logging.info(
+                f'base predict: submitted {len(requests)} on-chain prediction(s), {txhash}',
+                color='green')
+            return txhash
+        except Exception as e:
+            logging.warning(f'base predict submission failed (will retry next round): {e}')
+            return None
+
+    def _startBasePredictLoop(self):
+        if self._basePredictThread is not None:
+            return
+        self._basePredictThread = threading.Thread(
+            target=self._basePredictLoop, daemon=True)
+        self._basePredictThread.start()
+
+    def _basePredictLoop(self):
+        """Fire submitBasePredictions once per day at a fixed UTC hour (before
+        the on-chain round is scored). The submit itself no-ops unless the
+        toggle is on, so the loop is cheap when disabled."""
+        from datetime import datetime, timezone, timedelta
+        while True:
+            try:
+                hour = int(config.get().get('base predict hour utc', 20))
+            except Exception:
+                hour = 20
+            now = datetime.now(timezone.utc)
+            target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            time.sleep(max(1.0, (target - now).total_seconds()))
+            try:
+                self.submitBasePredictions()
+            except Exception as e:
+                logging.warning(f'base predict loop error: {e}')
+
     async def _networkRunEngine(self, stream_name: str, provider_pubkey: str,
                                 observation):
         """Heavy engine: predict via the shared per-stream StreamModel.
@@ -997,6 +1086,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if prediction is not None:
                 value_str = prediction
                 method = 'engine'
+                # For base streams, remember the latest UP/DOWN so the daily
+                # on-chain predictor can submit it (see submitBasePredictions).
+                self._recordBaseDirection(stream_name, prediction, numeric_value)
 
         if value_str is None:
             # Echo fallback: non-numeric stream, or engine produced no forecast.

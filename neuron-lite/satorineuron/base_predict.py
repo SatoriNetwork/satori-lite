@@ -72,6 +72,22 @@ def direction_from(forecast, latest) -> int:
     return UP if float(forecast) > float(latest) else DOWN
 
 
+def build_requests(directions: dict, predictor) -> List[Tuple[int, int]]:
+    """Turn {streamId: direction} into [(gameId, direction)] for the batched
+    predict, resolving each stream's binary gameId and skipping streams with no
+    game (gameId 0) or a resolution error."""
+    requests = []
+    for stream_id, direction in directions.items():
+        try:
+            game_id = predictor.game_for_stream(stream_id)
+        except Exception as e:
+            logger.warning("base predict: could not resolve game for stream %s: %s", stream_id, e)
+            continue
+        if game_id and int(game_id) != 0:
+            requests.append((int(game_id), int(direction)))
+    return requests
+
+
 class BasePredictor:
     """Reads round/game state and submits the batched on-chain prediction."""
 

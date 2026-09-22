@@ -1438,6 +1438,27 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/settings/base-predict', methods=['GET'])
+    @login_required
+    def api_get_base_predict():
+        """Current state of the 'predict base streams on-chain' toggle."""
+        from satorineuron import config
+        return jsonify({
+            'enabled': bool(config.get().get('predict base on-chain', False)),
+            'hour_utc': int(config.get().get('base predict hour utc', 20)),
+        })
+
+    @app.route('/api/settings/base-predict', methods=['POST'])
+    @login_required
+    def api_set_base_predict():
+        """Turn on/off submitting predictions to Base on-chain. Off by default;
+        it spends gas (a Base transaction once a day)."""
+        from satorineuron import config
+        data = request.json or {}
+        enabled = bool(data.get('enabled', False))
+        config.add(data={'predict base on-chain': enabled})
+        return jsonify({'success': True, 'enabled': enabled})
+
     @app.route('/api/wallet/send-from-wallet', methods=['POST'])
     @login_required
     def api_wallet_send_from_wallet():
