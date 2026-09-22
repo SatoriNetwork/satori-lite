@@ -16,6 +16,8 @@ import logging
 import re
 from typing import List, Optional, Tuple
 
+from eth_utils import to_checksum_address
+
 logger = logging.getLogger(__name__)
 
 UP = 1
@@ -92,23 +94,19 @@ class BasePredictor:
     """Reads round/game state and submits the batched on-chain prediction."""
 
     def __init__(self, rpc_url: str, engine_address: str, games_address: str):
-        from web3 import Web3
-        self.rpc_url = rpc_url
-        self.engine_address = Web3.to_checksum_address(engine_address)
-        self.games_address = Web3.to_checksum_address(games_address)
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
-        self.engine = self.w3.eth.contract(address=self.engine_address, abi=ENGINE_ABI)
-        self.games = self.w3.eth.contract(address=self.games_address, abi=GAMES_ABI)
+        from satorilib.chain.evm import EvmClient
+        self.client = EvmClient(rpc_url)
+        self.engine = self.client.contract(engine_address, ENGINE_ABI)
+        self.games = self.client.contract(games_address, GAMES_ABI)
 
     def current_round(self) -> int:
         """UTC-day round index (matches SatoriToken.getCurrentRound = block.timestamp/86400)."""
-        return int(self.w3.eth.get_block("latest")["timestamp"]) // TIME_UNIT_SECONDS
+        return self.client.latest_timestamp() // TIME_UNIT_SECONDS
 
     def already_predicted(self, address: str) -> bool:
         """True if this address has already submitted its one batch this round."""
-        from web3 import Web3
         count = self.engine.functions.predictedStreamsCount(
-            Web3.to_checksum_address(address), self.current_round()).call()
+            to_checksum_address(address), self.current_round()).call()
         return int(count) != 0
 
     def game_for_stream(self, stream_id: int) -> int:
@@ -121,21 +119,6 @@ class BasePredictor:
         if not requests:
             raise ValueError("no predictions to submit")
         payloads = [(int(game_id), bytes([int(direction)])) for game_id, direction in requests]
-        fn = self.engine.functions.predictMultipleWithPayloads(payloads)
-        account = self.w3.eth.account.from_key(private_key)
-        gas_price = self.w3.eth.gas_price
-        tx = fn.build_transaction({
-            "from": account.address,
-            "nonce": self.w3.eth.get_transaction_count(account.address),
-            "chainId": self.w3.eth.chain_id,
-            "maxFeePerGas": gas_price * 2,
-            "maxPriorityFeePerGas": gas_price,
-        })
-        signed = account.sign_transaction(tx)
-        txhash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = self.w3.eth.wait_for_transaction_receipt(txhash)
-        h = txhash.hex()
-        h = h if h.startswith("0x") else "0x" + h
-        if receipt.status != 1:
-            raise RuntimeError(f"prediction transaction reverted: {h}")
-        return h
+        return self.client.send(
+            self.engine.functions.predictMultipleWithPayloads(payloads),
+            private_key=private_key)

@@ -12,6 +12,8 @@ little ETH on Base. If it has none, the send fails with a clear error.
 import logging
 from typing import List
 
+from eth_utils import to_checksum_address
+
 logger = logging.getLogger(__name__)
 
 MERKLE_ABI = [
@@ -80,56 +82,31 @@ class BaseClaimer:
 
     def __init__(self, rpc_url: str, merkle_address: str, rewards_address: str):
         """Addresses are injected (from satorineuron.base_config) so nothing here
-        hardcodes a deployment — a Base redeploy changes only central's config."""
-        from web3 import Web3
-
-        self.rpc_url = rpc_url
-        self.merkle_address = Web3.to_checksum_address(merkle_address)
-        self.rewards_address = Web3.to_checksum_address(rewards_address)
-        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
-        self.contract = self.w3.eth.contract(address=self.merkle_address, abi=MERKLE_ABI)
-        self.rewards = self.w3.eth.contract(address=self.rewards_address, abi=REWARDS_ABI)
-
-    def _send(self, private_key: str, fn) -> str:
-        """Build, sign (with the vault key), send and confirm a contract call.
-        Returns the 0x tx hash. Raises on send/revert (e.g. no gas)."""
-        account = self.w3.eth.account.from_key(private_key)
-        gas_price = self.w3.eth.gas_price
-        tx = fn.build_transaction({
-            "from": account.address,
-            "nonce": self.w3.eth.get_transaction_count(account.address),
-            "chainId": self.w3.eth.chain_id,
-            "maxFeePerGas": gas_price * 2,
-            "maxPriorityFeePerGas": gas_price,
-        })
-        signed = account.sign_transaction(tx)
-        txhash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = self.w3.eth.wait_for_transaction_receipt(txhash)
-        h = txhash.hex()
-        h = h if h.startswith("0x") else "0x" + h
-        if receipt.status != 1:
-            raise RuntimeError(f"transaction reverted: {h}")
-        return h
+        hardcodes a deployment — a Base redeploy changes only central's config.
+        The web3 tx plumbing lives in the shared satorilib.chain.evm.EvmClient."""
+        from satorilib.chain.evm import EvmClient
+        self.client = EvmClient(rpc_url)
+        self.contract = self.client.contract(merkle_address, MERKLE_ABI)
+        self.rewards = self.client.contract(rewards_address, REWARDS_ABI)
 
     # ---- Merkle reward drop ------------------------------------------------
     def already_minted(self, address: str) -> int:
         """Wei already minted to `address` through the Merkle channel."""
-        from web3 import Web3
         return int(self.contract.functions.alreadyMintedTo(
-            Web3.to_checksum_address(address)).call())
+            to_checksum_address(address)).call())
 
     def claim(self, private_key: str, lifetime_entitlement: int, proof: List[str]) -> str:
         """Submit claimMerkle(lifetimeEntitlement, proof) signed by the vault
         key. Mints the delta over what's already been claimed to msg.sender."""
-        return self._send(private_key, self.contract.functions.claimMerkle(
-            int(lifetime_entitlement), list(proof)))
+        return self.client.send(
+            self.contract.functions.claimMerkle(int(lifetime_entitlement), list(proof)),
+            private_key=private_key)
 
     # ---- Airdrop -----------------------------------------------------------
     def airdrop_status(self, address: str) -> dict:
         """{allocation, claimed, claimable} in wei for `address`. `claimable` is
         the vested-and-unclaimed amount (the contract applies the vest curve)."""
-        from web3 import Web3
-        a = Web3.to_checksum_address(address)
+        a = to_checksum_address(address)
         return {
             "allocation": int(self.rewards.functions.airdropAllocation(a).call()),
             "claimed": int(self.rewards.functions.airdropClaimed(a).call()),
@@ -139,4 +116,5 @@ class BaseClaimer:
     def claim_airdrop(self, private_key: str) -> str:
         """Submit claimAirdrop() signed by the vault key. Mints the vested,
         unclaimed airdrop to msg.sender. No proof needed."""
-        return self._send(private_key, self.rewards.functions.claimAirdrop())
+        return self.client.send(
+            self.rewards.functions.claimAirdrop(), private_key=private_key)
