@@ -78,7 +78,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
-        self._baseDirections: dict = {}  # base streamId -> latest on-chain direction (1 up / 2 down)
         self._basePredictThread = None
         self._channelListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
@@ -978,39 +977,25 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     def _basePredictEnabled(self) -> bool:
         return bool(config.get().get('predict base on-chain', False))
 
-    def _recordBaseDirection(self, stream_name, forecast, latest):
-        """Record the latest UP/DOWN for a base stream (satori-<chainId>-<streamId>)
-        so the daily on-chain predictor can submit it. In-memory; refreshed each
-        observation. No-op for non-base streams / other chains."""
-        try:
-            from satorineuron.base_predict import parse_base_stream, direction_from
-            from satorineuron.base_config import base_config
-            parsed = parse_base_stream(stream_name)
-            if not parsed:
-                return
-            chain_id, stream_id = parsed
-            if chain_id != int(base_config().get('chainId', 0)):
-                return
-            self._baseDirections[stream_id] = direction_from(forecast, latest)
-        except Exception as e:
-            logging.debug(f'base direction record skipped for {stream_name}: {e}')
-
     def submitBasePredictions(self):
-        """Once per round: if enabled, submit ONE batched on-chain prediction for
-        all base streams we have a direction for. Signs with the IDENTITY wallet
-        (always available) — the vault delegated its prediction power to the
-        identity at setup, so rewards still accrue to the vault and NO vault
-        unlock is needed here. Skips (returns None) if disabled, nothing to
-        predict, no delegated power yet, or we already predicted this round."""
+        """Once a day: poll every subscribed base stream's current value + engine
+        forecast from the local DB (kept fresh by the subscription) — the same
+        pull-and-predict-all pattern we use for central streams — derive up/down
+        for each, and submit them ALL in ONE on-chain batch (the contract allows
+        one prediction tx per day). Signs with the IDENTITY wallet (the vault
+        delegated its prediction power to it), so no vault unlock is needed.
+        Stateless: no in-memory hoarding, no window. Skips if disabled, not
+        staked, already predicted this round, or nothing to predict."""
         if not self._basePredictEnabled():
             return None
-        if not self._baseDirections:
-            return None
         try:
-            from satorineuron.base_predict import BasePredictor, build_requests
+            import json
+            from satorilib.satori_nostr.models import DatastreamObservation
+            from satorineuron.base_predict import (
+                BasePredictor, parse_base_stream, direction_from)
             from satorineuron.base_config import base_config
             cfg = base_config()
-            # Sign with the always-available identity wallet (no vault unlock).
+            chain_id = int(cfg.get('chainId', 0))
             identity = self.wallet
             address = identity.ethAddress
             private_key = identity.account.key.to_0x_hex()
@@ -1018,18 +1003,57 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'],
                 games_address=cfg['games'], hub_address=cfg.get('hub'),
                 rewards_address=cfg['rewards'])
-            # No delegated power = delegation not set up yet; predicting would
-            # earn nothing, so don't waste gas.
+            # Not staked (no delegated power) = predicting would earn nothing.
             if predictor.incoming_delegated_power(address) == 0:
-                logging.info(
-                    'base predict: no delegated power yet — enable the toggle with '
-                    'the vault unlocked to set up delegation; skipping', color='yellow')
+                logging.info('base predict: not staked/delegated; skipping', color='yellow')
                 return None
             if predictor.already_predicted(address):
                 logging.info('base predict: already predicted this round', color='cyan')
                 return None
-            requests = build_requests(dict(self._baseDirections), predictor)
+
+            def _current_value(raw):
+                try:
+                    return self._numericObservationValue(
+                        DatastreamObservation.from_json(raw).value)
+                except Exception:
+                    try:
+                        return self._numericObservationValue(json.loads(raw).get('value'))
+                    except Exception:
+                        return None
+
+            seen, requests = set(), []
+            for pub in self.networkDB.get_active_publications():
+                source = pub.get('source_stream_name')
+                provider = pub.get('source_provider_pubkey')
+                if not source or not provider:
+                    continue
+                parsed = parse_base_stream(source)
+                if not parsed:
+                    continue
+                cid, stream_id = parsed
+                if cid != chain_id or stream_id in seen:
+                    continue
+                preds = self.networkDB.get_predictions(source, provider, limit=1)
+                if not preds:
+                    continue
+                try:
+                    forecast = float(preds[0].get('value'))
+                except (TypeError, ValueError):
+                    continue  # non-numeric forecast (echo) — can't take a direction
+                obs = self.networkDB.get_observations(source, provider, limit=1)
+                if not obs:
+                    continue
+                current = _current_value(obs[0].get('value'))
+                if current is None:
+                    continue
+                gid = predictor.game_for_stream(stream_id)
+                if not gid:
+                    continue
+                requests.append((gid, direction_from(forecast, current)))
+                seen.add(stream_id)
+
             if not requests:
+                logging.info('base predict: no base streams with values to predict', color='yellow')
                 return None
             txhash = predictor.predict(private_key, requests)
             logging.info(
@@ -1093,9 +1117,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if prediction is not None:
                 value_str = prediction
                 method = 'engine'
-                # For base streams, remember the latest UP/DOWN so the daily
-                # on-chain predictor can submit it (see submitBasePredictions).
-                self._recordBaseDirection(stream_name, prediction, numeric_value)
 
         if value_str is None:
             # Echo fallback: non-numeric stream, or engine produced no forecast.
