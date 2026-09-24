@@ -751,8 +751,11 @@
                         <div><strong>Predict Base streams on-chain</strong></div>
                         <div class="text-muted" style="font-size: 12px;">
                             When on, your neuron submits one prediction transaction to Base per day
-                            for the Base data streams you predict. <strong>This spends gas</strong>
-                            (a little ETH on your Base address), and your vault must be unlocked to sign.
+                            for the Base data streams you predict. Turning it on does a
+                            <strong>one-time setup</strong> (your vault delegates prediction power to
+                            your identity wallet) — so <strong>unlock your vault</strong> now, but
+                            not again afterward. <strong>Spends gas</strong>: a little ETH on both
+                            your vault (once) and identity (ongoing) Base addresses.
                         </div>
                     </div>
                     <div class="form-check form-switch">

@@ -1452,12 +1452,45 @@ def register_routes(app):
     @login_required
     def api_set_base_predict():
         """Turn on/off submitting predictions to Base on-chain. Off by default;
-        it spends gas (a Base transaction once a day)."""
+        it spends gas. Enabling also performs the one-time delegation setup so
+        the neuron can predict with the identity key (no vault unlock needed
+        afterward): the identity's predictor fee is set to 0, then the vault
+        delegates its prediction power to the identity. Needs the vault unlocked
+        (this session) and a little gas on both addresses."""
         from satorineuron import config
         data = request.json or {}
         enabled = bool(data.get('enabled', False))
-        config.add(data={'predict base on-chain': enabled})
-        return jsonify({'success': True, 'enabled': enabled})
+
+        if not enabled:
+            config.add(data={'predict base on-chain': False})
+            return jsonify({'success': True, 'enabled': False})
+
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault and wallet_manager.wallet):
+            return jsonify({'error': 'Unlock your vault to enable on-chain predictions.'}), 400
+        try:
+            from satorineuron.base_predict import BasePredictor
+            from satorineuron.base_config import base_config
+            cfg = base_config()
+            vault = wallet_manager.vault
+            identity = wallet_manager.wallet
+            try:
+                vault_addr = vault.ethAddress
+                identity_addr = identity.ethAddress
+            except Exception:
+                return jsonify({'error': 'Unlock your vault to enable on-chain predictions.'}), 400
+            predictor = BasePredictor(
+                rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'],
+                games_address=cfg['games'], hub_address=cfg.get('hub'),
+                rewards_address=cfg['rewards'])
+            setup = predictor.ensure_delegation(
+                vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr,
+                identity_key=identity.account.key.to_0x_hex(), identity_address=identity_addr)
+            # Only turn the toggle on once delegation is actually in place.
+            config.add(data={'predict base on-chain': True})
+            return jsonify({'success': True, 'enabled': True, 'setup': setup})
+        except Exception as e:
+            return jsonify({'error': f'Delegation setup failed (need gas on both addresses?): {e}'}), 500
 
     @app.route('/api/wallet/send-from-wallet', methods=['POST'])
     @login_required

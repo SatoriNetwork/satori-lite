@@ -30,6 +30,7 @@ DEFAULTS = {
     "engine": "0xc00FDabbf510b92Bd2c3f2eC0541E979EC124b16",
     "games": "0xDC7d53C7DF8764e814DED7aD2a6A8324d6aB39fc",
     "registry": "0x954C3217B4C4725e2e0ca77a7dB5d89cd91da81B",
+    "hub": "0x85051E48345bB569683fF9FaAb0cF14db7C5A9fb",
 }
 
 _ENV = {
@@ -42,6 +43,7 @@ _ENV = {
     "engine": "BASE_SATORI_ENGINE",
     "games": "BASE_SATORI_GAMES",
     "registry": "BASE_SATORI_REGISTRY",
+    "hub": "BASE_SATORI_HUB",
 }
 
 

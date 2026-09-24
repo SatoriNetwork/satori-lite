@@ -996,10 +996,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.debug(f'base direction record skipped for {stream_name}: {e}')
 
     def submitBasePredictions(self):
-        """Once per round: if enabled and the vault is unlocked, submit ONE
-        batched on-chain prediction for all base streams we have a direction for.
-        Skips (returns None) if disabled, vault locked, nothing to predict, or we
-        already predicted this round. Signs with the vault key; needs gas ETH."""
+        """Once per round: if enabled, submit ONE batched on-chain prediction for
+        all base streams we have a direction for. Signs with the IDENTITY wallet
+        (always available) — the vault delegated its prediction power to the
+        identity at setup, so rewards still accrue to the vault and NO vault
+        unlock is needed here. Skips (returns None) if disabled, nothing to
+        predict, no delegated power yet, or we already predicted this round."""
         if not self._basePredictEnabled():
             return None
         if not self._baseDirections:
@@ -1008,16 +1010,21 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             from satorineuron.base_predict import BasePredictor, build_requests
             from satorineuron.base_config import base_config
             cfg = base_config()
-            # Vault must be unlocked to sign (skip-if-locked, per design).
-            try:
-                vault = self.vault
-                address = vault.ethAddress
-                private_key = vault.account.key.to_0x_hex()
-            except Exception:
-                logging.info('base predict: vault locked, skipping this round', color='yellow')
-                return None
+            # Sign with the always-available identity wallet (no vault unlock).
+            identity = self.wallet
+            address = identity.ethAddress
+            private_key = identity.account.key.to_0x_hex()
             predictor = BasePredictor(
-                rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'], games_address=cfg['games'])
+                rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'],
+                games_address=cfg['games'], hub_address=cfg.get('hub'),
+                rewards_address=cfg['rewards'])
+            # No delegated power = delegation not set up yet; predicting would
+            # earn nothing, so don't waste gas.
+            if predictor.incoming_delegated_power(address) == 0:
+                logging.info(
+                    'base predict: no delegated power yet — enable the toggle with '
+                    'the vault unlocked to set up delegation; skipping', color='yellow')
+                return None
             if predictor.already_predicted(address):
                 logging.info('base predict: already predicted this round', color='cyan')
                 return None

@@ -60,6 +60,47 @@ GAMES_ABI = [
     },
 ]
 
+# Delegation: the vault delegates its prediction power to the identity wallet
+# (on the hub) so the neuron can predict with the always-available identity key
+# while rewards still accrue to the vault. The identity's predictor fee is set
+# to 0 (on rewards) so it takes no cut of the vault's delegated rewards.
+HUB_ABI = [
+    {
+        "name": "delegatePredictionPower",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [{"name": "delegate", "type": "address"}],
+        "outputs": [],
+    },
+]
+
+REWARDS_ABI = [
+    {
+        "name": "setPredictorFee",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [{"name": "bps", "type": "uint16"}],
+        "outputs": [],
+    },
+    {
+        "name": "effectivePredictorFee",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "predictor", "type": "address"}],
+        "outputs": [{"name": "", "type": "uint16"}],
+    },
+    {
+        "name": "predictionDelegateInfo",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "", "type": "address"}],
+        "outputs": [
+            {"name": "delegate", "type": "address"},
+            {"name": "power", "type": "uint96"},
+        ],
+    },
+]
+
 TIME_UNIT_SECONDS = 86400  # on-chain round = 1 UTC day (SatoriToken.TIME_UNIT_SECONDS)
 
 
@@ -93,11 +134,15 @@ def build_requests(directions: dict, predictor) -> List[Tuple[int, int]]:
 class BasePredictor:
     """Reads round/game state and submits the batched on-chain prediction."""
 
-    def __init__(self, rpc_url: str, engine_address: str, games_address: str):
+    def __init__(self, rpc_url: str, engine_address: str, games_address: str,
+                 hub_address: str = None, rewards_address: str = None):
         from satorilib.chain.evm import EvmClient
         self.client = EvmClient(rpc_url)
         self.engine = self.client.contract(engine_address, ENGINE_ABI)
         self.games = self.client.contract(games_address, GAMES_ABI)
+        # hub/rewards only needed for the one-time delegation setup.
+        self.hub = self.client.contract(hub_address, HUB_ABI) if hub_address else None
+        self.rewards = self.client.contract(rewards_address, REWARDS_ABI) if rewards_address else None
 
     def current_round(self) -> int:
         """UTC-day round index (matches SatoriToken.getCurrentRound = block.timestamp/86400)."""
@@ -122,3 +167,53 @@ class BasePredictor:
         return self.client.send(
             self.engine.functions.predictMultipleWithPayloads(payloads),
             private_key=private_key)
+
+    # ---- Delegation setup (one-time) ---------------------------------------
+    def incoming_delegated_power(self, address: str) -> int:
+        """Prediction power delegated TO `address` by others (the vault's power,
+        once set up). 0 means no delegation yet — predicting would earn nothing."""
+        _delegate, power = self.rewards.functions.predictionDelegateInfo(
+            to_checksum_address(address)).call()
+        return int(power)
+
+    def current_delegate(self, address: str) -> str:
+        """Whom `address` has delegated its prediction power TO (0x0 if none)."""
+        delegate, _power = self.rewards.functions.predictionDelegateInfo(
+            to_checksum_address(address)).call()
+        return delegate
+
+    def effective_predictor_fee(self, address: str) -> int:
+        """`address`'s effective predictor-fee bps (its cut as a delegate)."""
+        return int(self.rewards.functions.effectivePredictorFee(
+            to_checksum_address(address)).call())
+
+    def set_predictor_fee_zero(self, private_key: str) -> str:
+        """Set the caller's predictor fee to 0% (setPredictorFee(0) — the sentinel
+        that decodes to 0). Set-once on the contract."""
+        return self.client.send(
+            self.rewards.functions.setPredictorFee(0), private_key=private_key)
+
+    def delegate_to(self, private_key: str, delegate_address: str) -> str:
+        """Delegate the signer's prediction power to `delegate_address` (hub)."""
+        return self.client.send(
+            self.hub.functions.delegatePredictionPower(to_checksum_address(delegate_address)),
+            private_key=private_key)
+
+    def ensure_delegation(self, vault_key: str, vault_address: str,
+                          identity_key: str, identity_address: str) -> dict:
+        """Idempotent one-time setup: the identity's cut → 0% (identity signs),
+        THEN the vault delegates its prediction power to the identity (vault
+        signs). Reads on-chain state first so we never spend gas re-doing a step
+        that's already in place. Signing keys are only needed here (setup)."""
+        result = {}
+        # 1. identity predictor fee -> 0 (before delegation)
+        if self.effective_predictor_fee(identity_address) != 0:
+            result["fee_tx"] = self.set_predictor_fee_zero(identity_key)
+        else:
+            result["fee"] = "already 0"
+        # 2. vault delegates to identity
+        if self.current_delegate(vault_address).lower() != identity_address.lower():
+            result["delegate_tx"] = self.delegate_to(vault_key, identity_address)
+        else:
+            result["delegate"] = "already delegated"
+        return result
