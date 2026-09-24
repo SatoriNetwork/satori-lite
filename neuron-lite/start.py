@@ -1059,7 +1059,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # crash/restart never re-submits the same day (even if the tx is
             # still pending). Only reached on a real submit (not on skips).
             try:
-                config.add(data={'base predict last round': int(time.time()) // 86400})
+                config.add(data={'base predict last submit ts': int(time.time())})
             except Exception:
                 pass
             txhash = predictor.predict(private_key, requests)
@@ -1078,32 +1078,33 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             target=self._basePredictLoop, daemon=True)
         self._basePredictThread.start()
 
-    def _baseLastSubmittedRound(self) -> int:
-        """The last on-chain round we submitted for, persisted in config so a
-        restart/crash-loop never re-submits the same day. -1 = never."""
+    def _baseLastSubmitTs(self) -> int:
+        """Unix time of our last on-chain submit, persisted so restarts keep the
+        same daily schedule and a crash-loop never re-submits within 24h. 0 = never."""
         try:
-            return int(config.get().get('base predict last round', -1))
+            return int(config.get().get('base predict last submit ts', 0))
         except Exception:
-            return -1
+            return 0
 
     def _basePredictLoop(self):
-        """Submit once per on-chain round (UTC day). Runs immediately on startup
-        — but only if we haven't already submitted for the current round (the
-        marker is persisted, so a crash/restart loop can't re-do today) — then
-        sleeps to the next round boundary and repeats. The submit itself no-ops
-        unless the toggle is on and we're staked, so the loop is cheap otherwise."""
+        """Submit on STARTUP, then every 24h from that time — the schedule is
+        anchored to when THIS neuron starts, so predictors around the world are
+        naturally spread out rather than all firing at once. The last-submit time
+        is persisted, so a restart resumes the same daily schedule and never
+        re-submits within 24h (crash-loop safe). No-ops unless the toggle is on."""
+        DAY = 86400
+        POLL = 3600  # re-check cadence while disabled / not-yet-staked / overdue
         while True:
             try:
-                current_round = int(time.time()) // 86400  # = block.timestamp/86400
-                if (self._basePredictEnabled()
-                        and self._baseLastSubmittedRound() != current_round):
-                    self.submitBasePredictions()
+                if self._basePredictEnabled():
+                    last = self._baseLastSubmitTs()
+                    if last <= 0 or (time.time() - last) >= DAY:
+                        self.submitBasePredictions()  # persists last-submit before gas
             except Exception as e:
                 logging.warning(f'base predict loop error: {e}')
-            # Sleep until just past the next UTC-day boundary (the next round).
-            now = time.time()
-            next_round_start = (int(now) // 86400 + 1) * 86400
-            time.sleep(max(60.0, next_round_start - now + 5))
+            last = self._baseLastSubmitTs()
+            remaining = (last + DAY - time.time()) if last > 0 else 0
+            time.sleep(max(60.0, remaining) if remaining > 0 else POLL)
 
     async def _networkRunEngine(self, stream_name: str, provider_pubkey: str,
                                 observation):
