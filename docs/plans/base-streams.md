@@ -41,8 +41,8 @@ signs with the key          the payload schema         publish {stream}_pred
 
 Streams are named `satori-<chainId>-<streamId>`. On Base Sepolia (84532),
 `satori-84532-1` is the base stream and `-2`, `-3`, `-4` are roll ups at 28,
-183 and 731 rounds. A round is 43200 seconds (12 hours), so the roll ups are
-roughly 14 days, 3 months and a year.
+183 and 731 rounds. A round is 86400 seconds (24 hours), so the roll ups are
+roughly a month, 6 months and 2 years.
 
 A kind 34601 observation carries an **object**, not a scalar, because one
 observation describes an on chain write:
@@ -65,7 +65,7 @@ Four rules from the publisher's spec:
    occur), and wider than a float holds exactly.
 2. `value` may be absent. It is present only when a real conversion existed
    (a tick turned into a price), alongside `valueUnit`. **Absent is not zero.**
-3. `timestamp` is the round start (`round * 43200`), not publish time.
+3. `timestamp` is the round start (`round * 86400`), not publish time.
 4. `unit` is `raw`, or `tick` for Uniswap streams.
 
 

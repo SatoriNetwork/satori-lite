@@ -1458,6 +1458,9 @@ def register_routes(app):
         try:
             wm = get_or_create_session_vault()
             if wm and wm.vault:
+                resp['vault_address'] = wm.vault.ethAddress
+                if wm.wallet:
+                    resp['identity_address'] = wm.wallet.ethAddress
                 resp['stake'] = _base_predictor().stake_status(wm.vault.ethAddress)
         except Exception as e:
             resp['stake_error'] = str(e)

@@ -750,11 +750,11 @@
                     <div style="max-width: 80%;">
                         <div><strong>Stake your vault &amp; predict on Base</strong></div>
                         <div class="text-muted" style="font-size: 12px;">
-                            On: your vault stakes (delegates its prediction power to your identity
+                            On: your vault stakes (delegates its prediction power to your predicting
                             wallet) and the neuron predicts on Base once a day — earning to your vault.
                             <strong>Your staked tokens can't be moved while staked.</strong> Turn it
                             off to unstake; your tokens unlock ~24h later. Needs your vault
-                            <strong>unlocked</strong> to change, and a little gas ETH.
+                            <strong>unlocked</strong> to change.
                         </div>
                     </div>
                     <div class="form-check form-switch">
@@ -762,13 +762,60 @@
                                onchange="setBasePredict(this.checked)" style="transform: scale(1.4);">
                     </div>
                 </div>
+
+                <div class="alert alert-warning mt-3 mb-2" style="font-size: 12px;">
+                    <strong>Before you turn this on, both Base addresses need a little ETH for gas:</strong>
+                    the <strong>Vault</strong> spends gas once (to stake), and the
+                    <strong>Predicting wallet</strong> needs the most — it sends a prediction
+                    transaction every day. Fund them first, then flip the switch.
+                </div>
+                <div id="baseGasAddresses" class="row g-3" style="display:none;">
+                    <div class="col-12 col-sm-6">
+                        <div class="small"><strong>Vault Base address</strong> <span class="text-muted">(gas once)</span></div>
+                        <div class="input-group input-group-sm mt-1">
+                            <input type="text" class="form-control font-monospace" id="baseVaultAddr" readonly style="font-size:0.72rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseVaultAddr')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
+                        </div>
+                        <div class="text-center mt-2"><img id="baseVaultQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
+                    </div>
+                    <div class="col-12 col-sm-6">
+                        <div class="small"><strong>Predicting wallet Base address</strong> <span class="text-muted">(needs the most gas)</span></div>
+                        <div class="input-group input-group-sm mt-1">
+                            <input type="text" class="form-control font-monospace" id="baseIdentityAddr" readonly style="font-size:0.72rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseIdentityAddr')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
+                        </div>
+                        <div class="text-center mt-2"><img id="baseIdentityQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
+                    </div>
+                </div>
+
                 <div id="basePredictState" class="small mt-2 text-muted"></div>
                 <div id="basePredictStatus" class="small mt-2" style="display:none;"></div>
             </div>
         </div>
         <script>
             (function () {
+                async function fillQr(imgId, address) {
+                    try {
+                        const j = await (await fetch('/api/wallet/qr/' + address)).json();
+                        const img = document.getElementById(imgId);
+                        if (img && j.qr_code) { img.src = j.qr_code; img.style.display = 'inline-block'; }
+                    } catch (e) {}
+                }
+                let _qrDone = false;
+                function renderAddresses(j) {
+                    const box = document.getElementById('baseGasAddresses');
+                    if (!box || !j.vault_address) return;
+                    box.style.display = 'flex';
+                    document.getElementById('baseVaultAddr').value = j.vault_address;
+                    if (j.identity_address) document.getElementById('baseIdentityAddr').value = j.identity_address;
+                    if (!_qrDone) {  // fetch QRs once
+                        _qrDone = true;
+                        fillQr('baseVaultQr', j.vault_address);
+                        if (j.identity_address) fillQr('baseIdentityQr', j.identity_address);
+                    }
+                }
                 function renderState(j) {
+                    renderAddresses(j);
                     const el = document.getElementById('basePredictState');
                     const toggle = document.getElementById('basePredictToggle');
                     if (toggle) toggle.checked = !!j.enabled;
