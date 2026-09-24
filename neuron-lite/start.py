@@ -1055,6 +1055,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not requests:
                 logging.info('base predict: no base streams with values to predict', color='yellow')
                 return None
+            # Persist that we're submitting THIS round BEFORE spending gas, so a
+            # crash/restart never re-submits the same day (even if the tx is
+            # still pending). Only reached on a real submit (not on skips).
+            try:
+                config.add(data={'base predict last round': int(time.time()) // 86400})
+            except Exception:
+                pass
             txhash = predictor.predict(private_key, requests)
             logging.info(
                 f'base predict: submitted {len(requests)} on-chain prediction(s), {txhash}',
@@ -1071,25 +1078,32 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             target=self._basePredictLoop, daemon=True)
         self._basePredictThread.start()
 
+    def _baseLastSubmittedRound(self) -> int:
+        """The last on-chain round we submitted for, persisted in config so a
+        restart/crash-loop never re-submits the same day. -1 = never."""
+        try:
+            return int(config.get().get('base predict last round', -1))
+        except Exception:
+            return -1
+
     def _basePredictLoop(self):
-        """Fire submitBasePredictions once per day at a fixed UTC hour (before
-        the on-chain round is scored). The submit itself no-ops unless the
-        toggle is on, so the loop is cheap when disabled."""
-        from datetime import datetime, timezone, timedelta
+        """Submit once per on-chain round (UTC day). Runs immediately on startup
+        — but only if we haven't already submitted for the current round (the
+        marker is persisted, so a crash/restart loop can't re-do today) — then
+        sleeps to the next round boundary and repeats. The submit itself no-ops
+        unless the toggle is on and we're staked, so the loop is cheap otherwise."""
         while True:
             try:
-                hour = int(config.get().get('base predict hour utc', 20))
-            except Exception:
-                hour = 20
-            now = datetime.now(timezone.utc)
-            target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-            if target <= now:
-                target += timedelta(days=1)
-            time.sleep(max(1.0, (target - now).total_seconds()))
-            try:
-                self.submitBasePredictions()
+                current_round = int(time.time()) // 86400  # = block.timestamp/86400
+                if (self._basePredictEnabled()
+                        and self._baseLastSubmittedRound() != current_round):
+                    self.submitBasePredictions()
             except Exception as e:
                 logging.warning(f'base predict loop error: {e}')
+            # Sleep until just past the next UTC-day boundary (the next round).
+            now = time.time()
+            next_round_start = (int(now) // 86400 + 1) * 86400
+            time.sleep(max(60.0, next_round_start - now + 5))
 
     async def _networkRunEngine(self, stream_name: str, provider_pubkey: str,
                                 observation):
