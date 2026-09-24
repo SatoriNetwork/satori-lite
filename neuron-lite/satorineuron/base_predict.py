@@ -74,6 +74,19 @@ HUB_ABI = [
     },
 ]
 
+TOKEN_ABI = [
+    {
+        "name": "transferLockedUntil",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "user", "type": "address"}],
+        "outputs": [{"name": "", "type": "uint24"}],
+    },
+]
+
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+_LOCK_INDEFINITE = (1 << 24) - 1  # type(uint24).max — the "locked while delegated" sentinel
+
 REWARDS_ABI = [
     {
         "name": "setPredictorFee",
@@ -135,14 +148,16 @@ class BasePredictor:
     """Reads round/game state and submits the batched on-chain prediction."""
 
     def __init__(self, rpc_url: str, engine_address: str, games_address: str,
-                 hub_address: str = None, rewards_address: str = None):
+                 hub_address: str = None, rewards_address: str = None,
+                 token_address: str = None):
         from satorilib.chain.evm import EvmClient
         self.client = EvmClient(rpc_url)
         self.engine = self.client.contract(engine_address, ENGINE_ABI)
         self.games = self.client.contract(games_address, GAMES_ABI)
-        # hub/rewards only needed for the one-time delegation setup.
+        # hub/rewards/token only needed for delegation setup + stake status.
         self.hub = self.client.contract(hub_address, HUB_ABI) if hub_address else None
         self.rewards = self.client.contract(rewards_address, REWARDS_ABI) if rewards_address else None
+        self.token = self.client.contract(token_address, TOKEN_ABI) if token_address else None
 
     def current_round(self) -> int:
         """UTC-day round index (matches SatoriToken.getCurrentRound = block.timestamp/86400)."""
@@ -217,3 +232,36 @@ class BasePredictor:
         else:
             result["delegate"] = "already delegated"
         return result
+
+    def undelegate(self, vault_key: str) -> str:
+        """Undelegate (delegate to address(0)). Frees the vault's prediction
+        power and switches the token lock from indefinite to next-round (~24h)."""
+        return self.delegate_to(vault_key, ZERO_ADDRESS)
+
+    def ensure_undelegated(self, vault_key: str, vault_address: str) -> dict:
+        """Idempotent: undelegate the vault if it's currently delegated."""
+        if int(self.current_delegate(vault_address), 16) == 0:
+            return {"delegate": "already undelegated"}
+        return {"undelegate_tx": self.undelegate(vault_key)}
+
+    def transfer_locked_until(self, address: str) -> int:
+        """Round until which `address`'s tokens are transfer-locked (0 = free)."""
+        return int(self.token.functions.transferLockedUntil(
+            to_checksum_address(address)).call())
+
+    def stake_status(self, vault_address: str) -> dict:
+        """Current staking state for the vault: delegated?, token locked?, and
+        (when unstaking) the round/timestamp the tokens unlock."""
+        delegate = self.current_delegate(vault_address)
+        staked = int(delegate, 16) != 0
+        lock_round = self.transfer_locked_until(vault_address)
+        current = self.current_round()
+        indefinite = lock_round >= _LOCK_INDEFINITE
+        locked = lock_round > current
+        return {
+            "staked": staked,
+            "locked": locked,
+            "indefinite": indefinite,
+            "unlock_round": None if (indefinite or not locked) else lock_round,
+            "unlock_ts": None if (indefinite or not locked) else lock_round * TIME_UNIT_SECONDS,
+        }

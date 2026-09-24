@@ -1438,15 +1438,30 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    def _base_predictor():
+        from satorineuron.base_predict import BasePredictor
+        from satorineuron.base_config import base_config
+        cfg = base_config()
+        return BasePredictor(
+            rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'], games_address=cfg['games'],
+            hub_address=cfg.get('hub'), rewards_address=cfg['rewards'], token_address=cfg['token'])
+
     @app.route('/api/settings/base-predict', methods=['GET'])
     @login_required
     def api_get_base_predict():
-        """Current state of the 'predict base streams on-chain' toggle."""
+        """Toggle state + on-chain staking status (staked?, token lock/unlock)."""
         from satorineuron import config
-        return jsonify({
+        resp = {
             'enabled': bool(config.get().get('predict base on-chain', False)),
             'hour_utc': int(config.get().get('base predict hour utc', 20)),
-        })
+        }
+        try:
+            wm = get_or_create_session_vault()
+            if wm and wm.vault:
+                resp['stake'] = _base_predictor().stake_status(wm.vault.ethAddress)
+        except Exception as e:
+            resp['stake_error'] = str(e)
+        return jsonify(resp)
 
     @app.route('/api/settings/base-predict', methods=['POST'])
     @login_required
@@ -1461,36 +1476,37 @@ def register_routes(app):
         data = request.json or {}
         enabled = bool(data.get('enabled', False))
 
-        if not enabled:
-            config.add(data={'predict base on-chain': False})
-            return jsonify({'success': True, 'enabled': False})
-
+        # Both on (delegate) and off (undelegate) need the vault to sign, so it
+        # must be unlocked either way.
         wallet_manager = get_or_create_session_vault()
         if not (wallet_manager and wallet_manager.vault and wallet_manager.wallet):
-            return jsonify({'error': 'Unlock your vault to enable on-chain predictions.'}), 400
+            return jsonify({'error': 'Unlock your vault to change staking.'}), 400
         try:
-            from satorineuron.base_predict import BasePredictor
-            from satorineuron.base_config import base_config
-            cfg = base_config()
             vault = wallet_manager.vault
             identity = wallet_manager.wallet
             try:
                 vault_addr = vault.ethAddress
                 identity_addr = identity.ethAddress
             except Exception:
-                return jsonify({'error': 'Unlock your vault to enable on-chain predictions.'}), 400
-            predictor = BasePredictor(
-                rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'],
-                games_address=cfg['games'], hub_address=cfg.get('hub'),
-                rewards_address=cfg['rewards'])
-            setup = predictor.ensure_delegation(
-                vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr,
-                identity_key=identity.account.key.to_0x_hex(), identity_address=identity_addr)
-            # Only turn the toggle on once delegation is actually in place.
-            config.add(data={'predict base on-chain': True})
-            return jsonify({'success': True, 'enabled': True, 'setup': setup})
+                return jsonify({'error': 'Unlock your vault to change staking.'}), 400
+            predictor = _base_predictor()
+            if enabled:
+                # Stake: identity fee -> 0, then vault delegates to identity.
+                setup = predictor.ensure_delegation(
+                    vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr,
+                    identity_key=identity.account.key.to_0x_hex(), identity_address=identity_addr)
+                config.add(data={'predict base on-chain': True})
+                return jsonify({'success': True, 'enabled': True, 'setup': setup,
+                                'stake': predictor.stake_status(vault_addr)})
+            # Unstake: undelegate the vault (tokens unlock next round, ~24h) and
+            # stop predicting. Predictions stop as soon as the toggle is off.
+            result = predictor.ensure_undelegated(
+                vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr)
+            config.add(data={'predict base on-chain': False})
+            return jsonify({'success': True, 'enabled': False, 'unstake': result,
+                            'stake': predictor.stake_status(vault_addr)})
         except Exception as e:
-            return jsonify({'error': f'Delegation setup failed (need gas on both addresses?): {e}'}), 500
+            return jsonify({'error': f'Failed (need gas on your vault?): {e}'}), 500
 
     @app.route('/api/wallet/send-from-wallet', methods=['POST'])
     @login_required

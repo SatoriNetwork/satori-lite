@@ -740,22 +740,21 @@
 
     <div class="d-flex flex-column gap-4 set-stack">
 
-        <!-- ── Base on-chain predictions ─────────────────── -->
+        <!-- ── Staking (Base predictions) ────────────────── -->
         <div class="card">
             <div class="card-header set-card-head">
-                <h5><i class="material-icons">hub</i>Base on-chain predictions</h5>
+                <h5><i class="material-icons">savings</i>Staking</h5>
             </div>
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div style="max-width: 80%;">
-                        <div><strong>Predict Base streams on-chain</strong></div>
+                        <div><strong>Stake your vault &amp; predict on Base</strong></div>
                         <div class="text-muted" style="font-size: 12px;">
-                            When on, your neuron submits one prediction transaction to Base per day
-                            for the Base data streams you predict. Turning it on does a
-                            <strong>one-time setup</strong> (your vault delegates prediction power to
-                            your identity wallet) — so <strong>unlock your vault</strong> now, but
-                            not again afterward. <strong>Spends gas</strong>: a little ETH on both
-                            your vault (once) and identity (ongoing) Base addresses.
+                            On: your vault stakes (delegates its prediction power to your identity
+                            wallet) and the neuron predicts on Base once a day — earning to your vault.
+                            <strong>Your staked tokens can't be moved while staked.</strong> Turn it
+                            off to unstake; your tokens unlock ~24h later. Needs your vault
+                            <strong>unlocked</strong> to change, and a little gas ETH.
                         </div>
                     </div>
                     <div class="form-check form-switch">
@@ -763,21 +762,40 @@
                                onchange="setBasePredict(this.checked)" style="transform: scale(1.4);">
                     </div>
                 </div>
+                <div id="basePredictState" class="small mt-2 text-muted"></div>
                 <div id="basePredictStatus" class="small mt-2" style="display:none;"></div>
             </div>
         </div>
         <script>
             (function () {
+                function renderState(j) {
+                    const el = document.getElementById('basePredictState');
+                    const toggle = document.getElementById('basePredictToggle');
+                    if (toggle) toggle.checked = !!j.enabled;
+                    if (!el) return;
+                    const s = j.stake;
+                    if (!s) { el.textContent = j.stake_error ? '' : 'Unlock your vault to see staking status.'; return; }
+                    if (s.staked) {
+                        el.className = 'small mt-2 text-success';
+                        el.textContent = '● Staked — predicting on Base. Tokens are locked while staked.';
+                    } else if (s.locked && s.unlock_ts) {
+                        const when = new Date(s.unlock_ts * 1000).toLocaleString();
+                        el.className = 'small mt-2 text-warning';
+                        el.textContent = '● Unstaking — tokens unlock around ' + when + ' (~24h).';
+                    } else {
+                        el.className = 'small mt-2 text-muted';
+                        el.textContent = '○ Not staked — tokens are free to move.';
+                    }
+                }
                 async function load() {
-                    try {
-                        const r = await fetch('/api/settings/base-predict');
-                        const j = await r.json();
-                        const el = document.getElementById('basePredictToggle');
-                        if (el) el.checked = !!j.enabled;
-                    } catch (e) {}
+                    try { renderState(await (await fetch('/api/settings/base-predict')).json()); }
+                    catch (e) {}
                 }
                 window.setBasePredict = async function (enabled) {
                     const status = document.getElementById('basePredictStatus');
+                    status.style.display = 'block';
+                    status.className = 'small mt-2 text-muted';
+                    status.textContent = enabled ? 'Staking (signing transactions)…' : 'Unstaking…';
                     try {
                         const r = await fetch('/api/settings/base-predict', {
                             method: 'POST',
@@ -785,15 +803,20 @@
                             body: JSON.stringify({ enabled: enabled }),
                         });
                         const j = await r.json();
-                        status.style.display = 'block';
                         status.className = 'small mt-2 ' + (j.success ? 'text-success' : 'text-danger');
-                        status.textContent = j.success
-                            ? (j.enabled ? 'On — the neuron will predict on Base once a day.' : 'Off.')
-                            : (j.error || 'Failed to update.');
+                        if (!j.success) {
+                            status.textContent = j.error || 'Failed to update.';
+                            load();  // revert toggle to real state
+                            return;
+                        }
+                        status.textContent = j.enabled
+                            ? 'Staked — predicting on Base once a day.'
+                            : 'Unstaked — predictions stopped; tokens unlock in ~24h.';
+                        renderState(j);
                     } catch (e) {
-                        status.style.display = 'block';
                         status.className = 'small mt-2 text-danger';
                         status.textContent = 'Failed: ' + e;
+                        load();
                     }
                 };
                 document.addEventListener('DOMContentLoaded', load);
