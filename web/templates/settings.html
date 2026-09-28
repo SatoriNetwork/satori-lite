@@ -751,7 +751,7 @@
                         <div><strong>Stake your vault &amp; predict on Base</strong></div>
                         <div class="text-muted" style="font-size: 12px;">
                             On: your vault stakes (delegates its prediction power to your predicting
-                            wallet) and the neuron predicts on Base once a day — earning to your vault.
+                            wallet) and the neuron predicts on Base once a day, earning to your vault.
                             <strong>Your staked tokens can't be moved while staked.</strong> Turn it
                             off to unstake; your tokens unlock ~24h later. Needs your vault
                             <strong>unlocked</strong> to change.
@@ -766,7 +766,7 @@
                 <div class="alert alert-warning mt-3 mb-2" style="font-size: 12px;">
                     <strong>Before you turn this on, both Base addresses need a little ETH for gas:</strong>
                     the <strong>Vault</strong> spends gas once (to stake), and the
-                    <strong>Predicting wallet</strong> needs the most — it sends a prediction
+                    <strong>Predicting wallet</strong> needs the most, since it sends a prediction
                     transaction every day. Fund them first, then flip the switch.
                 </div>
                 <div id="baseGasAddresses" class="row g-3" style="display:none;">
@@ -824,14 +824,14 @@
                     if (!s) { el.textContent = j.stake_error ? '' : 'Unlock your vault to see staking status.'; return; }
                     if (s.staked) {
                         el.className = 'small mt-2 text-success';
-                        el.textContent = '● Staked — predicting on Base. Tokens are locked while staked.';
+                        el.textContent = '● Staked and predicting on Base. Tokens are locked while staked.';
                     } else if (s.locked && s.unlock_ts) {
                         const when = new Date(s.unlock_ts * 1000).toLocaleString();
                         el.className = 'small mt-2 text-warning';
-                        el.textContent = '● Unstaking — tokens unlock around ' + when + ' (~24h).';
+                        el.textContent = '● Unstaking. Tokens unlock around ' + when + ' (~24h).';
                     } else {
                         el.className = 'small mt-2 text-muted';
-                        el.textContent = '○ Not staked — tokens are free to move.';
+                        el.textContent = '○ Not staked. Tokens are free to move.';
                     }
                 }
                 async function load() {
@@ -857,8 +857,8 @@
                             return;
                         }
                         status.textContent = j.enabled
-                            ? 'Staked — predicting on Base once a day.'
-                            : 'Unstaked — predictions stopped; tokens unlock in ~24h.';
+                            ? 'Staked and predicting on Base once a day.'
+                            : 'Unstaked. Predictions stopped, and tokens unlock in about 24h.';
                         renderState(j);
                     } catch (e) {
                         status.className = 'small mt-2 text-danger';

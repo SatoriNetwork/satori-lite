@@ -1373,12 +1373,12 @@ def register_routes(app):
             address = vault.ethAddress
             entry = _fetch_base_proof(address)
             if not entry:
-                return jsonify({'error': 'Nothing to claim yet — your address is not in the current drop.'}), 400
+                return jsonify({'error': 'Nothing to claim yet. Your address is not in the current drop.'}), 400
             claimer = _base_claimer()
             total = int(entry['amountWei'])
             claimed = claimer.already_minted(address)
             if total <= claimed:
-                return jsonify({'error': 'Nothing to claim — you are already up to date.'}), 400
+                return jsonify({'error': 'Nothing to claim. You are already up to date.'}), 400
             txhash = claimer.claim(vault.account.key.to_0x_hex(), total, entry['proof'])
             return jsonify({
                 'success': True,
