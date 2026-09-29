@@ -1446,6 +1446,20 @@ def register_routes(app):
             rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'], games_address=cfg['games'],
             hub_address=cfg.get('hub'), rewards_address=cfg['rewards'], token_address=cfg['token'])
 
+    def _stake_status_after(predictor, vault_addr, staked):
+        """Stake status right after a (mined) stake/unstake tx. The public RPC is
+        load balanced and a node can lag a block or two, so re-read briefly until
+        it reflects the tx; if it still lags, trust the receipt."""
+        for _ in range(5):
+            status = predictor.stake_status(vault_addr)
+            if status['staked'] == staked:
+                return status
+            time.sleep(1)
+        status['staked'] = staked
+        if not staked:
+            status['locked'] = True  # undelegating always locks until next round
+        return status
+
     @app.route('/api/settings/base-predict', methods=['GET'])
     @login_required
     def api_get_base_predict():
@@ -1500,14 +1514,14 @@ def register_routes(app):
                     identity_key=identity.account.key.to_0x_hex(), identity_address=identity_addr)
                 config.add(data={'predict base on-chain': True})
                 return jsonify({'success': True, 'enabled': True, 'setup': setup,
-                                'stake': predictor.stake_status(vault_addr)})
+                                'stake': _stake_status_after(predictor, vault_addr, True)})
             # Unstake: undelegate the vault (tokens unlock next round, ~24h) and
             # stop predicting. Predictions stop as soon as the toggle is off.
             result = predictor.ensure_undelegated(
                 vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr)
             config.add(data={'predict base on-chain': False})
             return jsonify({'success': True, 'enabled': False, 'unstake': result,
-                            'stake': predictor.stake_status(vault_addr)})
+                            'stake': _stake_status_after(predictor, vault_addr, False)})
         except Exception as e:
             return jsonify({'error': f'Failed (need gas on your vault?): {e}'}), 500
 

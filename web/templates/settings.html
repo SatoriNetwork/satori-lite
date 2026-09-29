@@ -825,10 +825,11 @@
                     if (s.staked) {
                         el.className = 'small mt-2 text-success';
                         el.textContent = '● Staked and predicting on Base. Tokens are locked while staked.';
-                    } else if (s.locked && s.unlock_ts) {
-                        const when = new Date(s.unlock_ts * 1000).toLocaleString();
+                    } else if (s.locked) {
                         el.className = 'small mt-2 text-warning';
-                        el.textContent = '● Unstaking. Tokens unlock around ' + when + ' (~24h).';
+                        el.textContent = s.unlock_ts
+                            ? '● Unstaking. Tokens unlock around ' + new Date(s.unlock_ts * 1000).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) + ' (~24h).'
+                            : '● Unstaking. Tokens unlock in about 24h.';
                     } else {
                         el.className = 'small mt-2 text-muted';
                         el.textContent = '○ Not staked. Tokens are free to move.';
@@ -856,9 +857,8 @@
                             load();  // revert toggle to real state
                             return;
                         }
-                        status.textContent = j.enabled
-                            ? 'Staked and predicting on Base once a day.'
-                            : 'Unstaked. Predictions stopped, and tokens unlock in about 24h.';
+                        // The state line below now shows the result; one line, not two.
+                        status.style.display = 'none';
                         renderState(j);
                     } catch (e) {
                         status.className = 'small mt-2 text-danger';
