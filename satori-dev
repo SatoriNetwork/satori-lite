@@ -45,7 +45,12 @@ IMAGE_TAG="dev"
 IMAGE="satorinet/satori-lite:${IMAGE_TAG}"
 
 # Check if running in local mode
-if [ "$1" = "local" ] || [ "$2" = "local" ]; then
+if [ -n "$SATORI_CENTRAL_URL" ]; then
+    # e.g. SATORI_CENTRAL_URL=http://10.10.10.113:8000 for the dev central
+    CENTRAL_URL="$SATORI_CENTRAL_URL"
+    API_URL="$SATORI_CENTRAL_URL"
+    echo "Using central-lite at $CENTRAL_URL (SATORI_CENTRAL_URL)"
+elif [ "$1" = "local" ] || [ "$2" = "local" ]; then
     CENTRAL_URL="http://host.docker.internal:8000"
     API_URL="http://host.docker.internal:8000"
     echo "Using LOCAL central-lite at $CENTRAL_URL"

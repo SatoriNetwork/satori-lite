@@ -2637,6 +2637,7 @@ def register_routes(app):
                 }), 400
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
+        startup.refreshFollowedSync()
 
         bounty_host_pubkey = data.get('bounty_host_pubkey')
         if bounty_host_pubkey:
@@ -2675,6 +2676,7 @@ def register_routes(app):
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
         startup.networkDB.unsubscribe(data['stream_name'], data['nostr_pubkey'])
+        startup.refreshFollowedSync()
         # Notify the provider so they stop encrypting for us (Fix G)
         startup.publishUnsubscribeSync(data['stream_name'], data['nostr_pubkey'])
         pred_name = data['stream_name'] + '_pred'

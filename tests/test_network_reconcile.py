@@ -76,6 +76,7 @@ _MOCK_MAP = {
     'satorineuron': _mock_satorineuron,
     'satorineuron.logging': _mock_satorineuron.logging,
     'satorineuron.config': _mock_satorineuron.config,
+    'satorineuron.relay_manager': _mock_satorineuron.relay_manager,
     'satorineuron.init': _mock_satorineuron.init,
     'satorineuron.init.wallet': _mock_satorineuron.init.wallet,
     'satorineuron.structs': _mock_satorineuron.structs,
@@ -117,9 +118,18 @@ def harness():
         h._networkClients = {}
         h._networkSubscribed = {}
         h._networkListeners = {}
+        h._channelListeners = {}
+        h._channelOpenListeners = {}
+        h._channelSettlementListeners = {}
+        h._channelTombstoneListeners = {}
+        h._predictionListeners = {}
+        h._accessRequestListeners = {}
         h._networkFirstRun = True
         h.server = mock.MagicMock()
-        yield h
+        # Hunting shuffles the relay list; keep central's order so relay
+        # order assertions are deterministic.
+        with mock.patch('random.shuffle'):
+            yield h
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -173,13 +183,34 @@ def make_mock_client(streams=None, observations=None):
         observations: dict of stream_name -> InboundObservation for get_last_observation
     """
     client = mock.AsyncMock()
-    client.discover_datastreams.return_value = streams or []
-    if observations:
-        async def get_obs(name):
-            return observations.get(name)
-        client.get_last_observation.side_effect = get_obs
-    else:
-        client.get_last_observation.return_value = None
+    streams = streams or []
+    observations = observations or {}
+    client.discover_datastreams.return_value = streams
+
+    async def find(pairs):
+        wanted = set(pairs)
+        return {(s.nostr_pubkey, s.stream_name): s for s in streams
+                if (s.nostr_pubkey, s.stream_name) in wanted}
+    client.find_datastreams.side_effect = find
+
+    async def latest_events(pairs):
+        found = {}
+        for pubkey, name in pairs:
+            obs = observations.get(name)
+            if obs and obs.nostr_pubkey == pubkey:
+                event = mock.MagicMock()
+                event.obs = obs
+                event.created_at.return_value.as_secs.return_value = (
+                    obs.observation.timestamp)
+                found[(pubkey, name)] = event
+        return found
+    client.get_last_observation_events.side_effect = latest_events
+    client.parse_observation_event = mock.MagicMock(
+        side_effect=lambda event: event.obs)
+
+    async def get_obs(name):
+        return observations.get(name)
+    client.get_last_observation.side_effect = get_obs
     return client
 
 
@@ -379,7 +410,8 @@ class TestStaleRecheck:
         asyncio.run(harness._networkReconcile(ConfigClass))
 
         # Should have connected and searched
-        client.discover_datastreams.assert_called_once()
+        client.find_datastreams.assert_called_once()
+        client.discover_datastreams.assert_not_called()
 
 
 # ── Test Relay Hunting ───────────────────────────────────────────────
@@ -578,6 +610,33 @@ class TestRelayHunting:
 
 
 # ── Test Central Server Fallback ─────────────────────────────────────
+
+class TestProviderMatch:
+    """Hunting matches on (provider, stream), not stream name alone."""
+
+    def test_same_name_other_provider_not_matched(self, harness):
+        subscribe(harness, 'btc-price', pubkey='pub123')
+        harness.server.getRelays.return_value = [{'relay_url': 'wss://relay1'}]
+        now = int(time.time())
+        meta = make_metadata('btc-price', pubkey='someone_else')
+        obs = make_observation(
+            'btc-price', pubkey='someone_else', timestamp=now - 60)
+        client = make_mock_client(
+            streams=[meta], observations={'btc-price': obs})
+
+        async def mock_connect(url, cfg):
+            harness._networkClients[url] = client
+            harness._networkSubscribed[url] = set()
+            return client
+        harness._networkConnect = mock_connect
+        harness._networkEnsureListener = mock.MagicMock()
+        harness._networkAnnouncePublications = mock.AsyncMock()
+
+        asyncio.run(harness._networkReconcile(mock_config_class()))
+
+        client.subscribe_datastream.assert_not_called()
+        assert harness.networkDB.get_active()[0]['stale_since']
+
 
 class TestCentralFallback:
     """Falls back to known relays when central server is unavailable."""

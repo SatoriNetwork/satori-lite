@@ -253,6 +253,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 except Exception as e:
                     logging.error(f'Network reconcile error: {e}')
                 try:
+                    await self._networkRefreshFollowed()
+                except Exception as e:
+                    logging.error(f'Network follow refresh error: {e}')
+                try:
                     await self._networkEnsurePublisherConnections(SatoriNostrConfig)
                 except Exception as e:
                     logging.error(f'Network publisher connect error: {e}')
@@ -390,6 +394,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 relay_urls=[relay_url])
             client = SatoriNostr(cfg)
             await client.start()
+            # Narrow the public-event subscription to authors we follow so
+            # this connection doesn't pull the relay's observation firehose.
+            try:
+                await client.set_followed_authors(
+                    await self._networkFollowedAuthors())
+            except Exception as e:
+                logging.warning(
+                    f'Network: follow setup failed on {relay_url}: {e}')
             self._networkClients[relay_url] = client
             self._networkSubscribed[relay_url] = set()
             logging.info(f'Network: connected to {relay_url}', color='green')
@@ -411,6 +423,38 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Network: failed to connect to {relay_url}: {e}')
             return None
+
+    async def _networkFollowedAuthors(self) -> list:
+        """Nostr pubkeys whose public events we need: providers we subscribe
+        to (observations) and receivers of channels we fund (commitment
+        tombstones)."""
+        subs = await asyncio.to_thread(self.networkDB.get_active)
+        channels = await asyncio.to_thread(
+            self.networkDB.get_channels_as_sender)
+        authors = {s['provider_pubkey'] for s in subs}
+        authors.update(c['receiver_nostr_pubkey'] for c in channels
+                       if c.get('receiver_nostr_pubkey'))
+        return sorted(authors)
+
+    async def _networkRefreshFollowed(self) -> None:
+        """Push the current followed-author set to every connected relay."""
+        authors = await self._networkFollowedAuthors()
+        for relay_url, client in list(self._networkClients.items()):
+            try:
+                await client.set_followed_authors(authors)
+            except Exception as e:
+                logging.warning(
+                    f'Network: follow update failed on {relay_url}: {e}')
+
+    def refreshFollowedSync(self) -> None:
+        """Non-blocking _networkRefreshFollowed from the web thread, so a
+        new subscription on an already-connected relay starts flowing
+        without waiting for the next reconcile."""
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._networkRefreshFollowed(), loop)
 
     async def _channelPublishStaleTombstones(self, relay_url: str) -> None:
         """On reconnect, tombstone relay commitments whose UTXO is outdated.
@@ -945,6 +989,39 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception:
             pass
         return None, False
+
+    async def _networkCheckFreshnessBatch(self, client, streams) -> dict:
+        """Batched _networkCheckFreshness for many streams on one relay.
+
+        One relay round trip per 200 providers instead of one or two REQs
+        per stream. Returns {(nostr_pubkey, stream_name): (last_obs_time,
+        is_active)}.
+        """
+        pairs = [(s.nostr_pubkey, s.stream_name) for s in streams]
+        try:
+            latest = await client.get_last_observation_events(pairs)
+        except Exception as e:
+            logging.warning(f'Network: batch freshness check failed: {e}')
+            latest = {}
+        result = {}
+        for s in streams:
+            key = (s.nostr_pubkey, s.stream_name)
+            event = latest.get(key)
+            if event is None:
+                result[key] = (None, False)
+                continue
+            obs = client.parse_observation_event(event)
+            if obs and obs.observation:
+                ts = obs.observation.timestamp
+                try:
+                    await self._networkProcessObservation(obs)
+                except Exception:
+                    pass
+            else:
+                # Paid stream we can't decrypt: header timestamp still works
+                ts = event.created_at().as_secs()
+            result[key] = (ts, s.is_likely_active(ts))
+        return result
 
     async def _networkListen(self, relay_url: str):
         """Listen for observations on a relay and save them to the DB.
@@ -3872,20 +3949,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if not client:
                 continue
             try:
-                streams = await client.discover_datastreams(limit=1000)
-                # Run freshness checks concurrently — each is a network RTT.
-                results = await asyncio.gather(
-                    *[self._networkCheckFreshness(client, s.stream_name, s)
-                      for s in streams],
-                    return_exceptions=True)
-                for s, res in zip(streams, results):
+                streams = await client.discover_datastreams(limit=None)
+                fresh = await self._networkCheckFreshnessBatch(
+                    client, streams)
+                for s in streams:
                     d = s.to_dict()
                     d['relay_url'] = relay_url
-                    if isinstance(res, Exception):
-                        d['last_observation_at'] = None
-                        d['active'] = False
-                    else:
-                        d['last_observation_at'], d['active'] = res
+                    d['last_observation_at'], d['active'] = fresh.get(
+                        (s.nostr_pubkey, s.stream_name), (None, False))
                     all_streams.append(d)
                 logging.info(
                     f'Network discover: {len(streams)} streams from '
@@ -3906,19 +3977,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return []
         result = []
         try:
-            streams = await client.discover_datastreams(limit=1000)
-            results = await asyncio.gather(
-                *[self._networkCheckFreshness(client, s.stream_name, s)
-                  for s in streams],
-                return_exceptions=True)
-            for s, res in zip(streams, results):
+            streams = await client.discover_datastreams(limit=None)
+            fresh = await self._networkCheckFreshnessBatch(client, streams)
+            for s in streams:
                 d = s.to_dict()
                 d['relay_url'] = relay_url
-                if isinstance(res, Exception):
-                    d['last_observation_at'] = None
-                    d['active'] = False
-                else:
-                    d['last_observation_at'], d['active'] = res
+                d['last_observation_at'], d['active'] = fresh.get(
+                    (s.nostr_pubkey, s.stream_name), (None, False))
                 result.append(d)
         except Exception as e:
             logging.warning(
@@ -4327,32 +4392,33 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             client = await self._networkConnect(relay_url, ConfigClass)
             if not client:
                 continue
+            # Look up only the wanted streams, not the relay's whole catalog
             try:
-                streams = await client.discover_datastreams(limit=1000)
+                relay_index = await client.find_datastreams(
+                    [(sub['provider_pubkey'], name)
+                     for name, sub in hunting.items()])
+                # Paid subscriptions skip freshness: the provider only
+                # publishes to known subscribers, so the relay may have no
+                # recent events even though the provider is alive. Connect
+                # and announce so the provider learns about us again.
+                fresh = await self._networkCheckFreshnessBatch(
+                    client,
+                    [m for m in relay_index.values()
+                     if not int(hunting[m.stream_name].get(
+                         'price_per_obs', 0) or 0) > 0])
             except Exception:
                 await self._networkDisconnect(relay_url)
                 continue
 
-            # Index this relay's streams by name
-            relay_index = {s.stream_name: s for s in streams}
-
             # Check which of our wanted streams are on this relay and active
             found_any = False
             for stream_name in list(hunting.keys()):
-                metadata = relay_index.get(stream_name)
+                key = (hunting[stream_name]['provider_pubkey'], stream_name)
+                metadata = relay_index.get(key)
                 if not metadata:
                     continue
-                # Paid subscriptions: skip freshness — the provider only
-                # publishes to known subscribers, so the relay may have no
-                # recent events even though the provider is alive. Connect
-                # and announce so the provider learns about us again.
-                sub_info = hunting.get(stream_name, {})
-                is_paid = int(sub_info.get('price_per_obs', 0) or 0) > 0
-                if not is_paid:
-                    _, is_active = await self._networkCheckFreshness(
-                        client, stream_name, metadata)
-                    if not is_active:
-                        continue
+                if key in fresh and not fresh[key][1]:
+                    continue
                 # Found active — update DB, subscribe
                 sub = hunting.pop(stream_name)
                 found_any = True
