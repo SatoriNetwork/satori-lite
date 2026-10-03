@@ -31,6 +31,8 @@ DEFAULTS = {
     "games": "0xDC7d53C7DF8764e814DED7aD2a6A8324d6aB39fc",
     "registry": "0x954C3217B4C4725e2e0ca77a7dB5d89cd91da81B",
     "hub": "0x85051E48345bB569683fF9FaAb0cF14db7C5A9fb",
+    # Nostr pubkey of the bridge that mirrors registry streams.
+    "streamProvider": "cb45de2a76a5df79ea8aff0c867e96e527f803eb389420419e441a4946129838",
 }
 
 _ENV = {
@@ -44,6 +46,7 @@ _ENV = {
     "games": "BASE_SATORI_GAMES",
     "registry": "BASE_SATORI_REGISTRY",
     "hub": "BASE_SATORI_HUB",
+    "streamProvider": "BASE_STREAM_PROVIDER",
 }
 
 

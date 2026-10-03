@@ -1513,6 +1513,9 @@ def register_routes(app):
                     vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr,
                     identity_key=identity.account.key.to_0x_hex(), identity_address=identity_addr)
                 config.add(data={'predict base on-chain': True})
+                startup = get_startup()
+                if startup:
+                    startup.ensureBaseStreamsSync()
                 return jsonify({'success': True, 'enabled': True, 'setup': setup,
                                 'stake': _stake_status_after(predictor, vault_addr, True)})
             # Unstake: undelegate the vault (tokens unlock next round, ~24h) and

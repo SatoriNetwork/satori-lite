@@ -78,6 +78,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
+        self._baseNoGame: dict = {}  # base stream_id -> last time it had no game
         self._basePredictThread = None
         self._channelListeners: dict = {}  # relay_url -> asyncio.Task
         self._channelOpenListeners: dict = {}  # relay_url -> asyncio.Task
@@ -252,6 +253,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._networkReconcile(SatoriNostrConfig)
                 except Exception as e:
                     logging.error(f'Network reconcile error: {e}')
+                try:
+                    await self._networkEnsureBaseStreams()
+                except Exception as e:
+                    logging.error(f'Network base stream subscribe error: {e}')
                 try:
                     await self._networkRefreshFollowed()
                 except Exception as e:
@@ -446,6 +451,71 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 logging.warning(
                     f'Network: follow update failed on {relay_url}: {e}')
 
+    # Base streams are looked up as satori-<chainId>-1..BASE_STREAM_SCAN.
+    BASE_STREAM_SCAN = 32
+
+    async def _networkEnsureBaseStreams(self) -> None:
+        """Subscribe to and predict the on-chain Base streams.
+
+        Only streams named satori-<chainId>-<streamId>, published by the
+        bridge in base_config['streamProvider'], with a game on the contract.
+        Any stream this neuron already has a row for is left alone: active
+        means subscribed, inactive means the user unsubscribed. Only runs
+        when 'predict base on-chain' is on.
+        """
+        if not self._networkClients or not self._basePredictEnabled():
+            return
+        from satorineuron.base_config import base_config
+        from satorineuron.base_predict import BasePredictor
+        cfg = await asyncio.to_thread(base_config)
+        provider = cfg.get('streamProvider')
+        chain_id = int(cfg.get('chainId') or 0)
+        if not provider or not chain_id:
+            return
+        known = {(s['stream_name'], s['provider_pubkey'])
+                 for s in await asyncio.to_thread(self.networkDB.get_all)}
+        no_game = self._baseNoGame  # rechecked daily
+        now = time.time()
+        wanted = []
+        for stream_id in range(1, self.BASE_STREAM_SCAN + 1):
+            name = f'satori-{chain_id}-{stream_id}'
+            if (name, provider) in known:
+                continue
+            if now - no_game.get(stream_id, 0) < 86400:
+                continue
+            wanted.append((provider, name))
+        predictor = None
+        for relay_url, client in list(self._networkClients.items()):
+            if not wanted:
+                break
+            found = await client.find_datastreams(wanted)
+            for key, meta in found.items():
+                wanted.remove(key)
+                if int(meta.price_per_obs or 0) > 0:
+                    continue  # never auto-open a paid channel
+                stream_id = int(meta.stream_name.rsplit('-', 1)[1])
+                if predictor is None:
+                    predictor = BasePredictor(
+                        rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'],
+                        games_address=cfg['games'])
+                if not await asyncio.to_thread(
+                        predictor.game_for_stream, stream_id):
+                    no_game[stream_id] = now
+                    continue
+                stream = meta.to_dict()
+                await asyncio.to_thread(
+                    self.networkDB.subscribe, stream, relay_url)
+                await asyncio.to_thread(
+                    self.networkDB.add_publication,
+                    stream_name=meta.stream_name + '_pred',
+                    name=f'Predictions for {meta.name or meta.stream_name}',
+                    cadence_seconds=meta.cadence_seconds,
+                    source_stream_name=meta.stream_name,
+                    source_provider_pubkey=provider)
+                logging.info(
+                    f'Network: auto-subscribed to Base stream '
+                    f'{meta.stream_name} on {relay_url}', color='green')
+
     def refreshFollowedSync(self) -> None:
         """Non-blocking _networkRefreshFollowed from the web thread, so a
         new subscription on an already-connected relay starts flowing
@@ -455,6 +525,22 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         asyncio.run_coroutine_threadsafe(
             self._networkRefreshFollowed(), loop)
+
+    def ensureBaseStreamsSync(self) -> None:
+        """Non-blocking _networkEnsureBaseStreams from the web thread, so
+        turning on 'predict base on-chain' subscribes right away instead of
+        at the next hourly reconcile."""
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed():
+            return
+
+        async def run():
+            try:
+                await self._networkEnsureBaseStreams()
+                await self._networkRefreshFollowed()
+            except Exception as e:
+                logging.error(f'Network base stream subscribe error: {e}')
+        asyncio.run_coroutine_threadsafe(run(), loop)
 
     async def _channelPublishStaleTombstones(self, relay_url: str) -> None:
         """On reconnect, tombstone relay commitments whose UTXO is outdated.

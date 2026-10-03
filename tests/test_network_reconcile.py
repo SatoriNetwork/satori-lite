@@ -125,6 +125,7 @@ def harness():
         h._predictionListeners = {}
         h._accessRequestListeners = {}
         h._networkFirstRun = True
+        h._baseNoGame = {}
         h.server = mock.MagicMock()
         # Hunting shuffles the relay list; keep central's order so relay
         # order assertions are deterministic.
@@ -636,6 +637,79 @@ class TestProviderMatch:
 
         client.subscribe_datastream.assert_not_called()
         assert harness.networkDB.get_active()[0]['stale_since']
+
+
+class TestBaseAutoSubscribe:
+    """Neurons subscribe to and predict the Base contract streams."""
+
+    BRIDGE = 'bridge_pub'
+
+    def run(self, harness, streams, games, enabled=True):
+        harness._basePredictEnabled = lambda: enabled
+        client = make_mock_client(streams=streams)
+        harness._networkClients['wss://relay1'] = client
+        cfg = {'chainId': 84532, 'streamProvider': self.BRIDGE,
+               'rpcUrl': 'http://rpc', 'engine': '0xe', 'games': '0xg'}
+        predictor = mock.MagicMock()
+        predictor.game_for_stream.side_effect = lambda sid: games.get(sid, 0)
+        modules = {
+            'satorineuron.base_config': mock.MagicMock(
+                base_config=lambda: cfg),
+            'satorineuron.base_predict': mock.MagicMock(
+                BasePredictor=mock.MagicMock(return_value=predictor)),
+        }
+        with mock.patch.dict(sys.modules, modules):
+            asyncio.run(harness._networkEnsureBaseStreams())
+        return client, predictor
+
+    def active(self, harness):
+        return sorted(s['stream_name'] for s in harness.networkDB.get_active())
+
+    def predicting(self, harness):
+        return sorted(p['source_stream_name']
+                      for p in harness.networkDB.get_active_publications())
+
+    def test_subscribes_and_predicts_streams_with_a_game(self, harness):
+        streams = [make_metadata(f'satori-84532-{i}', pubkey=self.BRIDGE)
+                   for i in (1, 2, 3)]
+        self.run(harness, streams, games={1: 1, 2: 2})
+        assert self.active(harness) == ['satori-84532-1', 'satori-84532-2']
+        assert self.predicting(harness) == ['satori-84532-1', 'satori-84532-2']
+
+    def test_ignores_other_providers(self, harness):
+        streams = [make_metadata('satori-84532-1', pubkey='someone_else')]
+        self.run(harness, streams, games={1: 1})
+        assert self.active(harness) == []
+
+    def test_respects_user_unsubscribe(self, harness):
+        subscribe(harness, 'satori-84532-1', pubkey=self.BRIDGE)
+        harness.networkDB.unsubscribe('satori-84532-1', self.BRIDGE)
+        streams = [make_metadata('satori-84532-1', pubkey=self.BRIDGE)]
+        _, predictor = self.run(harness, streams, games={1: 1})
+        assert self.active(harness) == []
+        predictor.game_for_stream.assert_not_called()
+
+    def test_second_run_is_a_no_op(self, harness):
+        streams = [make_metadata(f'satori-84532-{i}', pubkey=self.BRIDGE)
+                   for i in (1, 3)]
+        self.run(harness, streams, games={1: 1})
+        _, predictor = self.run(harness, streams, games={1: 1})
+        assert self.active(harness) == ['satori-84532-1']
+        assert len(harness.networkDB.get_all()) == 1
+        # stream 1 is subscribed and stream 3 is cached as gameless
+        predictor.game_for_stream.assert_not_called()
+
+    def test_does_nothing_when_base_predict_is_off(self, harness):
+        streams = [make_metadata('satori-84532-1', pubkey=self.BRIDGE)]
+        client, _ = self.run(harness, streams, games={1: 1}, enabled=False)
+        assert self.active(harness) == []
+        client.find_datastreams.assert_not_called()
+
+    def test_skips_paid_streams(self, harness):
+        meta = make_metadata('satori-84532-1', pubkey=self.BRIDGE)
+        meta.price_per_obs = 10
+        self.run(harness, [meta], games={1: 1})
+        assert self.active(harness) == []
 
 
 class TestCentralFallback:
