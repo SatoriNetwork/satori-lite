@@ -1,0 +1,20 @@
+# Tester image: the normal neuron image, pinned to the dev central.
+#
+# Built by build-basetest.sh on top of an image from the main Dockerfile.
+# sitecustomize runs at the start of every Python process in the container
+# (neuron, web UI, cli.py), so the central URL can't be changed with -e or by
+# the satori wrapper. The neuron only ever talks to the dev central.
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG CENTRAL_URL=https://central2.satorinet.io
+
+ENV SATORI_CENTRAL_URL=${CENTRAL_URL} \
+    SATORI_API_URL=${CENTRAL_URL}
+
+RUN printf '%s\n' \
+    'import os' \
+    "os.environ['SATORI_CENTRAL_URL'] = '${CENTRAL_URL}'" \
+    "os.environ['SATORI_API_URL'] = '${CENTRAL_URL}'" \
+    > /usr/local/lib/python3.10/site-packages/sitecustomize.py

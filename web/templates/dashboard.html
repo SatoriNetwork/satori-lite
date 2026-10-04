@@ -3443,8 +3443,8 @@
 
     // Get central-lite API URL
     function getCentralApiUrl() {
-        // Always use the production Satori network server for audit files
-        return 'https://network.satorinet.io';
+        // The central this neuron is configured for (prod unless overridden)
+        return '{{ config.SATORI_API_URL }}';
     }
 
     // Helper function to download JSON data as a file

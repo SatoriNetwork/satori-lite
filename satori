@@ -68,8 +68,8 @@ else
     INSTANCE=1
 fi
 
-# Always use latest tag
-IMAGE_TAG="latest"
+# latest unless SATORI_IMAGE_TAG is set (e.g. base-test for testers)
+IMAGE_TAG="${SATORI_IMAGE_TAG:-latest}"
 IMAGE="satorinet/satori-lite:${IMAGE_TAG}"
 
 CONTAINER_NAME="satori-${INSTANCE}"
