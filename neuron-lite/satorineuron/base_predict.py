@@ -16,7 +16,7 @@ import logging
 import re
 from typing import List, Optional, Tuple
 
-from eth_utils import to_checksum_address
+from eth_utils import keccak, to_checksum_address
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,22 @@ REWARDS_ABI = [
     },
 ]
 
+REGISTRY_ABI = [
+    {
+        "name": "isNamedStream",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "", "type": "uint32"}],
+        "outputs": [{"name": "", "type": "bool"}],
+    },
+]
+
 TIME_UNIT_SECONDS = 86400  # on-chain round = 1 UTC day (SatoriToken.TIME_UNIT_SECONDS)
+
+# A named game takes one prediction per 24 CLOCK hours (SatoriEngine, on top of
+# once per round), and one too-early named game reverts the whole batch.
+NAMED_WAIT_HOURS = 24
+DUPLICATE_PREDICTION = "0x" + keccak(text="DuplicatePrediction()")[:4].hex()
 
 
 def parse_base_stream(stream_name: str) -> Optional[Tuple[int, int]]:
@@ -126,6 +141,37 @@ def parse_base_stream(stream_name: str) -> Optional[Tuple[int, int]]:
 def direction_from(forecast, latest) -> int:
     """UP if the forecast is above the latest value, else DOWN. (Ties → DOWN.)"""
     return UP if float(forecast) > float(latest) else DOWN
+
+
+def named_allowed(last_submit_ts: int, now: float) -> bool:
+    """Whether named games may go in a batch sent at `now`, given our last
+    submit time (0 = unknown: try, and let `submit_batch` recover)."""
+    return last_submit_ts <= 0 or int(now) // 3600 >= int(last_submit_ts) // 3600 + NAMED_WAIT_HOURS
+
+
+def _is_duplicate_prediction(err) -> bool:
+    text = f"{getattr(err, 'data', '') or ''} {err}".lower()
+    return DUPLICATE_PREDICTION in text
+
+
+def submit_batch(predictor, private_key: str, requests, named_ok: bool) -> Optional[str]:
+    """Send `requests` = [(gameId, direction, named)] as one batch. Named games
+    are left out unless `named_ok`; if the chain still refuses the batch as too
+    soon (our schedule was lost, e.g. a reinstall), it is resent once without
+    them so the day's other predictions land. None when nothing is left."""
+    batch = [(g, d) for g, d, named in requests if named_ok or not named]
+    if not batch:
+        return None
+    try:
+        return predictor.predict(private_key, batch)
+    except Exception as e:
+        rest = [(g, d) for g, d, named in requests if not named]
+        if len(rest) == len(batch) or not _is_duplicate_prediction(e):
+            raise
+        logger.info("base predict: a named game was predicted under 24h ago; sending without named games")
+        if not rest:
+            return None
+        return predictor.predict(private_key, rest)
 
 
 def build_requests(directions: dict, predictor) -> List[Tuple[int, int]]:
@@ -149,7 +195,7 @@ class BasePredictor:
 
     def __init__(self, rpc_url: str, engine_address: str, games_address: str,
                  hub_address: str = None, rewards_address: str = None,
-                 token_address: str = None):
+                 token_address: str = None, registry_address: str = None):
         from satorilib.chain.evm import EvmClient
         self.client = EvmClient(rpc_url)
         self.engine = self.client.contract(engine_address, ENGINE_ABI)
@@ -158,6 +204,7 @@ class BasePredictor:
         self.hub = self.client.contract(hub_address, HUB_ABI) if hub_address else None
         self.rewards = self.client.contract(rewards_address, REWARDS_ABI) if rewards_address else None
         self.token = self.client.contract(token_address, TOKEN_ABI) if token_address else None
+        self.registry = self.client.contract(registry_address, REGISTRY_ABI) if registry_address else None
 
     def current_round(self) -> int:
         """UTC-day round index (matches SatoriToken.getCurrentRound = block.timestamp/86400)."""
@@ -172,6 +219,15 @@ class BasePredictor:
     def game_for_stream(self, stream_id: int) -> int:
         """The stream's default binary gameId (0 = none exists → not predictable)."""
         return int(self.games.functions.binaryGameByStream(int(stream_id)).call())
+
+    def is_named(self, stream_id: int) -> bool:
+        """A named stream's game waits 24 clock hours between predictions."""
+        if self.registry is None:
+            return False
+        try:
+            return bool(self.registry.functions.isNamedStream(int(stream_id)).call())
+        except Exception:
+            return False  # a registry from before named streams has no such view
 
     def predict(self, private_key: str, requests: List[Tuple[int, int]]) -> str:
         """Submit ONE batch. `requests` = [(gameId, direction 1|2), ...]. Signs

@@ -1155,7 +1155,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             import json
             from satorilib.satori_nostr.models import DatastreamObservation
             from satorineuron.base_predict import (
-                BasePredictor, parse_base_stream, direction_from)
+                BasePredictor, parse_base_stream, direction_from,
+                named_allowed, submit_batch)
             from satorineuron.base_config import base_config
             cfg = base_config()
             chain_id = int(cfg.get('chainId', 0))
@@ -1165,7 +1166,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             predictor = BasePredictor(
                 rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'],
                 games_address=cfg['games'], hub_address=cfg.get('hub'),
-                rewards_address=cfg['rewards'])
+                rewards_address=cfg['rewards'], registry_address=cfg.get('registry'))
             # Not staked (no delegated power) = predicting would earn nothing.
             if predictor.incoming_delegated_power(address) == 0:
                 logging.info('base predict: not staked/delegated; skipping', color='yellow')
@@ -1212,11 +1213,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 gid = predictor.game_for_stream(stream_id)
                 if not gid:
                     continue
-                requests.append((gid, direction_from(forecast, current)))
+                requests.append((gid, direction_from(forecast, current),
+                                 predictor.is_named(stream_id)))
                 seen.add(stream_id)
 
             if not requests:
                 logging.info('base predict: no base streams with values to predict', color='yellow')
+                return None
+            named_ok = named_allowed(self._baseLastSubmitTs(), time.time())
+            if not any(named_ok or not named for _, _, named in requests):
+                logging.info('base predict: only named streams, predicted under 24h ago', color='cyan')
                 return None
             # Persist that we're submitting THIS round BEFORE spending gas, so a
             # crash/restart never re-submits the same day (even if the tx is
@@ -1225,10 +1231,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 config.add(data={'base predict last submit ts': int(time.time())})
             except Exception:
                 pass
-            txhash = predictor.predict(private_key, requests)
-            logging.info(
-                f'base predict: submitted {len(requests)} on-chain prediction(s), {txhash}',
-                color='green')
+            txhash = submit_batch(predictor, private_key, requests, named_ok)
+            logging.info(f'base predict: submitted on-chain predictions, {txhash}', color='green')
             return txhash
         except Exception as e:
             logging.warning(f'base predict submission failed (will retry next round): {e}')
