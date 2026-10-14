@@ -43,7 +43,8 @@ MERKLE_ABI = [
     },
 ]
 
-REWARDS_ABI = [
+# The airdrop is its own contract (SatoriAirdrop), separate from rewards.
+AIRDROP_ABI = [
     {
         "name": "claimAirdrop",
         "type": "function",
@@ -80,14 +81,14 @@ class BaseClaimer:
     (claimMerkle, needs a proof from central) and the airdrop (claimAirdrop, no
     proof; the contract computes vesting)."""
 
-    def __init__(self, rpc_url: str, merkle_address: str, rewards_address: str):
+    def __init__(self, rpc_url: str, merkle_address: str, airdrop_address: str):
         """Addresses are injected (from satorineuron.base_config) so nothing here
         hardcodes a deployment — a Base redeploy changes only central's config.
         The web3 tx plumbing lives in the shared satorilib.chain.evm.EvmClient."""
         from satorilib.chain.evm import EvmClient
         self.client = EvmClient(rpc_url)
         self.contract = self.client.contract(merkle_address, MERKLE_ABI)
-        self.rewards = self.client.contract(rewards_address, REWARDS_ABI)
+        self.airdrop = self.client.contract(airdrop_address, AIRDROP_ABI)
 
     # ---- Merkle reward drop ------------------------------------------------
     def already_minted(self, address: str) -> int:
@@ -108,13 +109,13 @@ class BaseClaimer:
         the vested-and-unclaimed amount (the contract applies the vest curve)."""
         a = to_checksum_address(address)
         return {
-            "allocation": int(self.rewards.functions.airdropAllocation(a).call()),
-            "claimed": int(self.rewards.functions.airdropClaimed(a).call()),
-            "claimable": int(self.rewards.functions.claimableAirdrop(a).call()),
+            "allocation": int(self.airdrop.functions.airdropAllocation(a).call()),
+            "claimed": int(self.airdrop.functions.airdropClaimed(a).call()),
+            "claimable": int(self.airdrop.functions.claimableAirdrop(a).call()),
         }
 
     def claim_airdrop(self, private_key: str) -> str:
         """Submit claimAirdrop() signed by the vault key. Mints the vested,
         unclaimed airdrop to msg.sender. No proof needed."""
         return self.client.send(
-            self.rewards.functions.claimAirdrop(), private_key=private_key)
+            self.airdrop.functions.claimAirdrop(), private_key=private_key)

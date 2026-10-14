@@ -52,7 +52,7 @@ def _base_claimer():
     return BaseClaimer(
         rpc_url=cfg['rpcUrl'],
         merkle_address=cfg['merkle'],
-        rewards_address=cfg['rewards'])
+        airdrop_address=cfg['airdrop'])
 
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
