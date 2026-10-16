@@ -986,7 +986,7 @@ def register_routes(app):
 
         This implements JWT authentication:
         1. Check if we have a valid access token in session
-        2. If not or expired, login with wallet signature to get JWT tokens
+        2. If not or expired, login with an EIP-191 wallet signature to get JWT tokens
         3. If expiring soon, refresh the access token
         4. Return Authorization header with Bearer token
         """
@@ -998,8 +998,8 @@ def register_routes(app):
             return None
 
         wallet = wallet_manager.wallet
-        if not hasattr(wallet, 'pubkey') or not hasattr(wallet, 'sign'):
-            logger.warning("Wallet missing pubkey or sign method")
+        if not hasattr(wallet, 'pubkey') or not hasattr(wallet, 'ethSign'):
+            logger.warning("Wallet missing pubkey or ethSign method")
             return None
 
         api_url = current_app.config.get('SATORI_API_URL', get_api_url())
@@ -1029,18 +1029,13 @@ def register_routes(app):
                             # Generate challenge (timestamp)
                             challenge = str(time.time())
 
-                            # Sign with wallet
-                            signature = wallet.sign(message=challenge)
-                            if isinstance(signature, bytes):
-                                signature = signature.decode('utf-8')
-
-                            # Call JWT login endpoint
+                            # Call JWT login endpoint, signed EIP-191 (personal_sign)
                             resp = requests.post(
                                 f"{api_url}/api/v1/auth/login",
                                 headers={
                                     'wallet-pubkey': wallet.pubkey,
                                     'message': challenge,
-                                    'signature': signature
+                                    'signature': wallet.ethSign(challenge)
                                 },
                                 timeout=15
                             )

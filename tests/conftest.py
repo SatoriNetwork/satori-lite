@@ -96,21 +96,11 @@ def authenticated_headers(test_wallet, challenge_token):
 
     Uses the real wallet to sign a challenge and create valid auth headers.
     """
-    # Sign the challenge directly using wallet.sign()
-    # This matches the approach used in test_real_wallet_signature_is_valid
-    signature = test_wallet.sign(challenge_token)
-
-    # Signature from wallet.sign() is already base64-encoded as bytes
-    # Just decode to string - do NOT base64 encode again
-    if isinstance(signature, bytes):
-        signature_str = signature.decode('utf-8')
-    else:
-        signature_str = signature
-
+    # Sign the challenge EIP-191 (personal_sign), the way satorilib signs for central
     return {
         'wallet-pubkey': test_wallet.pubkey,
         'message': challenge_token,
-        'signature': signature_str
+        'signature': test_wallet.ethSign(challenge_token)
     }
 
 

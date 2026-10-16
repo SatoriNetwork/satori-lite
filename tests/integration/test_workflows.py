@@ -25,20 +25,12 @@ def test_complete_authentication_flow(server_url, server_available, test_wallet)
     assert challenge is not None
     assert len(challenge) > 0
 
-    # Step 2: Sign challenge with real wallet
-    signature = test_wallet.sign(challenge)
-
-    # Signature from wallet.sign() is already base64-encoded as bytes
-    if isinstance(signature, bytes):
-        signature_str = signature.decode('utf-8')
-    else:
-        signature_str = signature
-
+    # Step 2: Sign challenge with real wallet, EIP-191 (personal_sign)
     # Create headers with proper HTTP header names
     headers = {
         'wallet-pubkey': test_wallet.pubkey,
         'message': challenge,
-        'signature': signature_str
+        'signature': test_wallet.ethSign(challenge)
     }
 
     assert "wallet-pubkey" in headers
@@ -251,17 +243,11 @@ def test_error_recovery_malformed_json(server_url, server_available, challenge_t
     2. Verify error response
     3. Server remains stable
     """
-    # Sign challenge with real wallet
-    signature = test_wallet.sign(challenge_token)
-    if isinstance(signature, bytes):
-        signature_str = signature.decode('utf-8')
-    else:
-        signature_str = signature
-
+    # Sign challenge with real wallet, EIP-191 (personal_sign)
     headers = {
         'wallet-pubkey': test_wallet.pubkey,
         'message': challenge_token,
-        'signature': signature_str
+        'signature': test_wallet.ethSign(challenge_token)
     }
 
     # Send malformed JSON (missing required fields)

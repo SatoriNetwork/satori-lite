@@ -94,20 +94,11 @@ def test_real_wallet_signature_is_valid(test_server_url, server_available, test_
     assert challenge_response.status_code == 200
     challenge = challenge_response.json()["challenge"]
 
-    # Sign with real wallet
-    signature = test_wallet.sign(challenge)
-
-    # Signature from wallet.sign() is already base64-encoded as bytes
-    # Just decode to string - do NOT base64 encode again
-    if isinstance(signature, bytes):
-        signature_str = signature.decode('utf-8')
-    else:
-        signature_str = signature
-
+    # Sign with real wallet, EIP-191 (personal_sign)
     headers = {
         "wallet-pubkey": test_wallet.pubkey,
         "message": challenge,
-        "signature": signature_str
+        "signature": test_wallet.ethSign(challenge)
     }
 
     # Try to access an authenticated endpoint
@@ -176,19 +167,11 @@ def test_wrong_message_signature_rejected(test_server_url, server_available, tes
     """Test that signature for wrong message is rejected."""
     # Sign a DIFFERENT message than the challenge
     wrong_message = "wrong_message"
-    signature = test_wallet.sign(wrong_message)
-
-    # Signature from wallet.sign() is already base64-encoded as bytes
-    # Just decode to string - do NOT base64 encode again
-    if isinstance(signature, bytes):
-        signature_str = signature.decode('utf-8')
-    else:
-        signature_str = signature
 
     headers = {
         "wallet-pubkey": test_wallet.pubkey,
         "message": challenge_token,  # This is the challenge
-        "signature": signature_str   # But signature is for different message
+        "signature": test_wallet.ethSign(wrong_message)  # But signature is for different message
     }
 
     response = requests.get(

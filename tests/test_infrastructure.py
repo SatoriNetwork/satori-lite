@@ -30,6 +30,7 @@ def test_wallet_fixture_structure(test_wallet):
     assert hasattr(test_wallet, 'pubkey')
     assert hasattr(test_wallet, 'address')
     assert hasattr(test_wallet, 'sign')
+    assert hasattr(test_wallet, 'ethSign')
     assert hasattr(test_wallet, 'verify')
     assert hasattr(test_wallet, 'authPayload')
 
@@ -70,14 +71,15 @@ def test_wallet_auth_payload(test_wallet):
     payload = test_wallet.authPayload(asDict=True, challenge=challenge)
 
     assert isinstance(payload, dict), "authPayload should return dict when asDict=True"
-    # NOTE: Real wallet authPayload returns 'pubkey', not 'wallet-pubkey'
-    # The HTTP header mapping happens in the client code
-    assert 'pubkey' in payload, "payload should have pubkey"
-    assert 'message' in payload, "payload should have message"
-    assert 'signature' in payload, "payload should have signature"
+    # The keys are the HTTP header names central's legacy auth reads
+    assert set(payload) == {'wallet-pubkey', 'message', 'address', 'signature'}
+    assert payload['wallet-pubkey'] == test_wallet.pubkey
+    assert payload['message'] == challenge
+    assert payload['address'] == test_wallet.address
 
-    # Verify the pubkey matches
-    assert payload['pubkey'] == test_wallet.pubkey
+    # The signature is EIP-191 (personal_sign): 0x + r || s || v
+    assert payload['signature'].startswith('0x') and len(payload['signature']) == 132
+    assert payload['signature'] == test_wallet.ethSign(challenge)
 
 
 def test_client_instance_fixture(client_instance):

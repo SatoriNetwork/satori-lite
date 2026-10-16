@@ -79,6 +79,24 @@ deployments.
 - **Wallet**: Evrmore wallet, identity derivation, and signing primitives.
 - **Server**: Authenticated client for the Satori central server (checkin,
   balances, stream and subscription management).
+
+### Central login (EIP-191)
+
+Since v3.2.14 the neuron signs every central-auth message with a standard
+Ethereum signature, EIP-191 (`personal_sign`), by its identity key (or by the
+vault where a call authenticates as the vault). That covers the JWT login
+(satorilib's `SatoriServerClient` and the web UI's `get_auth_headers`) and the
+legacy header auth (`authPayload`). The headers are unchanged: `wallet-pubkey`
+(compressed secp256k1 hex), `message` and `signature`, where `signature` is
+`0x` + r‖s‖v hex. Central recovers the signer and compares it with the Ethereum
+address of `wallet-pubkey`. The neuron no longer sends Evrmore signatures to
+central.
+
+The neuron image must be built with satorilib `base-upgrade` (commit `5028913`
+or later, which adds `wallet.ethSign`). It needs a central that accepts EIP-191
+login: central's `base-upgrade` branch (commit `d5984b2` or later). An older
+central rejects these signatures, so the two deploy together: central first,
+or at the same time, never the neuron first.
 - **Concepts**: Canonical data structures for streams, observations, and
   related domain objects.
 - **Transports**: Nostr-based datastream pub/sub
