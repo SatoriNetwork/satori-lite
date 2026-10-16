@@ -52,7 +52,9 @@ def _base_claimer():
     return BaseClaimer(
         rpc_url=cfg['rpcUrl'],
         merkle_address=cfg['merkle'],
-        airdrop_address=cfg['airdrop'])
+        airdrop_address=cfg['airdrop'],
+        hub_address=cfg.get('hub'),
+        lens_address=cfg.get('lens'))
 
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
@@ -1434,6 +1436,50 @@ def register_routes(app):
                 'txhash': txhash,
                 'claimed_wei': str(status['claimable']),
                 'claimed': status['claimable'] / 10 ** 18,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/base/prediction-rewards')
+    @login_required
+    def api_wallet_base_prediction_rewards():
+        """On-chain prediction rewards the vault can claim now: rewards credited
+        when this neuron's predictions were scored (via the vault's delegation)."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            address = wallet_manager.vault.ethAddress
+            r = _base_claimer().prediction_rewards(address)
+            return jsonify({
+                'address': address,
+                'claimable_wei': str(r['claimable']),
+                'claimable': r['claimable'] / 10 ** 18,
+                'complete': r['complete'],
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/base/prediction-rewards/claim', methods=['POST'])
+    @login_required
+    def api_wallet_base_prediction_rewards_claim():
+        """Claim on-chain prediction rewards: the vault calls SatoriHub.claim(),
+        which mints them to the vault. Needs a little ETH on the vault for gas."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            vault = wallet_manager.vault
+            claimer = _base_claimer()
+            r = claimer.prediction_rewards(vault.ethAddress)
+            if r['claimable'] <= 0:
+                return jsonify({'error': 'No prediction rewards to claim yet.'}), 400
+            txhash = claimer.claim_prediction_rewards(vault.account.key.to_0x_hex())
+            return jsonify({
+                'success': True,
+                'txhash': txhash,
+                'claimed_wei': str(r['claimable']),
+                'claimed': r['claimable'] / 10 ** 18,
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500

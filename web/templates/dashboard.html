@@ -2256,6 +2256,44 @@
             </div>
         </div>
 
+        <!-- Prediction Rewards Card (on-chain, Base) -->
+        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="predictionRewards" draggable="true">
+            <div class="card h-100 d-flex flex-column">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">emoji_events</i>
+                        Prediction Rewards
+                    </h5>
+                    <div class="card-header-actions">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadPredictionRewards(true)" title="Refresh">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                        </button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="text-center mb-3">
+                        <div class="text-muted" style="font-size: 12px;">Claimable now</div>
+                        <div><strong id="predRewardsClaimable" style="font-size: 1.8rem;">–</strong> <span class="text-muted">SATORI</span></div>
+                        <div class="text-muted" id="predRewardsPartial" style="font-size: 11px; display:none;">
+                            at least this much; claim to collect the rest
+                        </div>
+                    </div>
+                    <button class="btn btn-primary w-100" id="predRewardsBtn" onclick="doClaimPredictionRewards()">
+                        <i class="material-icons align-middle me-1">emoji_events</i>
+                        Claim Prediction Rewards
+                    </button>
+                    <div id="predRewardsStatus" class="small mt-3" style="display:none;"></div>
+                    <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
+                        Earned by this neuron's on-chain predictions. A prediction is scored about a day
+                        after it is made. The neuron claims for you with your vault key (needs a little ETH for gas).
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <!-- MetaMask / Base Card -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="base" draggable="true">
             <div class="card h-100 d-flex flex-column">
@@ -3812,6 +3850,58 @@
             }
         } catch (e) {
             show('Airdrop claim failed: ' + e, false);
+        } finally {
+            btn.innerHTML = orig;
+            btn.disabled = false;
+        }
+    }
+
+    // ── Claim on-chain prediction rewards (vault calls SatoriHub.claim) ───
+    async function loadPredictionRewards(force) {
+        const el = document.getElementById('predRewardsClaimable');
+        if (!el) return;
+        try {
+            const r = await apiCall('/wallet/base/prediction-rewards');
+            const btn = document.getElementById('predRewardsBtn');
+            const partial = document.getElementById('predRewardsPartial');
+            if (r && !r.error) {
+                el.textContent = _fmtSatori(r.claimable);
+                if (partial) partial.style.display = r.complete ? 'none' : 'block';
+                if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
+            } else {
+                el.textContent = '–';
+                if (btn) btn.disabled = true;
+            }
+        } catch (e) {
+            el.textContent = '–';
+        }
+    }
+
+    async function doClaimPredictionRewards() {
+        const status = document.getElementById('predRewardsStatus');
+        const btn = document.getElementById('predRewardsBtn');
+        const show = (msg, ok) => {
+            status.style.display = 'block';
+            status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
+            status.innerHTML = msg;
+        };
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="material-icons align-middle me-1">hourglass_empty</i> Claiming…';
+        try {
+            const r = await apiCall('/wallet/base/prediction-rewards/claim', 'POST');
+            if (r && r.success) {
+                const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
+                    ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+                const url = explorer + '/tx/' + r.txhash;
+                show('Claimed ' + _fmtSatori(r.claimed) + ' SATORI in prediction rewards. '
+                    + '<a href="' + url + '" target="_blank" rel="noopener">View transaction</a>', true);
+                loadPredictionRewards(true);
+            } else {
+                show((r && r.error) ? r.error : 'Prediction rewards claim failed', false);
+            }
+        } catch (e) {
+            show('Prediction rewards claim failed: ' + e, false);
         } finally {
             btn.innerHTML = orig;
             btn.disabled = false;
@@ -6426,6 +6516,7 @@
             loadBaseIdentity();  // Base/EVM address + token info for MetaMask
             loadClaimable();  // Base reward claim amount
             loadAirdrop();  // Base airdrop claim amount
+            loadPredictionRewards();  // Base on-chain prediction rewards
             loadAllBalances();  // Load both stake and live balances from ElectrumX
             loadRewardAddress();
             // Staking/pool API calls moved to dedicated Stake Management page

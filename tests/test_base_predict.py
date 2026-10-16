@@ -118,3 +118,48 @@ def test_registry_without_named_streams_reads_not_named():
     assert p.is_named(4) is False
     p.registry = None
     assert p.is_named(4) is False
+
+
+# ── Why the neuron has no prediction power ───────────────────────────────
+
+VAULT_PUBKEY = "026ebe87ebcc56db4ce7423b97718deed6e0e2248a27a063e21ca0ffa4bd4dc3d5"
+VAULT = "0x03AbFED741a344C578304040D6CACAc86960e97d"
+IDENTITY = "0xe8Dfe519a2351b37D662d42D09fb481Baab91FFF"
+ZERO = "0x0000000000000000000000000000000000000000"
+
+
+class DelegateOf:
+    def __init__(self, delegate=None, error=None):
+        self.delegate, self.error = delegate, error
+
+    def current_delegate(self, address):
+        if self.error:
+            raise self.error
+        return self.delegate
+
+
+def test_vault_base_address_from_its_evrmore_pubkey():
+    # A real tester vault: this pubkey's Base address is the one delegating on chain.
+    assert bp.evm_address_from_pubkey(VAULT_PUBKEY) == VAULT
+    assert bp.evm_address_from_pubkey("0x" + VAULT_PUBKEY) == VAULT
+
+
+def test_reason_staked_but_no_satori():
+    msg = bp.no_power_reason(DelegateOf(IDENTITY.lower()), IDENTITY, VAULT)
+    assert "holds no SATORI" in msg and VAULT in msg
+
+
+def test_reason_not_staked():
+    assert "not staked" in bp.no_power_reason(DelegateOf(ZERO), IDENTITY, VAULT)
+
+
+def test_reason_staked_to_someone_else():
+    other = "0x9f505692808622fc1F0fbb53324262162C788762"
+    msg = bp.no_power_reason(DelegateOf(other), IDENTITY, VAULT)
+    assert other in msg and "restake" in msg
+
+
+def test_reason_generic_without_vault_or_on_rpc_error():
+    generic = bp.no_power_reason(DelegateOf(IDENTITY), IDENTITY, None)
+    assert "no prediction power" in generic
+    assert bp.no_power_reason(DelegateOf(error=RuntimeError("rpc")), IDENTITY, VAULT) == generic

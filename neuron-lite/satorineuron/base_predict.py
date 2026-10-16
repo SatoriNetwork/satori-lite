@@ -174,6 +174,35 @@ def submit_batch(predictor, private_key: str, requests, named_ok: bool) -> Optio
         return predictor.predict(private_key, rest)
 
 
+def evm_address_from_pubkey(pubkey_hex: str) -> str:
+    """Base address of a secp256k1 public key. The vault's Evrmore pubkey is
+    stored unencrypted in vault.yaml, and it is the same key as its Base wallet,
+    so this gives the vault's Base address without unlocking it."""
+    from eth_keys import keys
+    raw = bytes.fromhex(pubkey_hex.removeprefix("0x"))
+    if len(raw) == 33:
+        return keys.PublicKey.from_compressed_bytes(raw).to_checksum_address()
+    return keys.PublicKey(raw[-64:]).to_checksum_address()
+
+
+def no_power_reason(predictor, identity: str, vault: Optional[str] = None) -> str:
+    """Why the identity has no prediction power: the vault is not staked, is
+    staked to someone else, or is staked but holds no SATORI on Base."""
+    generic = "no prediction power (vault not staked, or it holds no SATORI on Base)"
+    if not vault:
+        return generic
+    try:
+        delegate = predictor.current_delegate(vault)
+    except Exception:
+        return generic
+    if int(delegate, 16) == 0:
+        return f"vault {vault} is not staked; turn on predict base on-chain to stake it"
+    if delegate.lower() != identity.lower():
+        return (f"vault {vault} is staked to {delegate}, not this neuron; "
+                "turn predict base on-chain off and on to restake")
+    return f"vault {vault} is staked but holds no SATORI on Base; send SATORI to the vault"
+
+
 def build_requests(directions: dict, predictor) -> List[Tuple[int, int]]:
     """Turn {streamId: direction} into [(gameId, direction)] for the batched
     predict, resolving each stream's binary gameId and skipping streams with no

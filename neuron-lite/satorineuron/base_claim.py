@@ -75,13 +75,38 @@ AIRDROP_ABI = [
     },
 ]
 
+# On-chain prediction rewards: credited on SatoriRewards when a prediction is
+# scored, read through the Lens, minted when the vault calls SatoriHub.claim().
+LENS_ABI = [
+    {
+        "name": "getTotalClaimableRewards",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "user", "type": "address"}],
+        "outputs": [{"name": "total", "type": "uint256"},
+                    {"name": "complete", "type": "bool"}],
+    },
+]
+
+HUB_ABI = [
+    {
+        "name": "claim",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+]
+
 
 class BaseClaimer:
     """Reads claim state and submits claims on Base — the Merkle reward drop
-    (claimMerkle, needs a proof from central) and the airdrop (claimAirdrop, no
-    proof; the contract computes vesting)."""
+    (claimMerkle, needs a proof from central), the airdrop (claimAirdrop, no
+    proof; the contract computes vesting) and on-chain prediction rewards
+    (SatoriHub.claim)."""
 
-    def __init__(self, rpc_url: str, merkle_address: str, airdrop_address: str):
+    def __init__(self, rpc_url: str, merkle_address: str, airdrop_address: str,
+                 hub_address: str = None, lens_address: str = None):
         """Addresses are injected (from satorineuron.base_config) so nothing here
         hardcodes a deployment — a Base redeploy changes only central's config.
         The web3 tx plumbing lives in the shared satorilib.chain.evm.EvmClient."""
@@ -89,6 +114,8 @@ class BaseClaimer:
         self.client = EvmClient(rpc_url)
         self.contract = self.client.contract(merkle_address, MERKLE_ABI)
         self.airdrop = self.client.contract(airdrop_address, AIRDROP_ABI)
+        self.hub = self.client.contract(hub_address, HUB_ABI) if hub_address else None
+        self.lens = self.client.contract(lens_address, LENS_ABI) if lens_address else None
 
     # ---- Merkle reward drop ------------------------------------------------
     def already_minted(self, address: str) -> int:
@@ -119,3 +146,17 @@ class BaseClaimer:
         unclaimed airdrop to msg.sender. No proof needed."""
         return self.client.send(
             self.airdrop.functions.claimAirdrop(), private_key=private_key)
+
+    # ---- On-chain prediction rewards ---------------------------------------
+    def prediction_rewards(self, address: str) -> dict:
+        """{claimable, complete} for `address`: claimable is wei credited from
+        scored predictions plus the vault's pending delegator share. complete is
+        False when the Lens hit its round budget, so the amount is a lower bound."""
+        total, complete = self.lens.functions.getTotalClaimableRewards(
+            to_checksum_address(address)).call()
+        return {"claimable": int(total), "complete": bool(complete)}
+
+    def claim_prediction_rewards(self, private_key: str) -> str:
+        """Submit SatoriHub.claim() signed by the vault key. Mints the vault's
+        prediction rewards to itself."""
+        return self.client.send(self.hub.functions.claim(), private_key=private_key)

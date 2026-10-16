@@ -91,3 +91,55 @@ def test_base_config_airdrop_env_override(monkeypatch):
     cfg = bc.base_config(force=True)
     assert cfg["airdrop"] == USER
     bc._cache["data"] = None
+
+
+# ── On-chain prediction rewards: read on the Lens, claim through the Hub ──
+
+HUB = "0x1eec7E1443C1065ab78180A14326e5Ac8284f143"
+LENS = "0x9BF5266F60092F1bFbd5F16d21d0bE9673c0F91F"
+
+
+@pytest.fixture
+def full_claimer(monkeypatch):
+    monkeypatch.setitem(sys.modules, "satorilib.chain.evm", _load("evm", _EVM))
+    return BaseClaimer(rpc_url="http://127.0.0.1:1", merkle_address=MERKLE,
+                       airdrop_address=AIRDROP, hub_address=HUB, lens_address=LENS)
+
+
+def test_prediction_rewards_contracts(full_claimer):
+    assert full_claimer.hub.address == HUB
+    assert full_claimer.lens.address == LENS
+    data = full_claimer.hub.functions.claim()._encode_transaction_data()
+    assert data[:10] == "0x" + bytes(full_claimer.client.w3.keccak(text="claim()"))[:4].hex()
+
+
+def test_claim_prediction_rewards_sends_to_hub(full_claimer, monkeypatch):
+    sent = {}
+    monkeypatch.setattr(full_claimer.client, "send",
+                        lambda fn, private_key: sent.setdefault("to", fn.address) or "0xtx")
+    full_claimer.claim_prediction_rewards("0x" + "11" * 32)
+    assert sent["to"] == HUB
+
+
+def test_prediction_rewards_reads_lens(full_claimer, monkeypatch):
+    seen = {}
+
+    class Call:
+        def __init__(self, user):
+            seen["user"] = user
+
+        def call(self):
+            return (5 * 10 ** 18, False)
+
+    monkeypatch.setattr(full_claimer.lens.functions, "getTotalClaimableRewards", Call)
+    assert full_claimer.prediction_rewards(USER.lower()) == {"claimable": 5 * 10 ** 18, "complete": False}
+    assert seen["user"] == USER
+
+
+def test_hub_and_lens_optional(claimer):
+    assert claimer.hub is None and claimer.lens is None
+
+
+def test_base_config_defaults_include_lens():
+    assert bc.DEFAULTS["lens"] == LENS
+    assert bc._ENV["lens"] == "BASE_SATORI_LENS"

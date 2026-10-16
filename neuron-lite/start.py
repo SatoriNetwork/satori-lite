@@ -1156,7 +1156,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             from satorilib.satori_nostr.models import DatastreamObservation
             from satorineuron.base_predict import (
                 BasePredictor, parse_base_stream, direction_from,
-                named_allowed, submit_batch)
+                named_allowed, submit_batch, evm_address_from_pubkey,
+                no_power_reason)
             from satorineuron.base_config import base_config
             cfg = base_config()
             chain_id = int(cfg.get('chainId', 0))
@@ -1169,7 +1170,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 rewards_address=cfg['rewards'], registry_address=cfg.get('registry'))
             # Not staked (no delegated power) = predicting would earn nothing.
             if predictor.incoming_delegated_power(address) == 0:
-                logging.info('base predict: not staked/delegated; skipping', color='yellow')
+                vault = None
+                try:
+                    pubkey = self.getVaultInfoFromFile().get('pubkey')
+                    vault = evm_address_from_pubkey(pubkey) if pubkey else None
+                except Exception:
+                    pass
+                logging.info(
+                    f'base predict: skipping, {no_power_reason(predictor, address, vault)}',
+                    color='yellow')
                 return None
             if predictor.already_predicted(address):
                 logging.info('base predict: already predicted this round', color='cyan')

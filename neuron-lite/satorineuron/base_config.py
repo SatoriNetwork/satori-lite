@@ -32,6 +32,8 @@ DEFAULTS = {
     "games": "0xB06e419D24cCbA967c6193e9e374117171B400C3",
     "registry": "0x1ED75AB0a66Ba7d23C3E5c84798e90205E76743a",
     "hub": "0x1eec7E1443C1065ab78180A14326e5Ac8284f143",
+    # SatoriRewardsLens: read-only views, e.g. claimable prediction rewards.
+    "lens": "0x9BF5266F60092F1bFbd5F16d21d0bE9673c0F91F",
     # Nostr pubkey of the bridge that mirrors registry streams.
     "streamProvider": "cb45de2a76a5df79ea8aff0c867e96e527f803eb389420419e441a4946129838",
 }
@@ -48,6 +50,7 @@ _ENV = {
     "games": "BASE_SATORI_GAMES",
     "registry": "BASE_SATORI_REGISTRY",
     "hub": "BASE_SATORI_HUB",
+    "lens": "BASE_SATORI_LENS",
     "streamProvider": "BASE_STREAM_PROVIDER",
 }
 
