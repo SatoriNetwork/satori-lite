@@ -1,6 +1,7 @@
 from typing import Union, Optional
 import math
 import os
+import re
 import time
 import json
 import asyncio
@@ -20,6 +21,32 @@ from satorineuron.init.wallet import WalletManager
 from satorineuron.structs.start import RunMode, StartupDagStruct
 # from satorilib.utils.ip import getPublicIpv4UsingCurl  # Removed - not needed
 from satoriengine.veda.engine import Engine
+
+
+def _baseAddress(value) -> Optional[str]:
+    """The EIP-55 checksummed form of a Base address, or None if `value` is not
+    one: 0x and 40 hex digits, all in one case or correctly checksummed (mixed
+    case with a wrong checksum is a typo). Same rule as central's."""
+    from eth_utils import to_checksum_address
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not re.fullmatch(r'0x[0-9a-fA-F]{40}', value):
+        return None
+    checksummed = to_checksum_address(value)
+    digits = value[2:]
+    if digits not in (digits.lower(), digits.upper()) and value != checksummed:
+        return None
+    return checksummed
+
+
+def _centralReason(text: str) -> str:
+    """Central's error detail from a response body, or ''."""
+    try:
+        detail = json.loads(text or '').get('detail')
+    except Exception:
+        return ''
+    return detail if isinstance(detail, str) else ''
 
 
 class SingletonMeta(type):
@@ -5021,68 +5048,53 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self,
         address: Union[str, None] = None,
         globally: bool = False
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """
-        Set or sync reward address between local config and central server.
+        Set the reward address at central, or sync the local copy with it.
+
+        The reward address is a Base address and central is its source.
 
         Args:
-            address: Reward address to set. If None, loads from config or syncs from server.
-            globally: If True, also syncs with central server (requires production env).
+            address: A Base 0x address to set (any case, or correctly
+                checksummed). It is posted to central checksummed and kept
+                locally only once central accepts it. None syncs instead: the
+                local copy becomes what central answers (the Base address
+                rewards are paid at, or none). An old non-0x local value is
+                dropped, never re-posted.
+            globally: Kept for callers; setting always goes through central.
 
         Returns:
-            True if successfully set/synced, False otherwise.
+            (True, '') on success, else (False, a plain reason).
         """
-        # If address is provided, validate and save to config
-        if EvrmoreWallet.addressIsValid(address):
-            self.configRewardAddress = address
+        if address is not None:
+            base = _baseAddress(address)
+            if base is None:
+                return False, 'Invalid Base address: 0x and 40 hex digits, all one case or correctly checksummed.'
+            if getattr(self, 'server', None) is None:
+                return False, 'Not connected to central.'
+            ok, text = self.server.setRewardAddress(address=base)
+            if not ok:
+                return False, _centralReason(text) or 'Central did not accept the reward address.'
+            self._keepRewardAddress(base)
+            logging.info(f"Updated server reward address: {base[:8]}...", color="green")
+            return True, ''
+        self.configRewardAddress = _baseAddress(config.get().get('reward address')) or ''
+        if getattr(self, 'server', None) is None:
+            return False, 'Not connected to central.'
+        try:
+            serverAddress = self.server.mineToAddressStatus()
+        except Exception as e:
+            logging.debug(f"Could not sync reward address with server: {e}")
+            serverAddress = None
+        if serverAddress is None:
+            return False, 'Could not reach central.'
+        self._keepRewardAddress(_baseAddress(serverAddress) or '')
+        return True, ''
+
+    def _keepRewardAddress(self, address: str):
+        self.configRewardAddress = address
+        if config.get().get('reward address') != address:
             config.add(data={'reward address': address})
-
-            # If globally=True, check if server needs update
-            if globally and self.env in ['prod', 'local', 'testprod', 'dev']:
-                try:
-                    serverAddress = self.server.mineToAddressStatus()
-                    # Only send to server if addresses differ
-                    if address != serverAddress:
-                        self.server.setRewardAddress(address=address)
-                        logging.info(f"Updated server reward address: {address[:8]}...", color="green")
-                except Exception as e:
-                    logging.debug(f"Could not sync reward address with server: {e}")
-            return True
-        else:
-            # No address provided - load from config
-            self.configRewardAddress: str = str(config.get().get('reward address', ''))
-
-            # If we need to sync with server, check if addresses match
-            if (
-                hasattr(self, 'server') and
-                self.server is not None and
-                self.env in ['prod', 'local', 'testprod', 'dev']
-            ):
-                try:
-                    serverAddress = self.server.mineToAddressStatus()
-
-                    # If config is empty but server has address, fetch and save
-                    if not self.configRewardAddress and serverAddress and EvrmoreWallet.addressIsValid(serverAddress):
-                        self.configRewardAddress = serverAddress
-                        config.add(data={'reward address': serverAddress})
-                        logging.info(f"Synced reward address from server: {serverAddress[:8]}...", color="green")
-                        return True
-
-                    # If config has address and globally=True, check if server needs update
-                    if (
-                        globally and
-                        EvrmoreWallet.addressIsValid(self.configRewardAddress) and
-                        self.configRewardAddress != serverAddress
-                    ):
-                        # Only send to server if addresses differ
-                        self.server.setRewardAddress(address=self.configRewardAddress)
-                        logging.info(f"Updated server reward address: {self.configRewardAddress[:8]}...", color="green")
-                        return True
-
-                except Exception as e:
-                    logging.debug(f"Could not sync reward address with server: {e}")
-
-        return False
 
     @staticmethod
     def predictionStreams(streams: list[Stream]):

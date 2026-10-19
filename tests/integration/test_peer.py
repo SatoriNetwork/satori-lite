@@ -6,6 +6,9 @@ Tests reward address setting and retrieval.
 import pytest
 import requests
 
+# The reward address is a Base address (a throwaway one).
+REWARD_ADDRESS = "0x2F66D2d1DfA3cbF191dd26394d3b241C90B57E74"
+
 
 @pytest.mark.integration
 @pytest.mark.peer
@@ -23,7 +26,7 @@ def test_set_reward_address_requires_auth(server_url, server_available):
     """Test POST /api/v1/peer/reward-address requires authentication."""
     response = requests.post(
         f"{server_url}/api/v1/peer/reward-address",
-        json={"reward_address": "ERewardAddress123"}
+        json={"reward_address": REWARD_ADDRESS}
     )
 
     # Should reject unauthenticated request
@@ -54,7 +57,7 @@ def test_set_reward_address_with_invalid_auth(server_url, server_available, chal
     response = requests.post(
         f"{server_url}/api/v1/peer/reward-address",
         headers=headers,
-        json={"reward_address": "ERewardAddress123"}
+        json={"reward_address": REWARD_ADDRESS}
     )
 
     # Should reject invalid signature (mock wallet)
@@ -67,7 +70,7 @@ def test_reward_address_payload_structure(server_url, server_available, challeng
     """Test reward address payload is correctly structured."""
     headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
 
-    payload = {"reward_address": "ERewardAddress123456789"}
+    payload = {"reward_address": REWARD_ADDRESS}
 
     response = requests.post(
         f"{server_url}/api/v1/peer/reward-address",

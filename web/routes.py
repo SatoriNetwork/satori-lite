@@ -1149,10 +1149,12 @@ def register_routes(app):
     @login_required
     def api_reward_address():
         """
-        Get or set reward address using local config (synced with server by start.py).
+        Get or set the reward address, a Base 0x address. Central is the source.
 
-        GET: Reads from local config (fast, no server call)
-        POST: Updates both local config and server (via setRewardAddress)
+        GET: What central answers (the Base address rewards are paid at, or
+             none), mirrored into local config by setRewardAddress.
+        POST: Checksum-validated, posted to central, kept locally once central
+              accepts it; a refusal is a plain 400 with the reason.
         """
         startup = get_startup()
 
@@ -1162,25 +1164,22 @@ def register_routes(app):
             if not data or 'reward_address' not in data:
                 return jsonify({'error': 'Missing reward_address'}), 400
 
-            new_address = data['reward_address']
-
-            # Update both local config and server using setRewardAddress
             if startup:
                 try:
-                    success = startup.setRewardAddress(address=new_address, globally=True)
-                    if success:
-                        return jsonify({'success': True, 'reward_address': new_address})
-                    else:
-                        return jsonify({'error': 'Failed to set reward address'}), 500
+                    ok, error = startup.setRewardAddress(
+                        address=data['reward_address'], globally=True)
                 except Exception as e:
                     logger.error(f"Error setting reward address: {e}")
                     return jsonify({'error': str(e)}), 500
+                if not ok:
+                    return jsonify({'error': error}), 400
+                return jsonify({'success': True, 'reward_address': startup.configRewardAddress})
             else:
                 # Fallback to proxy if startup not available
                 return proxy_api('/peer/reward-address', 'POST', request.json)
 
-        # GET request - read from local config
         if startup and hasattr(startup, 'configRewardAddress'):
+            startup.setRewardAddress()  # mirror central; keeps the last value if unreachable
             return jsonify({'reward_address': startup.configRewardAddress or ''})
         else:
             # Fallback to proxy if startup not available
