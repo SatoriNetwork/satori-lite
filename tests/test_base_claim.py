@@ -143,3 +143,18 @@ def test_hub_and_lens_optional(claimer):
 def test_base_config_defaults_include_lens():
     assert bc.DEFAULTS["lens"] == LENS
     assert bc._ENV["lens"] == "BASE_SATORI_LENS"
+
+
+# ── Gas: a claim is sent from the claiming address, which needs ETH ──
+
+def test_eth_balance_reads_the_address(claimer):
+    seen = {}
+
+    class Eth:
+        def get_balance(self, address):
+            seen["address"] = address
+            return 7
+
+    claimer.client._w3 = type("W3", (), {"eth": Eth()})()
+    assert claimer.eth_balance(USER.lower()) == 7
+    assert seen["address"] == USER

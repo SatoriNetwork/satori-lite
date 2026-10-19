@@ -2209,10 +2209,16 @@
                         <i class="material-icons align-middle me-1">redeem</i>
                         Claim
                     </button>
+                    <div class="d-flex justify-content-between align-items-center mt-3" style="font-size: 12px;">
+                        <span class="text-muted">On your identity's Base address:
+                            <strong id="claimIdentityClaimable">–</strong> SATORI</span>
+                        <button class="btn btn-sm btn-outline-primary" id="claimIdentityBtn" onclick="doClaim('identity')" disabled>Claim</button>
+                    </div>
                     <div id="claimStatus" class="small mt-3" style="display:none;"></div>
                     <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
-                        The neuron claims for you with your vault key. Your Base address needs a
-                        little ETH for gas.
+                        The neuron claims for you with your vault key, or your identity key for
+                        rewards paid to your identity. The claiming address needs a little ETH
+                        on Base for gas.
                     </p>
                 </div>
             </div>
@@ -3759,23 +3765,31 @@
         try {
             const r = await apiCall('/wallet/base/claimable');
             const btn = document.getElementById('claimBtn');
+            const idEl = document.getElementById('claimIdentityClaimable');
+            const idBtn = document.getElementById('claimIdentityBtn');
             if (r && !r.error) {
                 el.textContent = _fmtSatori(r.claimable);
                 document.getElementById('claimTotal').textContent = _fmtSatori(r.total);
                 document.getElementById('claimClaimed').textContent = _fmtSatori(r.claimed);
                 if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
+                const id = r.identity || {};
+                idEl.textContent = _fmtSatori(id.claimable);
+                idEl.title = id.address || '';
+                idBtn.disabled = !(parseFloat(id.claimable) > 0);
             } else {
                 el.textContent = '–';
+                idEl.textContent = '–';
                 if (btn) btn.disabled = true;
+                idBtn.disabled = true;
             }
         } catch (e) {
             el.textContent = '–';
         }
     }
 
-    async function doClaim() {
+    async function doClaim(key) {
         const status = document.getElementById('claimStatus');
-        const btn = document.getElementById('claimBtn');
+        const btn = document.getElementById(key === 'identity' ? 'claimIdentityBtn' : 'claimBtn');
         const show = (msg, ok) => {
             status.style.display = 'block';
             status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
@@ -3785,7 +3799,11 @@
         btn.disabled = true;
         btn.innerHTML = '<i class="material-icons align-middle me-1">hourglass_empty</i> Claiming…';
         try {
-            const r = await apiCall('/wallet/base/claim', 'POST');
+            // fetch, not apiCall: show central's/the chain's reason here, not as 'Claim failed'
+            const res = await fetch(API_URL + '/wallet/base/claim', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: key || 'vault' }) });
+            const r = await res.json().catch(() => null);
             if (r && r.success) {
                 const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
                     ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';

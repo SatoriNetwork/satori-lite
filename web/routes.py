@@ -1326,31 +1326,40 @@ def register_routes(app):
             return None
         raise RuntimeError(f"central returned {resp.status_code} for proof")
 
+    def _merkle_status(claimer, address):
+        """(proof entry or None, claim numbers) for one Base address: lifetime
+        entitlement in central's drop, what's already minted, and the rest."""
+        entry = _fetch_base_proof(address)
+        total = int(entry['amountWei']) if entry else 0
+        claimed = claimer.already_minted(address)
+        claimable = max(0, total - claimed)
+        WEI = 10 ** 18
+        return entry, {
+            'address': address,
+            'total_wei': str(total),
+            'claimed_wei': str(claimed),
+            'claimable_wei': str(claimable),
+            'total': total / WEI,
+            'claimed': claimed / WEI,
+            'claimable': claimable / WEI,
+        }
+
     @app.route('/api/wallet/base/claimable')
     @login_required
     def api_wallet_base_claimable():
         """How much this neuron can claim on Base: total lifetime entitlement
         (from central's published drop) minus what's already been minted
-        on-chain."""
+        on-chain. Top level is the vault's Base address; `identity` is the
+        identity's, where central pays a neuron with no vault, or a reward
+        address naming this identity."""
         wallet_manager = get_or_create_session_vault()
         if not (wallet_manager and wallet_manager.vault):
             return jsonify({'error': 'Vault not initialized'}), 500
         try:
-            address = wallet_manager.vault.ethAddress
-            entry = _fetch_base_proof(address)
-            total = int(entry['amountWei']) if entry else 0
-            claimed = _base_claimer().already_minted(address)
-            claimable = max(0, total - claimed)
-            WEI = 10 ** 18
-            return jsonify({
-                'address': address,
-                'total_wei': str(total),
-                'claimed_wei': str(claimed),
-                'claimable_wei': str(claimable),
-                'total': total / WEI,
-                'claimed': claimed / WEI,
-                'claimable': claimable / WEI,
-            })
+            claimer = _base_claimer()
+            _, result = _merkle_status(claimer, wallet_manager.vault.ethAddress)
+            _, result['identity'] = _merkle_status(claimer, wallet_manager.wallet.ethAddress)
+            return jsonify(result)
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -1358,29 +1367,32 @@ def register_routes(app):
     @login_required
     def api_wallet_base_claim():
         """Claim the neuron's Base rewards: fetch the proof from central and
-        submit claimMerkle signed with the vault key. The neuron holds the key
-        (it signs predictions), so it claims for itself. Needs a little ETH on
-        the user's Base address for gas."""
+        submit claimMerkle signed with the vault key, or with the identity key
+        for {"key": "identity"}. The neuron holds both keys, so it claims for
+        itself. The claiming address pays the gas, so it needs a little ETH on
+        Base; with none, it says so."""
         wallet_manager = get_or_create_session_vault()
         if not (wallet_manager and wallet_manager.vault):
             return jsonify({'error': 'Vault not initialized'}), 500
         try:
-            vault = wallet_manager.vault
-            address = vault.ethAddress
-            entry = _fetch_base_proof(address)
+            whose = 'identity' if (request.get_json(silent=True) or {}).get('key') == 'identity' else 'vault'
+            signer = wallet_manager.wallet if whose == 'identity' else wallet_manager.vault
+            claimer = _base_claimer()
+            entry, status = _merkle_status(claimer, signer.ethAddress)
             if not entry:
                 return jsonify({'error': 'Nothing to claim yet. Your address is not in the current drop.'}), 400
-            claimer = _base_claimer()
-            total = int(entry['amountWei'])
-            claimed = claimer.already_minted(address)
-            if total <= claimed:
+            if int(status['claimable_wei']) <= 0:
                 return jsonify({'error': 'Nothing to claim. You are already up to date.'}), 400
-            txhash = claimer.claim(vault.account.key.to_0x_hex(), total, entry['proof'])
+            if claimer.eth_balance(signer.ethAddress) == 0:
+                return jsonify({'error': (
+                    f"Your {whose}'s Base address {signer.ethAddress} has no ETH to pay "
+                    f"the gas. Send it a little ETH on Base, then claim again.")}), 400
+            txhash = claimer.claim(signer.account.key.to_0x_hex(), int(entry['amountWei']), entry['proof'])
             return jsonify({
                 'success': True,
                 'txhash': txhash,
-                'claimed_wei': str(total - claimed),
-                'claimed': (total - claimed) / 10 ** 18,
+                'claimed_wei': status['claimable_wei'],
+                'claimed': status['claimable'],
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500

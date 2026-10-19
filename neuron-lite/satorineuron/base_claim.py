@@ -123,9 +123,14 @@ class BaseClaimer:
         return int(self.contract.functions.alreadyMintedTo(
             to_checksum_address(address)).call())
 
+    def eth_balance(self, address: str) -> int:
+        """Wei of ETH at `address`, which pays the gas of a claim sent from it."""
+        return int(self.client.w3.eth.get_balance(to_checksum_address(address)))
+
     def claim(self, private_key: str, lifetime_entitlement: int, proof: List[str]) -> str:
         """Submit claimMerkle(lifetimeEntitlement, proof) signed by the vault
-        key. Mints the delta over what's already been claimed to msg.sender."""
+        (or identity) key. Mints the delta over what's already been claimed to
+        msg.sender."""
         return self.client.send(
             self.contract.functions.claimMerkle(int(lifetime_entitlement), list(proof)),
             private_key=private_key)
