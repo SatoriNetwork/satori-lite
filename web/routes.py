@@ -54,7 +54,8 @@ def _base_claimer():
         merkle_address=cfg['merkle'],
         airdrop_address=cfg['airdrop'],
         hub_address=cfg.get('hub'),
-        lens_address=cfg.get('lens'))
+        lens_address=cfg.get('lens'),
+        token_address=cfg.get('token'))
 
 
 def _mundoRequestSimplePartial(network: str, inputCount: int, outputCount: int) -> dict:
@@ -1314,6 +1315,39 @@ def register_routes(app):
     def api_wallet_base_token_info():
         """Base token + network parameters for MetaMask (add-network / watchAsset)."""
         return jsonify(_base_token_info())
+
+    @app.route('/api/wallet/base/balances')
+    @login_required
+    def api_wallet_base_balances():
+        """SATORI and ETH on Base for the vault (holds and stakes SATORI) and the
+        identity (the predicting wallet, pays the daily prediction gas). A read
+        that fails comes back as that address's `error`, the rest still load."""
+        wallet_manager = get_or_create_session_vault()
+        if not (wallet_manager and wallet_manager.vault):
+            return jsonify({'error': 'Vault not initialized'}), 500
+        try:
+            claimer = _base_claimer()
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+        WEI = 10 ** 18
+        result = {}
+        for whose, w in (('vault', wallet_manager.vault), ('identity', wallet_manager.wallet)):
+            if not w:
+                continue
+            entry = {'address': w.ethAddress}
+            try:
+                satori = claimer.token_balance(w.ethAddress)
+                eth = claimer.eth_balance(w.ethAddress)
+                entry.update({
+                    'satori_wei': str(satori),
+                    'eth_wei': str(eth),
+                    'satori': satori / WEI,
+                    'eth': eth / WEI,
+                })
+            except Exception as e:
+                entry['error'] = str(e)
+            result[whose] = entry
+        return jsonify(result)
 
     def _fetch_base_proof(address):
         """Fetch this address's Merkle proof from central. Returns the entry

@@ -88,6 +88,17 @@ LENS_ABI = [
     },
 ]
 
+# The SATORI ERC-20 itself, for reading balances.
+TOKEN_ABI = [
+    {
+        "name": "balanceOf",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [{"name": "account", "type": "address"}],
+        "outputs": [{"name": "", "type": "uint256"}],
+    },
+]
+
 HUB_ABI = [
     {
         "name": "claim",
@@ -106,7 +117,8 @@ class BaseClaimer:
     (SatoriHub.claim)."""
 
     def __init__(self, rpc_url: str, merkle_address: str, airdrop_address: str,
-                 hub_address: str = None, lens_address: str = None):
+                 hub_address: str = None, lens_address: str = None,
+                 token_address: str = None):
         """Addresses are injected (from satorineuron.base_config) so nothing here
         hardcodes a deployment — a Base redeploy changes only central's config.
         The web3 tx plumbing lives in the shared satorilib.chain.evm.EvmClient."""
@@ -116,6 +128,7 @@ class BaseClaimer:
         self.airdrop = self.client.contract(airdrop_address, AIRDROP_ABI)
         self.hub = self.client.contract(hub_address, HUB_ABI) if hub_address else None
         self.lens = self.client.contract(lens_address, LENS_ABI) if lens_address else None
+        self.token = self.client.contract(token_address, TOKEN_ABI) if token_address else None
 
     # ---- Merkle reward drop ------------------------------------------------
     def already_minted(self, address: str) -> int:
@@ -126,6 +139,11 @@ class BaseClaimer:
     def eth_balance(self, address: str) -> int:
         """Wei of ETH at `address`, which pays the gas of a claim sent from it."""
         return int(self.client.w3.eth.get_balance(to_checksum_address(address)))
+
+    def token_balance(self, address: str) -> int:
+        """Wei of SATORI at `address`. Staked SATORI stays in the vault (it is
+        only delegated and transfer-locked), so this includes it."""
+        return int(self.token.functions.balanceOf(to_checksum_address(address)).call())
 
     def claim(self, private_key: str, lifetime_entitlement: int, proof: List[str]) -> str:
         """Submit claimMerkle(lifetimeEntitlement, proof) signed by the vault

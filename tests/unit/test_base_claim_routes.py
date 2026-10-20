@@ -22,7 +22,13 @@ class FakeClaimer:
     def __init__(self, minted=None, eth=None):
         self.minted = minted or {}
         self.eth = eth or {}
+        self.satori = {}
         self.claims = []
+
+    def token_balance(self, address):
+        if isinstance(self.satori.get(address), Exception):
+            raise self.satori[address]
+        return self.satori.get(address, 0)
 
     def already_minted(self, address):
         return self.minted.get(address, 0)
@@ -121,3 +127,23 @@ def test_claim_defaults_to_vault(web):
     r = client.post('/api/wallet/base/claim')
     assert r.status_code == 200
     assert claimer.claims == [(VAULT_KEY, 2 * WEI, ['0x' + 'ab' * 32])]
+
+
+def test_balances_shows_vault_and_identity(web):
+    client, _, claimer = web
+    claimer.satori = {VAULT: 250 * WEI}
+    claimer.eth = {VAULT: WEI // 100, IDENTITY: WEI // 20}
+    r = client.get('/api/wallet/base/balances').get_json()
+    assert (r['vault']['address'], r['vault']['satori'], r['vault']['eth']) == (VAULT, 250.0, 0.01)
+    assert r['vault']['satori_wei'] == str(250 * WEI)
+    assert (r['identity']['address'], r['identity']['satori'], r['identity']['eth']) == (IDENTITY, 0.0, 0.05)
+
+
+def test_balances_one_failed_read_keeps_the_other(web):
+    client, _, claimer = web
+    claimer.satori = {VAULT: RuntimeError('rpc down'), IDENTITY: WEI}
+    r = client.get('/api/wallet/base/balances')
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['vault'] == {'address': VAULT, 'error': 'rpc down'}
+    assert body['identity']['satori'] == 1.0

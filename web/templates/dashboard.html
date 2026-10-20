@@ -2315,9 +2315,33 @@
                 <div class="card-body">
                     <p class="text-muted mb-3" style="font-size: 12px;">
                         Satori rewards are moving to the SATORI token on Base. Your vault key
-                        <em>is</em> your Base wallet &mdash; import it into MetaMask to see your
-                        balance and claim. Your neuron keeps working exactly as before.
+                        <em>is</em> your Base wallet. Your balances are below, and you can also
+                        import the key into MetaMask. Your neuron keeps working exactly as before.
                     </p>
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label mb-0">Balances on Base</label>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="loadBaseBalances()" title="Refresh">
+                                <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                            </button>
+                        </div>
+                        <table class="table table-sm mb-1" style="font-size: 0.8rem;">
+                            <thead><tr><th></th><th class="text-end">SATORI</th><th class="text-end">ETH</th></tr></thead>
+                            <tbody>
+                                <tr>
+                                    <td><a id="baseVaultLink" href="#" target="_blank" rel="noopener">Vault</a></td>
+                                    <td class="text-end font-monospace" id="baseVaultSatori">--</td>
+                                    <td class="text-end font-monospace" id="baseVaultEth">--</td>
+                                </tr>
+                                <tr>
+                                    <td><a id="baseIdentityLink" href="#" target="_blank" rel="noopener">Predicting wallet</a></td>
+                                    <td class="text-end font-monospace" id="baseIdentitySatori">--</td>
+                                    <td class="text-end font-monospace" id="baseIdentityEth">--</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="form-text text-muted" style="font-size:0.72rem;">Vault SATORI includes staked SATORI. ETH pays gas: the predicting wallet spends some every day.</div>
+                    </div>
                     <div class="mb-3">
                         <label class="form-label">Your Base Address</label>
                         <div class="input-group">
@@ -3763,6 +3787,29 @@
         return (typeof n === 'number')
             ? n.toLocaleString(undefined, { maximumFractionDigits: 8 })
             : (n == null ? '–' : n);
+    }
+
+    async function loadBaseBalances() {
+        const ids = { vault: 'baseVault', identity: 'baseIdentity' };
+        for (const p of Object.values(ids)) {
+            document.getElementById(p + 'Satori').textContent = '…';
+            document.getElementById(p + 'Eth').textContent = '…';
+        }
+        const result = await apiCall('/wallet/base/balances');
+        const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
+            ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+        for (const [whose, p] of Object.entries(ids)) {
+            const b = result && result[whose];
+            const ok = b && !b.error;
+            document.getElementById(p + 'Satori').textContent = ok ? _fmtSatori(b.satori) : '--';
+            document.getElementById(p + 'Eth').textContent = ok
+                ? b.eth.toLocaleString(undefined, { maximumFractionDigits: 6 }) : '--';
+            const link = document.getElementById(p + 'Link');
+            if (b && b.address) {
+                link.href = explorer + '/address/' + b.address;
+                link.title = b.address;
+            }
+        }
     }
 
     async function loadClaimable(force) {
@@ -6538,6 +6585,7 @@
             // checkHealth();
             loadWalletAddresses();
             loadBaseIdentity();  // Base/EVM address + token info for MetaMask
+            loadBaseBalances();  // SATORI and ETH on Base, vault and predicting wallet
             loadClaimable();  // Base reward claim amount
             loadAirdrop();  // Base airdrop claim amount
             loadPredictionRewards();  // Base on-chain prediction rewards

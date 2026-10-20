@@ -158,3 +158,31 @@ def test_eth_balance_reads_the_address(claimer):
     claimer.client._w3 = type("W3", (), {"eth": Eth()})()
     assert claimer.eth_balance(USER.lower()) == 7
     assert seen["address"] == USER
+
+
+# ── Balances: SATORI on the token contract ──
+
+TOKEN = "0x4dee947383d5C9c8E421F55Fe3518a29324aE469"
+
+
+def test_token_balance_reads_balance_of(monkeypatch):
+    monkeypatch.setitem(sys.modules, "satorilib.chain.evm", _load("evm", _EVM))
+    claimer = BaseClaimer(rpc_url="http://127.0.0.1:1", merkle_address=MERKLE,
+                          airdrop_address=AIRDROP, token_address=TOKEN)
+    assert claimer.token.address == TOKEN
+    seen = {}
+
+    class Call:
+        def __init__(self, account):
+            seen["account"] = account
+
+        def call(self):
+            return 3 * 10 ** 18
+
+    monkeypatch.setattr(claimer.token.functions, "balanceOf", Call)
+    assert claimer.token_balance(USER.lower()) == 3 * 10 ** 18
+    assert seen["account"] == USER
+
+
+def test_token_optional(claimer):
+    assert claimer.token is None
