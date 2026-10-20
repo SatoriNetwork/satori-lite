@@ -1176,20 +1176,20 @@
             </div>
         </div>
 
-        <!-- Nostr-Evrmore Address -->
+        <!-- Relay reward address (Base) -->
         <div class="col-12">
             <div class="card">
                 <div class="card-header">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2">account_balance</i>
-                        Nostr-Derived Evrmore Address
+                        Relay Reward Address (Base)
                     </h5>
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-3">
-                        This Evrmore address is derived from your Nostr public key
-                        using the even-y (0x02) convention. Relay rewards can be sent
-                        directly to this address.
+                        Central pays relay rewards to the Base address of your relay's
+                        Nostr public key (even-y, 0x02 convention). This is the address
+                        central lists for your relay.
                     </p>
                     <div class="settings-grid mb-4">
                         <div class="settings-stat">
@@ -1197,7 +1197,7 @@
                             <div class="settings-stat-value font-mono-small" id="evrNostrPubkey">-</div>
                         </div>
                         <div class="settings-stat">
-                            <div class="settings-stat-label">Evrmore Address</div>
+                            <div class="settings-stat-label">Base Address</div>
                             <div class="settings-stat-value font-mono-small" id="evrDerivedAddress">-</div>
                         </div>
                     </div>
@@ -1206,7 +1206,7 @@
                     <h6>Key Normalization Tool</h6>
                     <p class="text-muted mb-3">
                         If you are a relay operator, enter your Nostr private key below
-                        to get the normalized version for importing into an Evrmore wallet.
+                        to get the normalized version for importing into a Base wallet such as MetaMask.
                         About half of all keys need normalization so the wallet address
                         matches the one derived from the Nostr pubkey.
                     </p>
@@ -1226,7 +1226,7 @@
                                      style="user-select:all">-</div>
                             </div>
                             <div class="settings-stat">
-                                <div class="settings-stat-label">Evrmore Address</div>
+                                <div class="settings-stat-label">Base Address</div>
                                 <div class="settings-stat-value font-mono-small" id="normAddress">-</div>
                             </div>
                             <div class="settings-stat">
@@ -1235,7 +1235,7 @@
                             </div>
                         </div>
                         <div class="alert alert-info mt-3 mb-0">
-                            Import the normalized secret into any Evrmore-compatible wallet
+                            Import the normalized secret into MetaMask (or any Base wallet)
                             to spend rewards sent to the address above.
                         </div>
                     </div>
@@ -1518,13 +1518,14 @@
         loadCustomRelays();
     }
 
-    // ── Nostr-Evrmore Address ───────────────────────────────────
+    // ── Relay reward address (Base, from central) ──────────────
     async function loadEvrAddress() {
         try {
-            const resp = await fetch('/api/nostr/evr-address');
+            const resp = await fetch('/api/nostr/relay-address');
             const data = await resp.json();
             document.getElementById('evrNostrPubkey').textContent = data.nostr_pubkey || '-';
-            document.getElementById('evrDerivedAddress').textContent = data.evr_address || '-';
+            document.getElementById('evrDerivedAddress').textContent =
+                data.address || (data.error ? 'Error' : 'Not listed by central');
         } catch (err) {
             document.getElementById('evrDerivedAddress').textContent = 'Error';
         }
@@ -1551,7 +1552,7 @@
                 return;
             }
             document.getElementById('normSecret').textContent = data.secret_hex;
-            document.getElementById('normAddress').textContent = data.evr_address;
+            document.getElementById('normAddress').textContent = data.base_address;
             document.getElementById('normNegated').textContent =
                 data.was_negated ? 'Yes (key was negated for even-y)' : 'No (already even-y)';
             resultEl.classList.remove('d-none');

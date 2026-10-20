@@ -3785,31 +3785,35 @@ def register_routes(app):
         startup.networkDB.delete_relay(relay_url)
         return jsonify({'ok': True})
 
-    # ── Nostr-Evrmore Address Derivation ─────────────────────────
+    # ── Relay reward address ─────────────────────────────────────
 
-    @app.route('/api/nostr/evr-address', methods=['GET'])
+    @app.route('/api/nostr/relay-address', methods=['GET'])
     @login_required
-    def api_nostr_evr_address():
-        """Derive the Evrmore address for this node's Nostr pubkey."""
+    def api_nostr_relay_address():
+        """The Base address central pays this node's relay at: the `address`
+        of central's /peer/relays entry for our Nostr pubkey (None if central
+        doesn't list our relay)."""
         startup = get_startup()
         if not startup or not getattr(startup, 'nostrPubkey', None):
             return jsonify({'error': 'Not ready'}), 503
-        from satorineuron.common.nostr_evrmore import (
-            nostr_pubkey_to_evr_address)
-        address = nostr_pubkey_to_evr_address(startup.nostrPubkey)
-        return jsonify({
-            'nostr_pubkey': startup.nostrPubkey,
-            'evr_address': address,
-        })
+        ours = startup.nostrPubkey.lower()
+        try:
+            relays = startup.server.getRelays()
+        except Exception as e:
+            return jsonify({'nostr_pubkey': startup.nostrPubkey, 'error': str(e)}), 502
+        address = next((r.get('address') for r in relays
+                        if (r.get('nostr_pubkey') or '').lower() == ours), None)
+        return jsonify({'nostr_pubkey': startup.nostrPubkey, 'address': address})
 
     @app.route('/api/nostr/normalize-key', methods=['POST'])
     @login_required
     def api_nostr_normalize_key():
-        """Normalize a Nostr private key for even-y Evrmore address derivation.
+        """Normalize a Nostr private key for even-y address derivation.
 
         Takes a Nostr secret (hex or nsec) and returns the normalized key
-        that produces the even-y (0x02) compressed public key, ensuring the
-        Evrmore address matches the one derived from the Nostr pubkey.
+        that produces the even-y (0x02) compressed public key, so the key
+        controls the Base address central derives from the Nostr pubkey
+        (`base_address`, where relay rewards are paid).
         """
         data = request.get_json(force=True, silent=True) or {}
         secret = (data.get('secret') or '').strip()
@@ -3828,7 +3832,10 @@ def register_routes(app):
         try:
             from satorineuron.common.nostr_evrmore import (
                 normalize_nostr_secret)
+            from satorineuron.base_predict import evm_address_from_pubkey
             result = normalize_nostr_secret(secret)
+            # the Base address central pays the relay at (same 02+x key)
+            result['base_address'] = evm_address_from_pubkey(result['evr_compressed'])
             return jsonify(result)
         except Exception as e:
             return jsonify({'error': str(e)}), 400
