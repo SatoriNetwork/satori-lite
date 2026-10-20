@@ -71,11 +71,10 @@ def test_wallet_auth_payload(test_wallet):
     payload = test_wallet.authPayload(asDict=True, challenge=challenge)
 
     assert isinstance(payload, dict), "authPayload should return dict when asDict=True"
-    # The keys are the HTTP header names central's legacy auth reads
-    assert set(payload) == {'wallet-pubkey', 'message', 'address', 'signature'}
+    # The keys are the HTTP header names central's legacy auth reads (no address)
+    assert set(payload) == {'wallet-pubkey', 'message', 'signature'}
     assert payload['wallet-pubkey'] == test_wallet.pubkey
     assert payload['message'] == challenge
-    assert payload['address'] == test_wallet.address
 
     # The signature is EIP-191 (personal_sign): 0x + r || s || v
     assert payload['signature'].startswith('0x') and len(payload['signature']) == 132
