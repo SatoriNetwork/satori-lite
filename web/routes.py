@@ -1243,17 +1243,18 @@ def register_routes(app):
     @app.route('/api/wallet/address')
     @login_required
     def api_wallet_address():
-        """Get wallet and vault addresses."""
+        """The identity's and the vault's Base addresses (what central keys
+        this neuron by), and the identity pubkey."""
         wallet_manager = get_or_create_session_vault()
         if wallet_manager:
             result = {}
             # Get wallet address
-            if wallet_manager.wallet and hasattr(wallet_manager.wallet, 'address'):
-                result['wallet_address'] = wallet_manager.wallet.address
+            if wallet_manager.wallet:
+                result['wallet_address'] = wallet_manager.wallet.ethAddress
                 result['wallet_pubkey'] = getattr(wallet_manager.wallet, 'pubkey', None)
             # Get vault address
-            if wallet_manager.vault and hasattr(wallet_manager.vault, 'address'):
-                result['vault_address'] = wallet_manager.vault.address
+            if wallet_manager.vault:
+                result['vault_address'] = wallet_manager.vault.ethAddress
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 result['nostr_pubkey'] = startup.nostrPubkey

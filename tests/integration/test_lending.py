@@ -6,6 +6,9 @@ Tests lender relationship creation, removal, and status checking.
 import pytest
 import requests
 
+# Pools are named by their Base address (a throwaway one).
+POOL_ADDRESS = "0x52908400098527886E0F7030069857D2E4169EE7"
+
 
 @pytest.mark.integration
 @pytest.mark.lending
@@ -13,7 +16,7 @@ def test_create_lending_requires_auth(server_url, server_available):
     """Test POST /api/v1/lender/lend requires authentication."""
     response = requests.post(
         f"{server_url}/api/v1/lender/lend",
-        json={"pool_address": "EPoolAddress123"}
+        json={"pool_address": POOL_ADDRESS}
     )
 
     # Should reject unauthenticated request
@@ -49,7 +52,7 @@ def test_create_lending_with_invalid_auth(server_url, server_available, challeng
     response = requests.post(
         f"{server_url}/api/v1/lender/lend",
         headers=headers,
-        json={"pool_address": "EPoolAddress123"}
+        json={"pool_address": POOL_ADDRESS}
     )
 
     # Should reject invalid signature (mock wallet)
@@ -92,7 +95,7 @@ def test_lending_payload_structure(server_url, server_available, challenge_token
     """Test lending payload is correctly structured."""
     headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
 
-    payload = {"pool_address": "EPoolAddress123456789"}
+    payload = {"pool_address": POOL_ADDRESS}
 
     response = requests.post(
         f"{server_url}/api/v1/lender/lend",
@@ -116,7 +119,7 @@ def test_lending_endpoints_exist(server_url, server_available, challenge_token, 
     response1 = requests.post(
         f"{server_url}/api/v1/lender/lend",
         headers=headers,
-        json={"pool_address": "ETestPool"}
+        json={"pool_address": POOL_ADDRESS}
     )
     assert response1.status_code != 404
 

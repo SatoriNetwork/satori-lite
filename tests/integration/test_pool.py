@@ -6,6 +6,9 @@ Tests pool/worker relationship creation, removal, and open status toggling.
 import pytest
 import requests
 
+# Workers are named by their Base address (a throwaway one).
+WORKER_ADDRESS = "0x52908400098527886E0F7030069857D2E4169EE7"
+
 
 @pytest.mark.integration
 @pytest.mark.pool
@@ -13,7 +16,7 @@ def test_add_worker_requires_auth(server_url, server_available):
     """Test POST /api/v1/pool/worker requires authentication."""
     response = requests.post(
         f"{server_url}/api/v1/pool/worker",
-        json={"worker_address": "EWorkerAddress123"}
+        json={"worker_address": WORKER_ADDRESS}
     )
 
     # Should reject unauthenticated request
@@ -25,7 +28,7 @@ def test_add_worker_requires_auth(server_url, server_available):
 def test_remove_worker_requires_auth(server_url, server_available):
     """Test DELETE /api/v1/pool/worker/{address} requires authentication."""
     response = requests.delete(
-        f"{server_url}/api/v1/pool/worker/EWorkerAddress123"
+        f"{server_url}/api/v1/pool/worker/{WORKER_ADDRESS}"
     )
 
     # Should reject unauthenticated request
@@ -51,7 +54,7 @@ def test_add_worker_with_invalid_auth(server_url, server_available, challenge_to
     response = requests.post(
         f"{server_url}/api/v1/pool/worker",
         headers=headers,
-        json={"worker_address": "EWorkerAddress123"}
+        json={"worker_address": WORKER_ADDRESS}
     )
 
     # Should reject invalid signature (mock wallet)
@@ -65,7 +68,7 @@ def test_remove_worker_with_invalid_auth(server_url, server_available, challenge
     headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.delete(
-        f"{server_url}/api/v1/pool/worker/EWorkerAddress123",
+        f"{server_url}/api/v1/pool/worker/{WORKER_ADDRESS}",
         headers=headers
     )
 
@@ -94,7 +97,7 @@ def test_add_worker_payload_structure(server_url, server_available, challenge_to
     """Test add worker payload is correctly structured."""
     headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
 
-    payload = {"worker_address": "EWorkerAddress123456789"}
+    payload = {"worker_address": WORKER_ADDRESS}
 
     response = requests.post(
         f"{server_url}/api/v1/pool/worker",
@@ -114,7 +117,7 @@ def test_remove_worker_url_parameter(server_url, server_available, challenge_tok
     """Test remove worker uses URL path parameter correctly."""
     headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
 
-    worker_address = "EWorkerAddress123456789"
+    worker_address = WORKER_ADDRESS
 
     response = requests.delete(
         f"{server_url}/api/v1/pool/worker/{worker_address}",
@@ -177,13 +180,13 @@ def test_pool_endpoints_exist(server_url, server_available, challenge_token, tes
     response1 = requests.post(
         f"{server_url}/api/v1/pool/worker",
         headers=headers,
-        json={"worker_address": "ETestWorker"}
+        json={"worker_address": WORKER_ADDRESS}
     )
     assert response1.status_code != 404
 
     # Test DELETE /api/v1/pool/worker/{address}
     response2 = requests.delete(
-        f"{server_url}/api/v1/pool/worker/ETestWorker",
+        f"{server_url}/api/v1/pool/worker/{WORKER_ADDRESS}",
         headers=headers
     )
     assert response2.status_code != 404
