@@ -10,6 +10,12 @@ import requests
 WORKER_ADDRESS = "0x52908400098527886E0F7030069857D2E4169EE7"
 
 
+def route_exists(response):
+    """A missing route answers 404 "Not Found"; a 404 naming an unknown peer
+    (a valid Base address nobody registered) means the route is there."""
+    return response.status_code != 404 or response.json().get("detail") != "Not Found"
+
+
 @pytest.mark.integration
 @pytest.mark.pool
 def test_add_worker_requires_auth(server_url, server_available):
@@ -126,7 +132,7 @@ def test_remove_worker_url_parameter(server_url, server_available, challenge_tok
 
     # Will fail auth (401) but tests that URL structure is correct
     # If we got 404, it means URL pattern is wrong
-    assert response.status_code != 404, "URL pattern should be valid"
+    assert route_exists(response), "URL pattern should be valid"
     assert response.status_code == 401  # Auth failure expected
 
 
@@ -182,14 +188,14 @@ def test_pool_endpoints_exist(server_url, server_available, challenge_token, tes
         headers=headers,
         json={"worker_address": WORKER_ADDRESS}
     )
-    assert response1.status_code != 404
+    assert route_exists(response1)
 
     # Test DELETE /api/v1/pool/worker/{address}
     response2 = requests.delete(
         f"{server_url}/api/v1/pool/worker/{WORKER_ADDRESS}",
         headers=headers
     )
-    assert response2.status_code != 404
+    assert route_exists(response2)
 
     # Test POST /api/v1/pool/toggle-open
     response3 = requests.post(

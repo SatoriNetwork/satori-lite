@@ -10,6 +10,12 @@ import requests
 POOL_ADDRESS = "0x52908400098527886E0F7030069857D2E4169EE7"
 
 
+def route_exists(response):
+    """A missing route answers 404 "Not Found"; a 404 naming an unknown peer
+    (a valid Base address nobody registered) means the route is there."""
+    return response.status_code != 404 or response.json().get("detail") != "Not Found"
+
+
 @pytest.mark.integration
 @pytest.mark.lending
 def test_create_lending_requires_auth(server_url, server_available):
@@ -121,7 +127,7 @@ def test_lending_endpoints_exist(server_url, server_available, challenge_token, 
         headers=headers,
         json={"pool_address": POOL_ADDRESS}
     )
-    assert response1.status_code != 404
+    assert route_exists(response1)
 
     # Test DELETE /api/v1/lender/lend
     response2 = requests.delete(
