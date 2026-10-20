@@ -2,7 +2,7 @@
 
 Quick reference for Independent Predictors, Pool Operators, and Pool Stakers.
 
-> **Note:** This guide includes placeholders for screenshots of recently added features (pool stakers list, audit downloads, automated payments). See `capture-screenshots.md` for instructions on capturing these screenshots when the application is running.
+> **Note:** This guide includes placeholders for screenshots of recently added features (pool stakers list, audit downloads). See `capture-screenshots.md` for instructions on capturing these screenshots when the application is running.
 
 ---
 
@@ -120,30 +120,7 @@ each_staker_owed = (their_contribution / total_contributions) × total_owed
 
 ### Paying Pool Stakers
 
-**Manual option:**
-1. Download lenders.json audit file
-2. Read the `owed_amount` for each pool staker
-3. Send SATORI tokens manually to each pool staker address
-
-**Automatic option:**
-1. Click "Pay Lenders From Audit" button in Dashboard → Pool section
-2. System reads latest lenders.json automatically
-3. Confirms payment details (shows total amount and number of pool stakers)
-4. Sends one transaction to all pool stakers (up to 1000 pool stakers supported)
-
-> **📸 SCREENSHOT NEEDED:** Dashboard Pool section showing:
-> - Green "Pay Pool Stakers From Audit" button
-> - Help text: "Automatically pay your pool stakers based on the latest audit file"
->
-> **📸 SCREENSHOT NEEDED:** Payment confirmation dialog showing:
-> - "Pay 2 pool stakers a total of 46.5 SATORI?"
-> - List of pool stakers with amounts
-> - OK/Cancel buttons
-
-**Requirements for automatic payment:**
-- Vault must be unlocked
-- Sufficient SATORI balance to cover total owed amount
-- Maximum 1000 pool stakers per transaction
+Download lenders.json, read the `owed_amount` for each pool staker, and send it to that pool staker's address.
 
 ---
 
@@ -202,7 +179,6 @@ each_staker_owed = (their_contribution / total_contributions) × total_owed
    - Set commission percentage
    - View workers and pool stakers lists
    - Download audit files (workers.json, lenders.json)
-   - Pay pool stakers automatically
 
 4. **Pool Staking** (for pool stakers only)
    - Select pool to stake to
@@ -213,7 +189,7 @@ each_staker_owed = (their_contribution / total_contributions) × total_owed
 ## Key Concepts
 
 **Addresses:**
-- **Wallet Address** - Your main receiving address (starts with E)
+- **Wallet Address** - Your identity address (a Base address, 0x...)
 - **Vault Address** - Separate address for storing funds (optional)
 - **Reward Address** - Where your prediction rewards are sent
 
@@ -250,9 +226,6 @@ A: No, you can only stake to one pool at a time.
 **Q: What if pool operator doesn't pay commission?**
 A: Commission payment is off-chain and relies on pool operator honesty. Choose reputable pools. Audit files provide transparent proof of what's owed.
 
-**Q: How many pool stakers can receive payment in one transaction?**
-A: Up to 1000 pool stakers per transaction using the automated payment system.
-
 **Q: What happens if I don't have 50 SATORI?**
 A: You won't qualify for rewards. Join a pool to get boosted, or acquire more tokens.
 
@@ -273,7 +246,6 @@ GET https://central.satorinet.io/api/v1/audit/stakers/latest
 GET /api/v1/pool/workers - List your pool's workers
 GET /api/v1/pool/lenders - List your pool's pool stakers
 POST /api/v1/peer/reward-address - Set your reward address
-POST /api/lender/pay - Pay pool stakers from audit (frontend only)
 ```
 
 ---

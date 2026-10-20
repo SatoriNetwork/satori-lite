@@ -4,7 +4,7 @@ The dashboard and stake page send central the addresses /api/wallet/address
 gives, so those are the Base addresses of the identity and the vault. The
 settings relay card shows the Base address central pays this node's relay at
 (its /peer/relays entry), and the key normalizer gives the Base address that
-key controls.
+key controls. /api/lender/pay (an Evrmore send to central's addresses) is gone.
 """
 from unittest import mock
 
@@ -69,3 +69,8 @@ def test_normalized_key_gives_its_base_address(web):
     secret = '7f' * 32
     r = client.post('/api/nostr/normalize-key', json={'secret': secret}).get_json()
     assert r['base_address'] == Account.from_key(r['secret_hex']).address
+
+
+def test_lender_pay_is_gone(web):
+    client, _ = web
+    assert client.post('/api/lender/pay', json={'payments': {}}).status_code == 404
