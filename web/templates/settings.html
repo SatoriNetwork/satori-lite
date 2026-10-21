@@ -1660,7 +1660,23 @@
     function copyToClipboard(elId) {
         const el = document.getElementById(elId);
         if (!el) return;
-        navigator.clipboard.writeText(el.value || el.textContent || '').catch(()=>{});
+        const text = el.value || el.textContent || '';
+        const icon = el.nextElementSibling && el.nextElementSibling.querySelector('.material-icons');
+        const done = () => {
+            if (!icon) return;
+            icon.textContent = 'check';
+            setTimeout(() => { icon.textContent = 'content_copy'; }, 1500);
+        };
+        // Clipboard API only exists on HTTPS or localhost; fall back to execCommand
+        const fallback = () => {
+            el.select();
+            if (document.execCommand('copy')) done();
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(fallback);
+        } else {
+            fallback();
+        }
     }
 
     async function registerRelay() {
