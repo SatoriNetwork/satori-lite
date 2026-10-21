@@ -920,7 +920,7 @@ class TestBridgeObservationValues:
         def inbound(event_id, seq):
             return types.SimpleNamespace(
                 stream_name='satori-84532-1', nostr_pubkey='bridgepub',
-                event_id=event_id,
+                event_id=event_id, paid=False,
                 observation=DatastreamObservation(
                     stream_name='satori-84532-1', timestamp=1787313600,
                     value=self._bridge(raw='1'), seq_num=seq))

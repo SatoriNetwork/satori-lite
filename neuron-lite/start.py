@@ -49,6 +49,47 @@ def _centralReason(text: str) -> str:
     return detail if isinstance(detail, str) else ''
 
 
+class _MarketRelays:
+    """The paid-stream market's Nostr (satorineuron.market's `send`): every
+    connected relay."""
+
+    def __init__(self, startup):
+        self.startup = startup
+
+    def _clients(self):
+        return list(self.startup._networkClients.items())
+
+    async def subscription(self, provider, stream, payment_channel):
+        for url, client in self._clients():
+            try:
+                await client.subscribe_datastream(
+                    stream, provider, payment_channel=payment_channel)
+            except Exception as e:
+                logging.warning(f'Market: subscribe failed {stream} on {url}: {e}')
+
+    async def unsubscribe(self, provider, stream):
+        await self.startup._publishUnsubscribeNow(stream, provider)
+
+    async def payment(self, provider, stream, seq, amount_sats, voucher):
+        for url, client in self._clients():
+            try:
+                await client.send_payment(
+                    provider, stream, seq, amount_sats, voucher=voucher)
+            except Exception as e:
+                logging.warning(f'Market: payment failed {stream} on {url}: {e}')
+
+    async def deliver(self, observation, buyer) -> bool:
+        took = False
+        for url, client in self._clients():
+            try:
+                if await client.deliver_observation(observation, buyer):
+                    took = True
+            except Exception as e:
+                logging.warning(
+                    f'Market: delivery of {observation.stream_name} failed on {url}: {e}')
+        return took
+
+
 class SingletonMeta(type):
     _instances = {}
 
@@ -114,9 +155,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._predictionListeners: dict = {}  # relay_url -> asyncio.Task
         self._accessRequestListeners: dict = {}  # relay_url -> asyncio.Task
         self._settledChannels: set = set()  # p2sh addresses settled this session (race guard)
-        self._paymentCooldowns: dict = {}  # (stream, provider) -> last payment timestamp
-        self._paymentDeferred: dict = {}   # (stream, provider) -> asyncio.TimerHandle
-        self._channelPayLocks: dict = {}   # p2sh_address -> asyncio.Lock (Fix H)
+        self._marketListeners: dict = {}  # relay_url -> asyncio.Task (paid-stream subscriptions + payments)
+        self.market = None  # satorineuron.market.Market, on the network loop
         self._mundoCache: dict = {}        # p2sh_address -> {signed_hex, incomplete_hex, ...} (Fix J)
         self._dataSourceTasks: dict = {}  # stream_name -> (asyncio.Task, cadence)
         self._networkFirstRun: bool = True
@@ -230,7 +270,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Every hour:
         1. Reconcile subscriptions (connect, discover, subscribe)
         2. Ensure relay connections exist for active publications
-        3. Restore subscriber access
+        3. The paid-stream market's pass (settle daily, withdraw refunds)
         4. Check channel expiries
 
         Each data source gets its own asyncio task (managed by
@@ -253,6 +293,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._channelTombstoneListeners.clear()
         self._predictionListeners.clear()
         self._accessRequestListeners.clear()
+        self._marketListeners.clear()
         self._settledChannels.clear()
         self._networkSubscribed.clear()
         for _sn, (task, _cad) in list(self._dataSourceTasks.items()):
@@ -271,6 +312,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 _ndb.setMaxTotalStreams(cfg['max_streams'])
         except Exception:
             pass
+
+        try:
+            self.market = await asyncio.to_thread(self._networkCreateMarket)
+            await self.market.load()
+        except Exception as e:
+            self.market = None
+            logging.error(f'Network: paid-stream market not started: {e}')
 
         fetch_task = None
         next_relay_publish_at = 0.0
@@ -292,10 +340,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._networkEnsurePublisherConnections(SatoriNostrConfig)
                 except Exception as e:
                     logging.error(f'Network publisher connect error: {e}')
-                try:
-                    await self._networkRestoreSubscriberAccess()
-                except Exception as e:
-                    logging.error(f'Network subscriber access restore error: {e}')
+                if self.market is not None:
+                    await self.market.pass_()
                 # Start the data source manager after the first reconcile
                 # cycle so publisher relay connections exist before the
                 # first fetch attempts to publish.
@@ -306,10 +352,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._channelExpiryCheck()
                 except Exception as e:
                     logging.error(f'Channel expiry check error: {e}')
-                try:
-                    await self._channelResendStaleCommitments()
-                except Exception as e:
-                    logging.error(f'Channel stale resend error: {e}')
                 if time.monotonic() >= next_relay_publish_at:
                     try:
                         await self._networkPublishRelayList()
@@ -359,40 +401,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if relay_url in self._networkClients:
                 self._networkEnsurePredictionListener(relay_url)
                 self._networkEnsureAccessRequestListener(relay_url)
-
-    async def _networkRestoreSubscriberAccess(self):
-        """Restore persisted subscriber access into connected clients.
-
-        On provider restart, _subscribers in each SatoriNostr client is empty.
-        This reloads the subscriber_access table and populates every connected
-        client so that subscribers who already paid don't lose their access
-        rights while waiting for a new subscription announcement.
-
-        Called every reconcile cycle but is idempotent — record_payment only
-        advances last_paid_seq, never regresses it.
-        """
-        records = await asyncio.to_thread(
-            self.networkDB.load_subscriber_access)
-        if not records:
-            return
-        restored = 0
-        for rec in records:
-            stream_name = rec['stream_name']
-            nostr_pubkey = rec['nostr_pubkey']
-            last_paid_seq = rec['last_paid_seq']
-            if not nostr_pubkey or last_paid_seq <= 0:
-                continue
-            for client in self._networkClients.values():
-                if nostr_pubkey not in client._subscribers.get(
-                        stream_name, {}):
-                    client.record_subscription(stream_name, nostr_pubkey)
-                client.record_payment(stream_name, nostr_pubkey, last_paid_seq)
-            restored += 1
-        if restored:
-            logging.info(
-                f'Channel: restored {restored} subscriber access records '
-                f'from DB',
-                color='cyan')
 
     async def _networkPublishRelayList(self):
         """Publish a NIP-65 relay list (kind 10002) to all connected relays.
@@ -445,6 +453,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             self._networkEnsureChannelOpenListener(relay_url)
             self._networkEnsureSettlementListener(relay_url)
             self._networkEnsureTombstoneListener(relay_url)
+            self._networkEnsureMarketListener(relay_url)
             obs_task = self._networkListeners.get(relay_url)
             if not (obs_task and not obs_task.done()):
                 self._networkListeners[relay_url] = asyncio.ensure_future(
@@ -636,6 +645,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         artask = self._accessRequestListeners.pop(relay_url, None)
         if artask and not artask.done():
             artask.cancel()
+        mtask = self._marketListeners.pop(relay_url, None)
+        if mtask and not mtask.done():
+            mtask.cancel()
         if relay_url in self._networkClients:
             try:
                 await self._networkClients[relay_url].stop()
@@ -681,10 +693,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     obs.stream_name,
                     obs.nostr_pubkey,
                     obs.observation)
-            # Pay for this observation if the stream has a price and we have
-            # an open channel to this provider
-            await self._channelPayForObservation(
-                obs.stream_name, obs.nostr_pubkey, obs.observation.seq_num)
+            # A paid delivery of a stream we buy: the identity's next voucher
+            if obs.paid and self.market is not None:
+                try:
+                    await self.market.received(
+                        obs.nostr_pubkey, obs.stream_name,
+                        obs.observation.seq_num)
+                except Exception as e:
+                    logging.warning(f'Market: paying for {obs.stream_name} failed: {e}')
             # Score bounty predictions and pay predictors if we host one
             await self._bountyScoreAndPay(
                 stream_name=obs.stream_name,
@@ -907,169 +923,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Bounty: channel transfer failed for '
                 f'{predictor_nostr_pubkey[:12]}… (payment recorded, '
                 f'transfer pending): {e}')
-
-    async def _channelPayForObservation(
-        self,
-        stream_name: str,
-        provider_pubkey: str,
-        seq_num: int,
-    ) -> None:
-        """Pay for an observation via a channel (sender/buyer side).
-
-        Fix F — state-based trigger: fires a payment iff the subscriber's
-        persisted last_paid_seq is behind the incoming seq_num. This avoids
-        both over-paying on bursts and under-paying on replays/stale data.
-        The cooldown stays as a rate-limiter inside, not the entrance gate.
-        """
-        try:
-            conn_rows = await asyncio.to_thread(self.networkDB.get_active)
-            subscription = next(
-                (s for s in conn_rows
-                 if s['stream_name'] == stream_name
-                 and s['provider_pubkey'] == provider_pubkey),
-                None)
-            if not subscription or subscription.get('price_per_obs', 0) == 0:
-                return  # free stream
-            # State gate: only pay if we're behind
-            last_paid = subscription.get('last_paid_seq', 0) or 0
-            if seq_num <= last_paid:
-                return
-            price_sats = subscription['price_per_obs']
-            cadence = subscription.get('cadence_seconds') or 0
-            cooldown = cadence / 2 if cadence > 0 else 0
-            key = (stream_name, provider_pubkey)
-            now = time.time()
-            last_paid_time = self._paymentCooldowns.get(key, 0)
-            if cooldown > 0 and (now - last_paid_time) < cooldown:
-                # Inside cooldown — schedule one deferred payment at cooldown end
-                if key not in self._paymentDeferred:
-                    delay = cooldown - (now - last_paid_time)
-                    loop = asyncio.get_event_loop()
-                    self._paymentDeferred[key] = loop.call_later(
-                        delay,
-                        lambda k=key, s=stream_name, p=provider_pubkey:
-                            asyncio.ensure_future(
-                                self._channelPayDeferred(s, p)))
-                    logging.debug(
-                        f'Channel: deferred payment for {stream_name} '
-                        f'in {delay:.1f}s (cooldown)')
-                return
-            await self._channelPayNow(stream_name, provider_pubkey, price_sats)
-            # Advance last_paid_seq so we don't double-pay
-            await asyncio.to_thread(
-                self.networkDB.update_last_paid_seq,
-                stream_name, provider_pubkey, seq_num)
-        except Exception as e:
-            logging.warning(f'Channel: pay-for-observation failed: {e}')
-
-    async def _channelPayDeferred(
-        self,
-        stream_name: str,
-        provider_pubkey: str,
-    ) -> None:
-        """Execute a deferred payment scheduled during cooldown."""
-        key = (stream_name, provider_pubkey)
-        self._paymentDeferred.pop(key, None)
-        try:
-            conn_rows = await asyncio.to_thread(self.networkDB.get_active)
-            subscription = next(
-                (s for s in conn_rows
-                 if s['stream_name'] == stream_name
-                 and s['provider_pubkey'] == provider_pubkey),
-                None)
-            if not subscription or subscription.get('price_per_obs', 0) == 0:
-                return
-            price_sats = subscription['price_per_obs']
-            await self._channelPayNow(stream_name, provider_pubkey, price_sats)
-            # Advance last_paid_seq to the highest observation we've received
-            max_seq = await asyncio.to_thread(
-                self.networkDB.max_observation_seq,
-                stream_name, provider_pubkey)
-            if max_seq > 0:
-                await asyncio.to_thread(
-                    self.networkDB.update_last_paid_seq,
-                    stream_name, provider_pubkey, max_seq)
-        except Exception as e:
-            logging.warning(f'Channel: deferred payment failed: {e}')
-
-    async def _channelPayNow(
-        self,
-        stream_name: str,
-        provider_pubkey: str,
-        price_sats: int,
-    ) -> None:
-        """Send a channel payment immediately and reset the cooldown timer.
-
-        Handles channel lookup, refund if exhausted, and open if none exists.
-        Fix H: the read-build-write is serialized per channel with an
-        asyncio.Lock so two concurrent observations don't produce duplicate
-        commitments referencing the same prior state.
-        """
-        await self._channelEnsureWallet()
-        conn_rows = await asyncio.to_thread(self.networkDB.get_active)
-        subscription = next(
-            (s for s in conn_rows
-             if s['stream_name'] == stream_name
-             and s['provider_pubkey'] == provider_pubkey),
-            None)
-        provider_wallet_pubkey = (
-            subscription.get('provider_wallet_pubkey') if subscription else None)
-        if not provider_wallet_pubkey:
-            return
-        channels = await asyncio.to_thread(
-            self.networkDB.get_channels_as_sender)
-        channel = next(
-            (c for c in channels
-             if c['receiver_pubkey'] == provider_wallet_pubkey),
-            None)
-        # Acquire a per-channel lock for the remainder read → build → write
-        p2sh = channel['p2sh_address'] if channel else None
-        if p2sh and p2sh not in self._channelPayLocks:
-            self._channelPayLocks[p2sh] = asyncio.Lock()
-        lock = self._channelPayLocks.get(p2sh) if p2sh else None
-        if lock:
-            await lock.acquire()
-        try:
-            # Re-read channel inside the lock so we see the latest remainder
-            if channel:
-                channel = await asyncio.to_thread(
-                    self.networkDB.get_channel, channel['p2sh_address'])
-            if channel and channel['remainder_sats'] < price_sats:
-                fund_sats = self._channelFundSats(price_sats)
-                logging.info(
-                    f'Channel: refunding {channel["p2sh_address"]} '
-                    f'(remainder={channel["remainder_sats"]}) '
-                    f'with {fund_sats} sats',
-                    color='cyan')
-                await self.refundChannel(channel['p2sh_address'], fund_sats)
-                channel = await asyncio.to_thread(
-                    self.networkDB.get_channel, channel['p2sh_address'])
-                if not channel or channel['remainder_sats'] < price_sats:
-                    return
-            elif not channel:
-                fund_sats = self._channelFundSats(price_sats)
-                timeout_minutes = self._channelTimeoutMinutes()
-                logging.info(
-                    f'Channel: auto-opening to {provider_wallet_pubkey[:16]}… '
-                    f'fund={fund_sats} sats timeout={timeout_minutes} min',
-                    color='cyan')
-                new_p2sh = await self.openChannel(
-                    receiver_pubkey=provider_wallet_pubkey,
-                    amount_sats=fund_sats,
-                    minutes=timeout_minutes,
-                    receiver_nostr_pubkey=provider_pubkey,
-                )
-                channel = await asyncio.to_thread(
-                    self.networkDB.get_channel, new_p2sh)
-                if not channel or channel['remainder_sats'] < price_sats:
-                    return
-            await self.sendChannelPayment(
-                channel['p2sh_address'], price_sats, stream_name)
-            key = (stream_name, provider_pubkey)
-            self._paymentCooldowns[key] = time.time()
-        finally:
-            if lock:
-                lock.release()
 
     async def _networkCheckFreshness(self, client, stream_name, metadata):
         """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
@@ -1604,6 +1457,107 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkEnsurePredictionListener(relay_url)
         self._networkEnsureAccessRequestListener(relay_url)
 
+    # ── Paid streams on Base (satorineuron.market) ───────────────────────────
+
+    def _networkCreateMarket(self):
+        """The paid-stream market: the vault funds channels, the identity
+        signs vouchers and the binding, settles, closes and withdraws."""
+        from satorilib.chain.channels import ADDRESS, PaymentChannels
+        from satorilib.chain.evm import EvmClient
+        from satorineuron.base_config import base_config
+        from satorineuron.base_predict import evm_address_from_pubkey
+        from satorineuron.market import Market
+        cfg = base_config()
+        chans = PaymentChannels(
+            EvmClient(cfg['rpcUrl']), int(cfg['chainId']), cfg['token'])
+
+        def identity_key():
+            try:
+                return self.wallet.account.key.to_0x_hex()
+            except Exception:
+                return None
+
+        def vault_address():
+            try:
+                pubkey = self.getVaultInfoFromFile().get('pubkey')
+                return evm_address_from_pubkey(pubkey) if pubkey else None
+            except Exception:
+                return None
+
+        def prices():
+            return {p['stream_name']: int(p.get('price_per_obs') or 0)
+                    for p in self.networkDB.get_active_publications()
+                    if int(p.get('price_per_obs') or 0) > 0}
+
+        return Market(
+            db=self.networkDB, nostr_pubkey=self.nostrPubkey,
+            identity_key=identity_key, vault_address=vault_address,
+            chain=lambda: chans, send=_MarketRelays(self),
+            chain_id=int(cfg['chainId']), contract=ADDRESS,
+            token=cfg['token'], prices=prices)
+
+    def _networkEnsureMarketListener(self, relay_url: str):
+        """Start a relay's paid-stream listener if one isn't running."""
+        task = self._marketListeners.get(relay_url)
+        if task and not task.done():
+            return
+        self._marketListeners[relay_url] = asyncio.ensure_future(
+            self._marketListen(relay_url))
+
+    async def _marketListen(self, relay_url: str):
+        """The seller's side on a relay: buyers' subscriptions (34602) and
+        payments (34603) to the market."""
+        client = self._networkClients.get(relay_url)
+        if not client:
+            return
+
+        async def drain(items, handle):
+            async for inbound in items:
+                if self.market is None:
+                    continue
+                try:
+                    await handle(inbound)
+                except Exception as e:
+                    logging.warning(f'Market: {e}')
+
+        try:
+            await asyncio.gather(
+                drain(client.subscriptions(),
+                      lambda i: self.market.on_subscription(i)),
+                drain(client.payments(), lambda i: self.market.on_payment(i)))
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logging.warning(f'Market: listener stopped on {relay_url}: {e}')
+
+    def _marketRun(self, make, timeout: float = 180):
+        """Run a market coroutine on the network loop from a sync context."""
+        loop = getattr(self, '_networkLoop', None)
+        if loop is None or loop.is_closed() or self.market is None:
+            raise RuntimeError('The network is not running yet.')
+        return asyncio.run_coroutine_threadsafe(make(), loop).result(
+            timeout=timeout)
+
+    def marketBuySync(self, entry: dict, vault_key: str, deposit: int = None):
+        """Buy a priced stream (its discovered entry) with the unlocked vault."""
+        return self._marketRun(
+            lambda: self.market.buy(entry, deposit, vault_key=vault_key))
+
+    def marketStopSync(self, provider_pubkey: str, stream_name: str):
+        """Stop buying: requestClose, then the unsubscribe."""
+        return self._marketRun(
+            lambda: self.market.stop(provider_pubkey, stream_name))
+
+    def marketBuyingSync(self, provider_pubkey: str, stream_name: str) -> bool:
+        async def buying():
+            return self.market.buying(provider_pubkey, stream_name)
+        return self._marketRun(buying, timeout=30)
+
+    def marketStatusSync(self) -> dict:
+        async def status():
+            return self.market.status()
+        return self._marketRun(status, timeout=30)
+
     # ── Channel support ───────────────────────────────────────────────────────
 
     def _networkEnsureChannelListener(self, relay_url: str):
@@ -1938,14 +1892,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'remainder={commitment.remainder_sats}, locked={locked})',
                 color='yellow')
             return
-        is_resend = False
         prior_json = channel.get('pending_commitment')
         if prior_json:
             try:
                 from satorilib.satori_nostr.models import ChannelCommitment
                 prior = ChannelCommitment.from_json(prior_json)
-                is_resend = (commitment.remainder_sats
-                             == prior.remainder_sats)
                 if commitment.remainder_sats > prior.remainder_sats:
                     logging.warning(
                         f'Channel: rejecting commitment for '
@@ -1984,40 +1935,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.error(
                 f'Channel: failed to store commitment '
                 f'{commitment.p2sh_address}: {e}')
-        # Grant provisional access immediately on commitment receipt so the
-        # subscriber can receive observations without waiting for an on-chain
-        # claim. The claim just settles funds; access is based on committed amt.
-        sender_nostr_pubkey = channel.get('sender_nostr_pubkey', '')
-        if sender_nostr_pubkey and commitment.pay_amount_sats > 0:
-            await self._grantChannelAccess(
-                sender_nostr_pubkey=sender_nostr_pubkey,
-                total_paid_sats=commitment.pay_amount_sats,
-                stream_name=commitment.stream_name,
-                p2sh_address=commitment.p2sh_address)
-            # Gap recovery (seller side): only when the commitment is a
-            # re-send (same remainder as prior — the buyer is reminding us
-            # they're online, not making a fresh payment).  In the normal
-            # case the buyer just received the observation and paid, so
-            # resending would be redundant.
-            if is_resend and commitment.stream_name:
-                try:
-                    pub = await asyncio.to_thread(
-                        lambda: next(
-                            (p for p in
-                             self.networkDB.get_active_publications()
-                             if p['stream_name'] == commitment.stream_name),
-                            None))
-                    if pub:
-                        current_seq = pub.get('last_seq_num', 0)
-                        if current_seq > 0:
-                            await self._networkResendObservation(
-                                commitment.stream_name,
-                                current_seq,
-                                sender_nostr_pubkey)
-                except Exception as e:
-                    logging.warning(
-                        f'Channel: gap recovery send failed for '
-                        f'{commitment.stream_name}: {e}')
 
     async def claimChannel(self, p2sh_address: str) -> str:
         """Claim accumulated micropayments from a channel (receiver side).
@@ -2219,12 +2136,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.info(
                 f'Channel: {p2sh_address} fully drained, awaiting refund',
                 color='yellow')
-        # ── Grant access for exactly this payment, not cumulative total ───────
-        await self._grantChannelAccess(
-            sender_nostr_pubkey=channel.get('sender_nostr_pubkey'),
-            total_paid_sats=commitment.pay_amount_sats,
-            stream_name=commitment.stream_name,
-            p2sh_address=p2sh_address)
         logging.info(
             f'Channel: claimed {commitment.pay_amount_sats} sats '
             f'from {p2sh_address} — txid={txid}',
@@ -2486,132 +2397,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         txid = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
         self._mundoCache.pop(p2sh, None)
         return txid
-
-    async def _grantChannelAccess(
-        self,
-        sender_nostr_pubkey: str,
-        total_paid_sats: int,
-        stream_name: str = '',
-        p2sh_address: str = '',
-    ) -> None:
-        """Update subscriber access rights after a successful channel claim.
-
-        Computes how many observations the sender has pre-paid for and
-        advances their last_paid_seq in every connected SatoriNostr client.
-
-        If stream_name is provided (populated from the ChannelCommitment Nostr
-        tag), only that specific stream is updated — prevents over-granting
-        access to other streams on the same channel.  If stream_name is empty
-        (old commitment without the tag, or manual call), falls back to
-        granting access across all active paid publications.
-
-        The provider's publish_observation() only sends encrypted data to
-        subscribers whose last_paid_seq >= current seq_num, so this is what
-        unlocks the next batch of observations for the paying subscriber.
-
-        When p2sh_address is supplied, the granted last_paid_seq is persisted
-        to the subscriber_access table so it survives provider restarts and
-        Nostr key rotations (Fix C).
-        """
-        if not sender_nostr_pubkey or total_paid_sats <= 0:
-            return
-        pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
-        for pub in pubs:
-            effective_price = pub.get('price_per_obs', 0)
-            if effective_price <= 0:
-                continue
-            pub_stream = pub['stream_name']
-            # If the commitment names a specific stream, skip all others
-            if stream_name and pub_stream != stream_name:
-                continue
-            paid_count = total_paid_sats // effective_price
-            if paid_count <= 0:
-                continue
-            current_seq = pub.get('last_seq_num', 0)
-            grant_to_seq = current_seq + paid_count
-            for client in self._networkClients.values():
-                # Ensure the subscriber is registered before granting access.
-                # record_payment is a no-op if they aren't in _subscribers,
-                # which can happen if a claim fires before their subscription
-                # announcement has been replayed on this relay.
-                if sender_nostr_pubkey not in client._subscribers.get(
-                        pub_stream, {}):
-                    client.record_subscription(pub_stream, sender_nostr_pubkey)
-                # Advance from the subscriber's existing last_paid_seq when
-                # higher than current_seq — handles multiple commits arriving
-                # between publishes, where last_seq_num hasn't moved but each
-                # incremental payment should still grant one more observation.
-                existing = client._subscribers[pub_stream].get(sender_nostr_pubkey)
-                base_seq = current_seq
-                if existing and existing.last_paid_seq is not None:
-                    base_seq = max(base_seq, existing.last_paid_seq)
-                grant_to_seq = base_seq + paid_count
-                client.record_payment(pub_stream, sender_nostr_pubkey, grant_to_seq)
-            # Persist to DB so access survives provider restarts (Fix C).
-            if p2sh_address:
-                try:
-                    await asyncio.to_thread(
-                        self.networkDB.save_subscriber_access,
-                        pub_stream, p2sh_address,
-                        sender_nostr_pubkey, grant_to_seq)
-                except Exception as e:
-                    logging.warning(
-                        f'Channel: failed to persist subscriber access: {e}')
-            logging.info(
-                f'Channel: granted {sender_nostr_pubkey[:16]}… access to '
-                f'{pub_stream} up to seq={grant_to_seq} '
-                f'({paid_count} obs)',
-                color='cyan')
-
-    async def _channelResendStaleCommitments(self):
-        """Re-publish the last commitment for stale paid subscriptions.
-
-        Gap recovery (buyer side): if we haven't received an observation
-        for longer than the cadence (or 24 h when cadence is unknown),
-        re-send our last commitment as a reminder to the seller so they
-        know we are online and where we left off.
-        """
-        from satorilib.satori_nostr.models import ChannelCommitment
-        channels = await asyncio.to_thread(
-            self.networkDB.get_channels_as_sender)
-        subs = await asyncio.to_thread(self.networkDB.get_active)
-        sub_map = {(s['stream_name'], s['provider_pubkey']): s for s in subs}
-        for channel in channels:
-            commitment_json = channel.get('pending_commitment')
-            if not commitment_json:
-                continue
-            try:
-                commitment = ChannelCommitment.from_json(commitment_json)
-            except Exception:
-                continue
-            stream_name = commitment.stream_name
-            if not stream_name:
-                continue
-            receiver_nostr = channel.get('receiver_nostr_pubkey') or ''
-            # Find the matching subscription
-            sub = sub_map.get((stream_name, receiver_nostr))
-            if not sub or (sub.get('price_per_obs', 0) or 0) == 0:
-                continue
-            cadence = sub.get('cadence_seconds') or 0
-            stale = await asyncio.to_thread(
-                self.networkDB.is_locally_stale,
-                stream_name, sub['provider_pubkey'],
-                cadence if cadence > 0 else 86400,
-                multiplier=2.0)
-            if not stale:
-                continue
-            # Re-publish the last commitment as a reminder
-            for client in self._networkClients.values():
-                try:
-                    await client.publish_commitment(
-                        commitment, receiver_nostr)
-                except Exception as e:
-                    logging.warning(
-                        f'Channel: stale resend failed: {e}')
-            logging.info(
-                f'Channel: re-sent stale commitment for {stream_name} '
-                f'to {receiver_nostr[:16]}…',
-                color='yellow')
 
     async def _channelExpiryCheck(self):
         """Auto-claim receiver channels every 15 days.
@@ -2939,88 +2724,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     logging.warning(
                         f'Channel: failed to announce open: {e}')
         return p2sh_address
-
-    async def refundChannel(
-        self,
-        p2sh_address: str,
-        amount_sats: int = None,
-    ) -> None:
-        """Send new SATORI to an existing channel's P2SH address (sender side).
-
-        Channels are persistent — when drained, they are refunded rather than
-        deleted and reopened.  Uses the stored redeem_script to call
-        producePaymentChannelFromScript, then updates the DB with the new
-        funding UTXO.
-
-        Args:
-            p2sh_address: The channel to refund
-            amount_sats: Amount to send (defaults to _channelFundSats())
-        """
-        await self._channelEnsureWallet()
-        channel = await asyncio.to_thread(
-            self.networkDB.get_channel, p2sh_address)
-        if not channel:
-            raise ValueError(f'Unknown channel: {p2sh_address}')
-        amount_sats = amount_sats or self._channelFundSats()
-        amount_satori = amount_sats / 1e8
-        # Refresh wallet UTXOs so _gatherSatoriUnspents sees current state
-        await asyncio.to_thread(self.wallet.getReadyToSend)
-        from evrmore.core.script import CScript
-        redeem_script = CScript(bytes.fromhex(channel['redeem_script']))
-        script_payload = {
-            'redeem_script': str(redeem_script),
-            'redeem_script_hex': channel['redeem_script'],
-            'redeem_script_size': len(redeem_script),
-            'p2sh_address': p2sh_address,
-            'amount': amount_satori,
-        }
-        _txhex, txid, result = await asyncio.to_thread(
-            self.wallet.producePaymentChannelFromScript,
-            redeemScript=redeem_script,
-            scriptPayload=script_payload,
-            broadcast=True,
-        )
-        funding_vout = result.get('funding_vout') or 0
-        # Use the actual on-chain UTXO amount to avoid divisibility rounding
-        # discrepancies between our request and what actually landed on-chain.
-        actual_locked = await asyncio.to_thread(
-            self._channelFetchUtxoSatori, txid, funding_vout, amount_sats)
-        # Single shared timestamp for local DB + announcement so sender
-        # and receiver agree on the CSV-timer anchor.
-        refund_ts = int(time.time())
-        await asyncio.to_thread(
-            self.networkDB.update_channel_funding,
-            p2sh_address, txid, funding_vout, actual_locked, refund_ts)
-        logging.info(
-            f'Channel: refunded {p2sh_address} '
-            f'amount={amount_sats} sats txid={txid}',
-            color='green')
-        # Announce to receiver so they pick up the new funding UTXO and
-        # reset their CSV timer. Reuses the channel_open kind since the
-        # receiver's handler now upserts on funding_txid change.
-        receiver_nostr_pubkey = channel.get('receiver_nostr_pubkey')
-        if receiver_nostr_pubkey:
-            from satorilib.satori_nostr.models import ChannelOpen
-            channel_open = ChannelOpen(
-                p2sh_address=p2sh_address,
-                sender_pubkey=channel['sender_pubkey'],
-                receiver_pubkey=channel['receiver_pubkey'],
-                redeem_script=channel['redeem_script'],
-                funding_txid=txid,
-                funding_vout=funding_vout,
-                locked_sats=actual_locked,
-                blocks=channel.get('blocks'),
-                minutes=channel.get('minutes'),
-                timestamp=refund_ts,
-                sender_nostr_pubkey=self.nostrPubkey or '',
-            )
-            for client in self._networkClients.values():
-                try:
-                    await client.publish_channel_open(
-                        channel_open, receiver_nostr_pubkey)
-                except Exception as e:
-                    logging.warning(
-                        f'Channel: failed to announce refund: {e}')
 
     async def sendChannelPayment(
         self,
@@ -3497,12 +3200,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 meta_dict = source or {}
                 if hasattr(self, 'wallet') and self.wallet and self.wallet.pubkey:
                     meta_dict['wallet_pubkey'] = self.wallet.pubkey
+                # Priced: where to pay (the Satori contract, SATORI, the vault)
+                listing = (self.market.listing(pub['stream_name'])
+                           if self.market is not None else None)
+                if listing:
+                    meta_dict['market'] = listing['market']
                 metadata = DatastreamMetadata(
                     stream_name=pub['stream_name'],
                     nostr_pubkey=self.nostrPubkey,
                     name=pub.get('name', ''),
                     description=pub.get('description', ''),
-                    encrypted=bool(pub.get('encrypted', 0)),
+                    encrypted=bool(pub.get('encrypted', 0)) or bool(listing),
                     price_per_obs=pub.get('price_per_obs', 0),
                     created_at=pub['created_at'],
                     cadence_seconds=pub.get('cadence_seconds'),
@@ -3516,71 +3224,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.warning(
                     f'Network: announce failed {pub["stream_name"]}: {e}')
-
-    async def _networkResendObservation(
-        self,
-        stream_name: str,
-        seq_num: int,
-        subscriber_nostr_pubkey: str,
-    ) -> int:
-        """Re-send a previously published observation to a specific subscriber.
-
-        Used for gap recovery (seller side): after receiving a payment
-        commitment, check if the observation the subscriber needs already
-        exists in our local DB and send it immediately — no seq_num
-        increment, no mark_published, no save_observation.
-
-        Returns the number of relays that delivered the observation.
-        """
-        from satorilib.satori_nostr.models import (
-            DatastreamObservation, DatastreamMetadata)
-        pub = await asyncio.to_thread(
-            lambda: next(
-                (p for p in self.networkDB.get_active_publications()
-                 if p['stream_name'] == stream_name), None))
-        if not pub:
-            return 0
-        obs_row = await asyncio.to_thread(
-            self.networkDB.get_observation_by_seq,
-            stream_name, self.nostrPubkey, seq_num)
-        if not obs_row:
-            return 0
-        observation = DatastreamObservation(
-            stream_name=stream_name,
-            timestamp=obs_row.get('timestamp') or int(time.time()),
-            value=obs_row.get('value', ''),
-            seq_num=seq_num)
-        source = {}
-        if pub.get('source_stream_name'):
-            source['source_stream_name'] = pub['source_stream_name']
-            source['source_provider_pubkey'] = pub.get(
-                'source_provider_pubkey', '')
-        metadata = DatastreamMetadata(
-            stream_name=stream_name,
-            nostr_pubkey=self.nostrPubkey,
-            name=pub.get('name', ''),
-            description=pub.get('description', ''),
-            encrypted=bool(pub.get('encrypted', 0)),
-            price_per_obs=pub.get('price_per_obs', 0),
-            created_at=pub['created_at'],
-            cadence_seconds=pub.get('cadence_seconds'),
-            tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
-            metadata=source or None)
-        delivered = 0
-        for relay_url, client in list(self._networkClients.items()):
-            try:
-                event_id = await client.send_observation_to_subscriber(
-                    observation, metadata, subscriber_nostr_pubkey)
-                if event_id:
-                    delivered += 1
-                    logging.info(
-                        f'Network: resent {stream_name} seq={seq_num} '
-                        f'to {subscriber_nostr_pubkey[:16]}… '
-                        f'via {relay_url}', color='green')
-            except Exception as e:
-                logging.warning(
-                    f'Network: resend failed on {relay_url}: {e}')
-        return delivered
 
     async def _networkPublishObservation(self, stream_name: str, value) -> int:
         """Publish an observation to all connected relays.
@@ -3637,6 +3280,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception as e:
                 logging.warning(
                     f'Network: publish failed on {relay_url}: {e}')
+        # A priced stream: the value to each paying buyer (after its heartbeat)
+        if int(pub.get('price_per_obs') or 0) > 0 and self.market is not None:
+            try:
+                await self.market.deliver(observation)
+            except Exception as e:
+                logging.warning(f'Market: delivering {stream_name} failed: {e}')
         # Score bounty predictions for this observation (host side).
         # The host publishes observations but doesn't subscribe to its own
         # stream, so _networkProcessObservation never fires for its own data.
@@ -4372,14 +4021,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Approve an access request (sync context, e.g. Flask route).
 
-        Adds the requester to the approved_subscribers table and records
-        them in the in-memory subscriber list so they start receiving
-        encrypted observations immediately.
+        Adds the requester to the approved_subscribers table.
         """
         self.networkDB.approve_access_request(stream_name, requester_pubkey)
-        # Also register in the in-memory subscriber list on all clients
-        for client in self._networkClients.values():
-            client.record_subscription(stream_name, requester_pubkey)
 
     def rejectAccessRequestSync(
         self,
@@ -4560,7 +4204,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         discovered_price)
                 try:
                     await client.subscribe_datastream(
-                        stream_name, sub['provider_pubkey'])
+                        stream_name, sub['provider_pubkey'],
+                        payment_channel=(
+                            self.market.payment_channel(
+                                sub['provider_pubkey'], stream_name)
+                            if self.market is not None else None))
                     logging.info(
                         f'Network: found {stream_name} active on '
                         f'{relay_url}', color='green')

@@ -495,7 +495,7 @@ class TestPaymentNotification:
             seq_num=42,
             amount_sats=10,
             timestamp=int(time.time()),
-            tx_id="lightning:tx789",
+            voucher={"channel": "0x" + "ab" * 32, "cumulative": "10000000000000", "signature": "0x" + "cd" * 65},
         )
 
         assert payment.from_pubkey == "subscriber123"
@@ -503,10 +503,10 @@ class TestPaymentNotification:
         assert payment.stream_name == "btc-price-usd"
         assert payment.seq_num == 42
         assert payment.amount_sats == 10
-        assert payment.tx_id == "lightning:tx789"
+        assert payment.voucher["cumulative"] == "10000000000000"
 
-    def test_payment_without_tx_id(self):
-        """Test payment without transaction ID."""
+    def test_payment_without_voucher(self):
+        """Test payment without a voucher."""
         payment = PaymentNotification(
             from_pubkey="sub",
             to_pubkey="provider",
@@ -516,7 +516,7 @@ class TestPaymentNotification:
             timestamp=123,
         )
 
-        assert payment.tx_id is None
+        assert payment.voucher is None
 
     def test_json_round_trip(self):
         """Test JSON serialization round-trip."""
@@ -527,7 +527,7 @@ class TestPaymentNotification:
             seq_num=10,
             amount_sats=100,
             timestamp=1234567890,
-            tx_id="tx123",
+            voucher={"channel": "0x" + "ab" * 32, "cumulative": "10000000000000", "signature": "0x" + "cd" * 65},
         )
 
         json_str = original.to_json()
@@ -536,7 +536,7 @@ class TestPaymentNotification:
         assert restored.from_pubkey == original.from_pubkey
         assert restored.seq_num == original.seq_num
         assert restored.amount_sats == original.amount_sats
-        assert restored.tx_id == original.tx_id
+        assert restored.voucher == original.voucher
 
 
 class TestInboundModels:

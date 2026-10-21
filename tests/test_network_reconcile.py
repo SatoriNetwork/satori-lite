@@ -124,6 +124,8 @@ def harness():
         h._channelTombstoneListeners = {}
         h._predictionListeners = {}
         h._accessRequestListeners = {}
+        h._marketListeners = {}
+        h.market = None
         h._networkFirstRun = True
         h._baseNoGame = {}
         h.server = mock.MagicMock()
@@ -246,7 +248,7 @@ class TestFirstRun:
 
         # Should have subscribed on the relay
         client.subscribe_datastream.assert_called_once_with(
-            'btc-price', 'pub123')
+            'btc-price', 'pub123', payment_channel=None)
         # First run flag cleared
         assert harness._networkFirstRun is False
 
@@ -458,7 +460,7 @@ class TestRelayHunting:
 
         # Should have found it on relay2
         client2.subscribe_datastream.assert_called_once_with(
-            'btc-price', 'pub123')
+            'btc-price', 'pub123', payment_channel=None)
         # Subscription relay updated in DB
         subs = harness.networkDB.get_active()
         assert subs[0]['relay_url'] == 'wss://relay2'
@@ -875,9 +877,9 @@ class TestMultipleStreams:
 
         # Both found
         client1.subscribe_datastream.assert_called_once_with(
-            'btc-price', 'pub_a')
+            'btc-price', 'pub_a', payment_channel=None)
         client2.subscribe_datastream.assert_called_once_with(
-            'eth-price', 'pub_b')
+            'eth-price', 'pub_b', payment_channel=None)
         # Relays updated
         subs = {s['stream_name']: s
                 for s in harness.networkDB.get_active()}
