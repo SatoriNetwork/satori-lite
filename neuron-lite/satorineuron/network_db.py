@@ -444,6 +444,28 @@ class NetworkDB:
             conn.execute(
                 "ALTER TABLE publications "
                 "ADD COLUMN approval_required INTEGER NOT NULL DEFAULT 0")
+        # Small JSON blobs by key (the paid-stream market's state: 'market').
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+    # ── Meta ───────────────────────────────────────────────────────
+
+    def get_meta(self, key: str) -> Optional[str]:
+        row = self._get_conn().execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value))
         conn.commit()
 
     # ── Subscriptions ──────────────────────────────────────────────

@@ -606,3 +606,11 @@ class TestRoundDedupe:
             's', 'p', 'v2', 'e1', seq_num=2, round_num=41373) is True
         assert db2.save_observation(
             's', 'p', 'v2', 'e2', seq_num=3, round_num=41373) is False
+
+
+class TestMeta:
+    def test_get_set_meta(self, db):
+        assert db.get_meta('market') is None
+        db.set_meta('market', '{"sales": {}}')
+        db.set_meta('market', '{"sales": {"a": 1}}')
+        assert db.get_meta('market') == '{"sales": {"a": 1}}'
