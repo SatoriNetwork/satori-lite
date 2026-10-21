@@ -2649,17 +2649,17 @@ def register_routes(app):
             None)
         price_per_obs = int((server_stream or {}).get('price_per_obs') or 0)
         if price_per_obs > 0:
-            obs_per_refill = 500
-            fund_sats = max(100_000, min(price_per_obs * obs_per_refill, 1_000_000))
-            required_satori = fund_sats / 1e8
+            # Buy: the vault opens a channel on Base (Unlock, gas), then the
+            # subscription names it (satorineuron.market).
+            wallet_manager = get_or_create_session_vault()
             try:
-                available = get_wallet_balance(force=True)
+                vault_key = wallet_manager.vault.account.key.to_0x_hex()
             except Exception:
-                available = 0
-            if available < required_satori:
-                return jsonify({
-                    'error': f'Insufficient wallet balance. This stream costs {price_per_obs} sats/obs and requires a minimum channel deposit of {required_satori:.4f} SATORIEVR. You have {available:.4f} SATORIEVR in your wallet.'
-                }), 400
+                vault_key = None
+            try:
+                startup.marketBuySync(server_stream, vault_key)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 400
         relay_url = data.get('relay_url', '')
         startup.networkDB.subscribe(data, relay_url)
         startup.refreshFollowedSync()
@@ -2700,10 +2700,24 @@ def register_routes(app):
         data = request.get_json()
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
+        # A bought stream: Stop (the identity asks to close the channel, then
+        # the unsubscribe); the refund comes after the 7-day grace period.
+        try:
+            buying = startup.marketBuyingSync(
+                data['nostr_pubkey'], data['stream_name'])
+        except Exception:
+            buying = False
+        if buying:
+            try:
+                startup.marketStopSync(data['nostr_pubkey'], data['stream_name'])
+            except Exception as e:
+                return jsonify({'error': str(e)}), 400
         startup.networkDB.unsubscribe(data['stream_name'], data['nostr_pubkey'])
         startup.refreshFollowedSync()
-        # Notify the provider so they stop encrypting for us (Fix G)
-        startup.publishUnsubscribeSync(data['stream_name'], data['nostr_pubkey'])
+        if not buying:
+            # Notify the provider so they stop encrypting for us (Fix G)
+            startup.publishUnsubscribeSync(
+                data['stream_name'], data['nostr_pubkey'])
         pred_name = data['stream_name'] + '_pred'
         startup.networkDB.remove_publication(pred_name)
         startup.tombstonePublicationSync(pred_name)
@@ -3306,6 +3320,19 @@ def register_routes(app):
             return jsonify({'sending': sending, 'receiving': receiving})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/market')
+    @login_required
+    def api_market():
+        """Paid streams on Base: what we sell (each buyer's channel) and what
+        we buy (satorineuron.market), amounts in SATORI."""
+        startup = get_startup()
+        if not startup:
+            return jsonify({'error': 'Not ready'}), 503
+        try:
+            return jsonify(startup.marketStatusSync())
+        except Exception as e:
+            return jsonify({'selling': [], 'bought': [], 'error': str(e)})
 
     @app.route('/api/channels/open', methods=['POST'])
     @login_required

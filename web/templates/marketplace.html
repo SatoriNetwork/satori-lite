@@ -1072,7 +1072,7 @@
             </div>
             <div class="mkt-unit" role="group" aria-label="Price unit">
                 <button class="is-active" data-unit="sats"   onclick="setPriceUnit('sats', this)">sats</button>
-                <button                     data-unit="satori" onclick="setPriceUnit('satori', this)">SATORIEVR</button>
+                <button                     data-unit="satori" onclick="setPriceUnit('satori', this)">SATORI</button>
             </div>
             <button class="mkt-refresh" id="mktRefreshBtn" onclick="refreshStreams({ discover: true })">
                 <i class="material-icons">refresh</i><span>Refresh</span>
@@ -1283,7 +1283,7 @@
             const satori = sats / SATS_PER_SATORI;
             // Trim trailing zeros after up to 8 decimals
             const str = parseFloat(satori.toFixed(8)).toString();
-            return str + ' SATORIEVR';
+            return str + ' SATORI';
         }
         return sats.toLocaleString() + ' sats';
     }
@@ -1842,7 +1842,7 @@
         btn.setAttribute('aria-busy', 'true');
         btn.disabled = true;
         const isPaid = (stream.price_per_obs || 0) > 0;
-        const label = isPaid ? 'Checking balance' : 'Subscribing';
+        const label = isPaid ? 'Opening a channel' : 'Subscribing';
         btn.innerHTML = `<span class="mkt-load-inline">
             <i class="material-icons">sync</i>${label}<span class="mkt-load-dots"></span>
         </span>`;
@@ -1870,17 +1870,21 @@
     async function doUnsubscribe(name, pubkey, btn) {
         btn.disabled = true; btn.textContent = '…';
         try {
-            await fetch('/api/network/unsubscribe', {
+            const resp = await fetch('/api/network/unsubscribe', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({stream_name: name, nostr_pubkey: pubkey})
             });
+            const data = await resp.json();
+            if (data.error) throw new Error(data.error);
             for (const s of allStreams) {
                 if (s.stream_name === name && s.nostr_pubkey === pubkey) {
                     s.subscribed = false;
                 }
             }
-        } catch (e) { /* */ }
+        } catch (e) {
+            showToast(e.message || 'Unsubscribe failed', true);
+        }
         renderStreams();
     }
 

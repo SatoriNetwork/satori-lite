@@ -60,6 +60,45 @@
   <!-- Broadcast console (replaces native confirm/alert for claim + reclaim) -->
   <div id="broadcastConsole"></div>
 
+  <!-- Paid streams on Base (the PaymentChannels contract) -->
+  <div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span class="fw-600">Paid streams on Base</span>
+      <button class="btn btn-outline-secondary btn-sm" onclick="loadMarket()">
+        <i class="material-icons align-middle" style="font-size:15px;">refresh</i>
+      </button>
+    </div>
+    <div class="card-body p-0">
+      <p class="small text-muted px-3 pt-3 mb-2">
+        Your vault funds a channel when you subscribe to a priced stream; your identity pays each observation
+        received and settles what you sold once a day. Prices in SATORI.
+      </p>
+      <div id="marketError" class="small text-danger px-3"></div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Buying</th><th>Seller</th><th class="text-end">Price</th><th class="text-end">Deposit</th>
+              <th class="text-end">Paid</th><th class="text-end">Left</th><th>Status</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="marketBuying"><tr><td colspan="8" class="text-muted text-center py-3">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Selling</th><th>Subscriber</th><th class="text-end">Delivered</th><th class="text-end">Paid</th>
+              <th class="text-end">Settled</th><th class="text-end">Deposit</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="marketSelling"><tr><td colspan="7" class="text-muted text-center py-3">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- Sending channels -->
   <div class="card mb-4">
     <div class="card-header d-flex align-items-center justify-content-between">
@@ -1601,7 +1640,52 @@ function bxCopyTxid(txid, btn) {
   }
 }
 
+// ── Paid streams on Base ──────────────────────────────────────
+function mkShort(x) { x = String(x || ''); return x.length > 14 ? x.slice(0, 8) + '…' + x.slice(-4) : x; }
+async function loadMarket() {
+  try {
+    const data = await (await fetch('/api/market')).json();
+    document.getElementById('marketError').textContent = data.error || '';
+    const bought = data.bought || [];
+    document.getElementById('marketBuying').innerHTML = bought.length ? bought.map(b => `<tr>
+      <td>${bxEsc(b.name || b.stream)}</td>
+      <td class="font-monospace small" title="${bxEsc(b.pubkey)}">${bxEsc(mkShort(b.pubkey))}</td>
+      <td class="text-end">${bxEsc(b.price)}</td><td class="text-end">${bxEsc(b.deposit)}</td>
+      <td class="text-end">${bxEsc(b.paid)}</td><td class="text-end">${bxEsc(b.left)}</td>
+      <td>${b.status === 'open' ? 'Open' : 'Closing' + (b.close_at ? ', refund after ' + new Date(b.close_at * 1000).toLocaleString() : '')}</td>
+      <td class="text-end">${b.status === 'open' ? `<button class="btn btn-outline-danger btn-sm"
+        onclick="stopBuying('${bxEsc(b.stream)}','${bxEsc(b.pubkey)}', this)">Stop</button>` : ''}</td>
+    </tr>`).join('') : '<tr><td colspan="8" class="text-muted text-center py-3">Not buying any stream.</td></tr>';
+    const rows = [];
+    for (const st of (data.selling || [])) {
+      if (!st.buyers.length) rows.push(`<tr><td>${bxEsc(st.stream)} <span class="text-muted small">${bxEsc(st.price)}</span></td>
+        <td colspan="6" class="text-muted">No subscribers yet.</td></tr>`);
+      for (const b of st.buyers) rows.push(`<tr>
+        <td>${bxEsc(st.stream)} <span class="text-muted small">${bxEsc(st.price)}</span></td>
+        <td class="font-monospace small" title="${bxEsc(b.pubkey)}">${bxEsc(mkShort(b.pubkey))}</td>
+        <td class="text-end">${b.delivered}</td><td class="text-end">${bxEsc(b.paid)}</td>
+        <td class="text-end">${bxEsc(b.settled)}</td><td class="text-end">${bxEsc(b.deposit)}</td>
+        <td>${b.closing ? 'Stopped, settled in the daily settle' : 'Open'}</td></tr>`);
+    }
+    document.getElementById('marketSelling').innerHTML = rows.length ? rows.join('')
+      : '<tr><td colspan="7" class="text-muted text-center py-3">No priced publications.</td></tr>';
+  } catch (e) {
+    document.getElementById('marketError').textContent = 'Failed to load paid streams: ' + e;
+  }
+}
+async function stopBuying(stream, pubkey, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const data = await (await fetch('/api/network/unsubscribe', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({stream_name: stream, nostr_pubkey: pubkey})})).json();
+    if (data.error) throw new Error(data.error);
+  } catch (e) { showAlert(e.message || String(e)); }
+  loadMarket();
+}
+setInterval(loadMarket, 5000);
+
 // ── Init ──────────────────────────────────────────────────────
 loadChannels();
+loadMarket();
 </script>
 {% endblock %}

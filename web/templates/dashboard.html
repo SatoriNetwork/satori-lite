@@ -817,7 +817,7 @@
     .ds-price-help { font-size: 13px !important; opacity: 0.5; transition: opacity 0.15s; }
     .ds-price-tooltip-wrap:hover .ds-price-help { opacity: 1; }
     .ds-price-tooltip-wrap::after {
-        content: '1 sat = 0.00000001 SATORIEVR, the smallest unit of SATORIEVR';
+        content: '1 sat = 0.00000001 SATORI, the smallest unit of SATORI';
         position: absolute;
         bottom: calc(100% + 6px);
         left: 50%;
@@ -2771,7 +2771,7 @@
                                         <i class="material-icons">bolt</i>
                                         <span id="dsPriceLabel">Sats (Satoshis) per Observation</span>
                                         <span class="ds-price-sub">(0 = free)</span>
-                                        <span class="ds-price-tooltip-wrap" title="1 sat = 0.00000001 SATORIEVR, the smallest unit of SATORIEVR">
+                                        <span class="ds-price-tooltip-wrap" title="1 sat = 0.00000001 SATORI, the smallest unit of SATORI">
                                             <i class="material-icons ds-price-help">help_outline</i>
                                         </span>
                                     </div>
@@ -2779,11 +2779,11 @@
                                         <input type="number" id="dsPricePerObs" class="ds-price-input" value="0" min="0" step="1" placeholder="0">
                                         <span id="dsPriceUnit" class="ds-price-unit">sats</span>
                                         <span style="width:1px; height:14px; background:var(--border-color); display:inline-block; margin: 0 0.4rem;"></span>
-                                        <div class="ds-price-toggle" onclick="togglePriceUnit()" title="Switch between sats and SATORIEVR">
+                                        <div class="ds-price-toggle" onclick="togglePriceUnit()" title="Switch between sats and SATORI">
                                             <div class="ds-price-toggle-track" id="dsPriceToggleTrack">
                                                 <div class="ds-price-toggle-thumb"></div>
                                             </div>
-                                            <span class="ds-price-toggle-label" id="dsPriceToggleLabel">SATORIEVR</span>
+                                            <span class="ds-price-toggle-label" id="dsPriceToggleLabel">SATORI</span>
                                         </div>
                                     </div>
                                 </div>
@@ -4750,8 +4750,8 @@
             input.value = currentVal / SATS_PER_SATORI || '';
             input.step = '0.00000001';
             input.placeholder = '0.00000001';
-            document.getElementById('dsPriceUnit').textContent = 'SATORIEVR';
-            document.getElementById('dsPriceLabel').textContent = 'SATORIEVR per Observation';
+            document.getElementById('dsPriceUnit').textContent = 'SATORI';
+            document.getElementById('dsPriceLabel').textContent = 'SATORI per Observation';
             document.getElementById('dsPriceToggleTrack').classList.add('active');
         } else {
             input.value = Math.round(currentVal * SATS_PER_SATORI) || '';
