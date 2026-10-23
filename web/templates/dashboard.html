@@ -2082,7 +2082,6 @@
                     </h5>
                     <div class="bal-tabs">
                         <button class="bal-tab bal-tab-active" onclick="switchWalletTab('wallet', this)">Wallet</button>
-                        <button class="bal-tab" onclick="switchWalletTab('alias', this)">Alias</button>
                         <button class="bal-tab" onclick="switchWalletTab('nostr', this)">Nostr</button>
                     </div>
                     <div class="card-header-actions">
@@ -2125,40 +2124,6 @@
                                 <button class="btn btn-outline-secondary btn-sm" onclick="copyPrivateKey()">
                                     <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
                                     Copy Private Key
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Alias pane -->
-                    <div id="aliasPane" style="display: none;">
-                        <div class="mb-3">
-                            <label class="form-label">Alias Address (Base)</label>
-                            <div class="input-group">
-                                <input type="text" class="form-control" id="aliasAddress" readonly placeholder="Loading...">
-                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('aliasAddress')" title="Copy">
-                                    <i class="material-icons align-middle">content_copy</i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Alias Public Key</label>
-                            <div class="input-group">
-                                <input type="text" class="form-control font-monospace" id="aliasPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
-                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('aliasPubkey')" title="Copy">
-                                    <i class="material-icons align-middle">content_copy</i>
-                                </button>
-                            </div>
-                            <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can open payment channels to you.</div>
-                        </div>
-                        <div class="mb-0">
-                            <label class="form-label">Alias Private Key (Evrmore WIF)</label>
-                            <div class="input-group">
-                                <input type="password" class="form-control" id="aliasPrivateKey" readonly placeholder="Click to reveal...">
-                                <button class="btn btn-outline-secondary" onclick="toggleAliasPrivateKey()" title="Show/Hide">
-                                    <i class="material-icons align-middle" id="aliasKeyIcon">visibility</i>
-                                </button>
-                                <button class="btn btn-outline-secondary" onclick="copyAliasPrivateKey()" title="Copy">
-                                    <i class="material-icons align-middle">content_copy</i>
                                 </button>
                             </div>
                         </div>
@@ -2209,16 +2174,10 @@
                         <i class="material-icons align-middle me-1">redeem</i>
                         Claim
                     </button>
-                    <div class="d-flex justify-content-between align-items-center mt-3" style="font-size: 12px;">
-                        <span class="text-muted">On your alias's Base address:
-                            <strong id="claimAliasClaimable">–</strong> SATORI</span>
-                        <button class="btn btn-sm btn-outline-primary" id="claimAliasBtn" onclick="doClaim('alias')" disabled>Claim</button>
-                    </div>
                     <div id="claimStatus" class="small mt-3" style="display:none;"></div>
                     <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
-                        The neuron claims for you with your wallet key, or your alias key for
-                        rewards paid to your alias. The claiming address needs a little ETH
-                        on Base for gas.
+                        The neuron claims for you with your wallet key (needs a little ETH
+                        on Base for gas).
                     </p>
                 </div>
             </div>
@@ -2333,14 +2292,9 @@
                                     <td class="text-end font-monospace" id="baseWalletSatori">--</td>
                                     <td class="text-end font-monospace" id="baseWalletEth">--</td>
                                 </tr>
-                                <tr>
-                                    <td><a id="baseAliasLink" href="#" target="_blank" rel="noopener">Alias</a></td>
-                                    <td class="text-end font-monospace" id="baseAliasSatori">--</td>
-                                    <td class="text-end font-monospace" id="baseAliasEth">--</td>
-                                </tr>
                             </tbody>
                         </table>
-                        <div class="form-text text-muted" style="font-size:0.72rem;">Wallet SATORI includes staked SATORI. ETH pays gas: the alias spends some every day.</div>
+                        <div class="form-text text-muted" style="font-size:0.72rem;">Wallet SATORI includes staked SATORI.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Your Base Address</label>
@@ -2395,26 +2349,10 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-3" style="font-size: 12px;">
-                        Sends SATORIEVR on Evrmore from your wallet's or alias's Evrmore address.
+                        Sends SATORIEVR on Evrmore from your wallet's Evrmore address.
                     </p>
                     <div id="sendFormFields" class="send-form-fields">
-                        <div class="mb-3">
-                            <label class="form-label">Send From</label>
-                            <div class="d-flex gap-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet" checked>
-                                    <label class="form-check-label" for="sendFromWallet">
-                                        Wallet <small class="text-muted" id="walletBalanceLabel" style="display:none;">(--)</small>
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromAlias" value="alias">
-                                    <label class="form-check-label" for="sendFromAlias">
-                                        Alias <small class="text-muted" id="aliasBalanceLabel" style="display:none;">(--)</small>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
+                        <input type="radio" name="sendSource" id="sendFromWallet" value="wallet" checked hidden>
                         <div class="mb-3">
                             <label class="form-label">Destination Address</label>
                             <input type="text" class="form-control" id="sendDestAddress" placeholder="Enter destination address (E...)">
@@ -2455,7 +2393,6 @@
                     </h5>
                     <div class="bal-tabs">
                         <button class="bal-tab bal-tab-active" onclick="switchBalTab('wallet', this)">Wallet</button>
-                        <button class="bal-tab" onclick="switchBalTab('alias', this)">Alias</button>
                     </div>
                     <div class="card-header-actions">
                         <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance(true)">
@@ -2483,21 +2420,6 @@
                         </div>
                         <div class="dash-stat">
                             <div class="dash-stat-value" id="evrBalance">
-                                <span class="spinner-border spinner-border-sm" role="status"></span>
-                            </div>
-                            <div class="dash-stat-label">EVR</div>
-                        </div>
-                    </div>
-                    <!-- Alias pane -->
-                    <div id="balAliasPane" class="dash-stat-row" style="display:none;">
-                        <div class="dash-stat">
-                            <div class="dash-stat-value" id="aliasSatoriBalance">
-                                <span class="spinner-border spinner-border-sm" role="status"></span>
-                            </div>
-                            <div class="dash-stat-label">SATORIEVR</div>
-                        </div>
-                        <div class="dash-stat">
-                            <div class="dash-stat-value" id="aliasEvrBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
                             </div>
                             <div class="dash-stat-label">EVR</div>
@@ -3203,8 +3125,6 @@
         // `force=true` (wired to the Refresh button) bypasses the 30 s cache.
         setBalanceLoading('tokenBalance', true);
         setBalanceLoading('evrBalance', true);
-        setBalanceLoading('aliasSatoriBalance', true);
-        setBalanceLoading('aliasEvrBalance', true);
 
         try {
             const endpoint = '/wallet/balance/direct' + (force ? '?refresh=1' : '');
@@ -3213,9 +3133,6 @@
                 // Wallet pane
                 document.getElementById('tokenBalance').textContent = result.wallet_balance !== undefined ? formatBalance(result.wallet_balance) : '--';
                 document.getElementById('evrBalance').textContent = result.wallet_evr !== undefined ? formatBalance(result.wallet_evr) : '--';
-                // Alias pane
-                document.getElementById('aliasSatoriBalance').textContent = result.alias_balance !== undefined ? formatBalance(result.alias_balance) : '--';
-                document.getElementById('aliasEvrBalance').textContent = result.alias_evr !== undefined ? formatBalance(result.alias_evr) : '--';
 
                 // Show/hide no-EVR warning (check total EVR)
                 const noEvrWarning = document.getElementById('noEvrWarning');
@@ -3223,13 +3140,6 @@
                     noEvrWarning.style.display = (result.total_evr !== undefined && parseFloat(result.total_evr) <= 0) ? 'block' : 'none';
                 }
 
-                // Update balance labels in send section
-                if (result.wallet_balance !== undefined) {
-                    document.getElementById('walletBalanceLabel').textContent = '(' + formatBalance(result.wallet_balance) + ')';
-                }
-                if (result.alias_balance !== undefined) {
-                    document.getElementById('aliasBalanceLabel').textContent = '(' + formatBalance(result.alias_balance) + ')';
-                }
                 // Hero pills: combined alias + wallet totals
                 updateDashHeroTotals({
                     satori: (parseFloat(result.wallet_balance) || 0) + (parseFloat(result.alias_balance) || 0),
@@ -3240,10 +3150,6 @@
             } else {
                 document.getElementById('tokenBalance').textContent = '--';
                 document.getElementById('evrBalance').textContent = '--';
-                document.getElementById('aliasSatoriBalance').textContent = '--';
-                document.getElementById('aliasEvrBalance').textContent = '--';
-                document.getElementById('walletBalanceLabel').textContent = '(--)';
-                document.getElementById('aliasBalanceLabel').textContent = '(--)';
                 updateDashHeroTotals(null);
                 if (result && result.error) {
                     console.error('ElectrumX balance fetch error:', result.error);
@@ -3253,10 +3159,6 @@
             console.error('Failed to fetch balance from ElectrumX:', error);
             document.getElementById('tokenBalance').textContent = '--';
             document.getElementById('evrBalance').textContent = '--';
-            document.getElementById('aliasSatoriBalance').textContent = '--';
-            document.getElementById('aliasEvrBalance').textContent = '--';
-            document.getElementById('walletBalanceLabel').textContent = '(--)';
-            document.getElementById('aliasBalanceLabel').textContent = '(--)';
             updateDashHeroTotals(null);
         }
     }
@@ -3276,14 +3178,12 @@
 
     function switchBalTab(tab, btn) {
         document.getElementById('balWalletPane').style.display = tab === 'wallet' ? 'flex' : 'none';
-        document.getElementById('balAliasPane').style.display = tab === 'alias' ? 'flex' : 'none';
         btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
         btn.classList.add('bal-tab-active');
     }
 
     function switchWalletTab(tab, btn) {
         document.getElementById('walletPane').style.display = tab === 'wallet' ? 'block' : 'none';
-        document.getElementById('aliasPane').style.display = tab === 'alias' ? 'block' : 'none';
         document.getElementById('walletNostrPane').style.display = tab === 'nostr' ? 'block' : 'none';
         btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
         btn.classList.add('bal-tab-active');
@@ -3670,17 +3570,6 @@
                 document.getElementById('walletAddress').value = 'Not available';
                 document.getElementById('walletQrCode').innerHTML = '<p class="text-muted mb-0">No address</p>';
             }
-            // The alias (for backup)
-            if (result.alias_address) {
-                document.getElementById('aliasAddress').value = result.alias_address;
-            } else {
-                document.getElementById('aliasAddress').value = 'Not available';
-            }
-            if (result.alias_pubkey) {
-                document.getElementById('aliasPubkey').value = result.alias_pubkey;
-            } else {
-                document.getElementById('aliasPubkey').value = 'Not available';
-            }
             if (result.nostr_pubkey) {
                 document.getElementById('nostrPubkeyField').value = result.nostr_pubkey;
             } else {
@@ -3790,7 +3679,7 @@
     }
 
     async function loadBaseBalances() {
-        const ids = { wallet: 'baseWallet', alias: 'baseAlias' };
+        const ids = { wallet: 'baseWallet' };
         for (const p of Object.values(ids)) {
             document.getElementById(p + 'Satori').textContent = '…';
             document.getElementById(p + 'Eth').textContent = '…';
@@ -3818,31 +3707,23 @@
         try {
             const r = await apiCall('/wallet/base/claimable');
             const btn = document.getElementById('claimBtn');
-            const idEl = document.getElementById('claimAliasClaimable');
-            const idBtn = document.getElementById('claimAliasBtn');
             if (r && !r.error) {
                 el.textContent = _fmtSatori(r.claimable);
                 document.getElementById('claimTotal').textContent = _fmtSatori(r.total);
                 document.getElementById('claimClaimed').textContent = _fmtSatori(r.claimed);
                 if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
-                const id = r.alias || {};
-                idEl.textContent = _fmtSatori(id.claimable);
-                idEl.title = id.address || '';
-                idBtn.disabled = !(parseFloat(id.claimable) > 0);
             } else {
                 el.textContent = '–';
-                idEl.textContent = '–';
                 if (btn) btn.disabled = true;
-                idBtn.disabled = true;
             }
         } catch (e) {
             el.textContent = '–';
         }
     }
 
-    async function doClaim(key) {
+    async function doClaim() {
         const status = document.getElementById('claimStatus');
-        const btn = document.getElementById(key === 'alias' ? 'claimAliasBtn' : 'claimBtn');
+        const btn = document.getElementById('claimBtn');
         const show = (msg, ok) => {
             status.style.display = 'block';
             status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
@@ -3855,7 +3736,7 @@
             // fetch, not apiCall: show central's/the chain's reason here, not as 'Claim failed'
             const res = await fetch(API_URL + '/wallet/base/claim', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: key || 'wallet' }) });
+                body: JSON.stringify({ key: 'wallet' }) });
             const r = await res.json().catch(() => null);
             if (r && r.success) {
                 const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
@@ -3976,69 +3857,6 @@
         } finally {
             btn.innerHTML = orig;
             btn.disabled = false;
-        }
-    }
-
-    // Alias functions
-    let aliasSectionVisible = false;
-    let aliasPrivateKeyLoaded = false;
-    let aliasPrivateKeyVisible = false;
-
-    function toggleAliasSection() {
-        const section = document.getElementById('aliasSection');
-        aliasSectionVisible = !aliasSectionVisible;
-        section.style.display = aliasSectionVisible ? 'block' : 'none';
-    }
-
-    async function toggleAliasPrivateKey() {
-        const input = document.getElementById('aliasPrivateKey');
-        const icon = document.getElementById('aliasKeyIcon');
-
-        if (!aliasPrivateKeyLoaded) {
-            // Load the alias private key from API
-            const result = await apiCall('/wallet/alias-private-key');
-            if (result && result.private_key) {
-                input.value = result.private_key;
-                aliasPrivateKeyLoaded = true;
-            } else {
-                input.value = 'Unable to load';
-            }
-        }
-
-        aliasPrivateKeyVisible = !aliasPrivateKeyVisible;
-        input.type = aliasPrivateKeyVisible ? 'text' : 'password';
-        icon.textContent = aliasPrivateKeyVisible ? 'visibility_off' : 'visibility';
-    }
-
-    function copyAliasPrivateKey() {
-        const input = document.getElementById('aliasPrivateKey');
-        if (input.value && input.value !== 'Click to reveal...' && input.value !== 'Unable to load') {
-            // Check if Clipboard API is available (requires HTTPS or localhost)
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(input.value).then(() => {
-                    showToast('Alias private key copied to clipboard');
-                }).catch(() => {
-                    // Fallback for older browsers or non-HTTPS
-                    input.select();
-                    try {
-                        document.execCommand('copy');
-                        showToast('Alias private key copied to clipboard');
-                    } catch (err) {
-                        showToast('Failed to copy', true);
-                    }
-                });
-            } else {
-                // Fallback for older browsers or non-HTTPS
-                input.select();
-                try {
-                    document.execCommand('copy');
-                    showToast('Alias private key copied to clipboard');
-                } catch (err) {
-                    showToast('Failed to copy', true);
-                }
-            }
-        } else {
-            showToast('Please reveal the private key first', true);
         }
     }
 

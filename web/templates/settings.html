@@ -750,8 +750,8 @@
                     <div style="max-width: 80%;">
                         <div><strong>Stake your wallet &amp; predict on Base</strong></div>
                         <div class="text-muted" style="font-size: 12px;">
-                            On: your wallet stakes (delegates its prediction power to your
-                            alias) and the neuron predicts on Base once a day, earning to your wallet.
+                            On: your wallet stakes and the neuron predicts on Base once a day,
+                            earning to your wallet.
                             <strong>Your staked tokens can't be moved while staked.</strong> Turn it
                             off to unstake; your tokens unlock ~24h later. Needs your wallet
                             <strong>unlocked</strong> to change.
@@ -764,10 +764,8 @@
                 </div>
 
                 <div class="alert alert-warning mt-3 mb-2" style="font-size: 12px;">
-                    <strong>Before you turn this on, both Base addresses need a little ETH for gas:</strong>
-                    the <strong>Wallet</strong> spends gas once (to stake), and the
-                    <strong>Alias</strong> needs the most, since it sends a prediction
-                    transaction every day. Fund them first, then flip the switch.
+                    <strong>Before you turn this on, send a little ETH on Base</strong> to your
+                    wallet (gas once, to stake) and to the alias below (gas for the daily batch).
                 </div>
                 <div id="baseGasAddresses" class="row g-3" style="display:none;">
                     <div class="col-12 col-sm-6">
@@ -778,13 +776,27 @@
                         </div>
                         <div class="text-center mt-2"><img id="baseWalletQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
                     </div>
-                    <div class="col-12 col-sm-6">
-                        <div class="small"><strong>Alias Base address</strong> <span class="text-muted">(needs the most gas)</span></div>
+                    <div class="col-12 col-sm-6" id="aliasBox">
+                        <div class="small"><strong>Alias</strong>
+                            <span class="text-muted">· daily batch gas: <span id="aliasEth">–</span> ETH<span id="aliasSatori"></span></span></div>
                         <div class="input-group input-group-sm mt-1">
                             <input type="text" class="form-control font-monospace" id="baseAliasAddr" readonly style="font-size:0.72rem;">
                             <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseAliasAddr')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
                         </div>
-                        <div class="text-center mt-2"><img id="baseAliasQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
+                        <div class="text-muted mt-1" style="font-size:11px;">The app's own signing address; the daily batch's gas is paid from it.</div>
+                        <div class="mt-2 d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="toggleAliasKeyForm()">Private key</button>
+                            <button class="btn btn-sm btn-outline-primary" type="button" id="aliasClaimBtn" onclick="claimOnAlias()" style="display:none;"></button>
+                        </div>
+                        <form id="aliasKeyForm" class="input-group input-group-sm mt-2" style="display:none;" onsubmit="showAliasKey(event)">
+                            <input type="password" class="form-control" id="aliasKeyPassword" placeholder="Wallet password" autocomplete="current-password">
+                            <button class="btn btn-outline-secondary" type="submit">Show</button>
+                        </form>
+                        <div id="aliasKeyOut" class="input-group input-group-sm mt-2" style="display:none;">
+                            <input type="text" class="form-control font-monospace" id="aliasKey" readonly style="font-size:0.72rem;">
+                            <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('aliasKey')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
+                        </div>
+                        <div id="aliasStatus" class="mt-1" style="font-size:11px; display:none;"></div>
                     </div>
                 </div>
 
@@ -808,12 +820,79 @@
                     box.style.display = 'flex';
                     document.getElementById('baseWalletAddr').value = j.wallet_address;
                     if (j.alias_address) document.getElementById('baseAliasAddr').value = j.alias_address;
-                    if (!_qrDone) {  // fetch QRs once
+                    if (!_qrDone) {  // fetch the QR and the alias's figures once
                         _qrDone = true;
                         fillQr('baseWalletQr', j.wallet_address);
-                        if (j.alias_address) fillQr('baseAliasQr', j.alias_address);
+                        loadAlias();
                     }
                 }
+                // The alias: its gas for the daily batch, any SATORI on it, and a
+                // Claim when rewards were paid to it.
+                const fmt = (n, digits) => Number(n).toLocaleString(undefined, { maximumFractionDigits: digits });
+                async function loadAlias() {
+                    try {
+                        const b = (await (await fetch('/api/wallet/base/balances')).json()).alias;
+                        if (b && !b.error) {
+                            document.getElementById('aliasEth').textContent = fmt(b.eth, 6);
+                            document.getElementById('aliasSatori').textContent = b.satori > 0 ? ' · ' + fmt(b.satori, 8) + ' SATORI' : '';
+                        }
+                    } catch (e) {}
+                    try {
+                        const c = (await (await fetch('/api/wallet/base/claimable')).json()).alias;
+                        const btn = document.getElementById('aliasClaimBtn');
+                        if (c && c.claimable > 0) {
+                            btn.textContent = 'Claim ' + fmt(c.claimable, 8) + ' SATORI paid to it';
+                            btn.style.display = '';
+                        } else {
+                            btn.style.display = 'none';
+                        }
+                    } catch (e) {}
+                }
+                function aliasStatus(text, ok) {
+                    const el = document.getElementById('aliasStatus');
+                    el.style.display = 'block';
+                    el.className = 'mt-1 ' + (ok ? 'text-success' : 'text-danger');
+                    el.textContent = text;
+                }
+                window.toggleAliasKeyForm = function () {
+                    const form = document.getElementById('aliasKeyForm');
+                    const out = document.getElementById('aliasKeyOut');
+                    const open = form.style.display !== 'none' || out.style.display !== 'none';
+                    form.style.display = open ? 'none' : 'flex';
+                    out.style.display = 'none';
+                    document.getElementById('aliasKey').value = '';
+                    document.getElementById('aliasStatus').style.display = 'none';
+                    if (!open) document.getElementById('aliasKeyPassword').focus();
+                };
+                window.showAliasKey = async function (event) {
+                    event.preventDefault();
+                    const pw = document.getElementById('aliasKeyPassword');
+                    try {
+                        const r = await fetch('/api/wallet/alias-private-key', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: pw.value }) });
+                        const j = await r.json();
+                        pw.value = '';
+                        if (!j.private_key) { aliasStatus(j.error || 'Could not show the key.', false); return; }
+                        document.getElementById('aliasKey').value = j.private_key;
+                        document.getElementById('aliasKeyForm').style.display = 'none';
+                        document.getElementById('aliasKeyOut').style.display = 'flex';
+                        document.getElementById('aliasStatus').style.display = 'none';
+                    } catch (e) { aliasStatus('Could not show the key: ' + e, false); }
+                };
+                window.claimOnAlias = async function () {
+                    const btn = document.getElementById('aliasClaimBtn');
+                    btn.disabled = true;
+                    try {
+                        const r = await fetch('/api/wallet/base/claim', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ key: 'alias' }) });
+                        const j = await r.json();
+                        if (j.success) { aliasStatus('Claimed ' + fmt(j.claimed, 8) + ' SATORI.', true); loadAlias(); }
+                        else aliasStatus(j.error || 'Claim failed', false);
+                    } catch (e) { aliasStatus('Claim failed: ' + e, false); }
+                    btn.disabled = false;
+                };
                 function renderState(j) {
                     renderAddresses(j);
                     const el = document.getElementById('basePredictState');

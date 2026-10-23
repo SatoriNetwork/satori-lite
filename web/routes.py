@@ -1218,15 +1218,21 @@ def register_routes(app):
                 return jsonify({'error': str(e)}), 500
         return jsonify({'error': 'Wallet not initialized'}), 500
 
-    @app.route('/api/wallet/alias-private-key')
+    @app.route('/api/wallet/alias-private-key', methods=['POST'])
     @login_required
     def api_wallet_alias_private_key():
-        """Get the alias's private key (for backup - requires login)."""
+        """The alias's private key, for the rare case funds were sent to it: the
+        0x-hex form a Base wallet imports, only for {"password": the wallet's
+        password}."""
+        import hmac
+        given = (request.get_json(silent=True) or {}).get('password')
+        held = decrypt_wallet_password_from_session()
+        if not (isinstance(given, str) and held and hmac.compare_digest(given.encode(), held.encode())):
+            return jsonify({'error': 'Wrong password'}), 403
         wallet_manager = get_or_create_session_wallet()
         if wallet_manager and wallet_manager.alias:
             try:
-                privkey = wallet_manager.alias.privkey
-                return jsonify({'private_key': privkey})
+                return jsonify({'private_key': wallet_manager.alias.account.key.to_0x_hex()})
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         return jsonify({'error': 'Alias not initialized'}), 500

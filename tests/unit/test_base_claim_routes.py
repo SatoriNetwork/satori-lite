@@ -2,8 +2,8 @@
 
 Central records a neuron's rewards at its reward address, else its wallet's Base
 address, else (no wallet) its alias's. A reward address naming an alias
-is paid at that alias's Base address. So the dashboard shows what is
-claimable on both, and claims either one, signed by that key. A claim is sent
+is paid at that alias's Base address. So the app shows what is claimable
+on both (the alias's in Settings), and claims either one, signed by that key. A claim is sent
 from the claiming address, so with no ETH there it says so instead of failing.
 """
 from unittest import mock
