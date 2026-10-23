@@ -232,7 +232,7 @@
         align-items: flex-end;
         gap: 0.3rem;
     }
-    .stk-pool-alias {
+    .stk-pool-name {
         font-size: 0.64rem;
         font-weight: 700;
         letter-spacing: 0.06em;
@@ -517,7 +517,7 @@
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         display: block;
     }
-    .stk-addr-row .stk-addr-alias {
+    .stk-addr-row .stk-addr-name {
         font-size: 0.64rem;
         font-weight: 700;
         letter-spacing: 0.07em;
@@ -1124,7 +1124,7 @@
                         <div class="stk-pool-addr">${pool.address}</div>
                     </div>
                     <div class="stk-pool-right">
-                        ${pool.alias ? `<span class="stk-pool-alias">${pool.alias}</span>` : ''}
+                        ${pool.pool_name ? `<span class="stk-pool-name">${pool.pool_name}</span>` : ''}
                         <span class="stk-pool-fee" style="color: ${commissionColor}">
                             ${pool.commission}% fee
                         </span>
@@ -1229,7 +1229,7 @@
                     <span class="stk-addr-dot"></span>
                     <div class="stk-addr-body">
                         <span class="stk-addr-code">${worker.address}</span>
-                        ${worker.alias ? `<span class="stk-addr-alias">${worker.alias}</span>` : ''}
+                        ${worker.pool_name ? `<span class="stk-addr-name">${worker.pool_name}</span>` : ''}
                     </div>
                     <button class="stk-addr-remove" onclick="removeWorker('${worker.address}')" title="Remove worker" aria-label="Remove worker" type="button">
                         <i class="material-icons">close</i>
@@ -1259,7 +1259,7 @@
                     <span class="stk-addr-dot"></span>
                     <div class="stk-addr-body">
                         <span class="stk-addr-code">${lender.address}</span>
-                        ${lender.alias ? `<span class="stk-addr-alias">${lender.alias}</span>` : ''}
+                        ${lender.pool_name ? `<span class="stk-addr-name">${lender.pool_name}</span>` : ''}
                     </div>
                     <span></span>
                 `;

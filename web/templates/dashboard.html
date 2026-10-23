@@ -3411,7 +3411,7 @@
                             <code class="small">${pool.address}</code>
                         </div>
                         <div class="text-end">
-                            ${pool.alias ? `<span class="badge bg-primary">${pool.alias}</span><br>` : ''}
+                            ${pool.pool_name ? `<span class="badge bg-primary">${pool.pool_name}</span><br>` : ''}
                             <small class="fw-bold" style="color: ${commissionColor}">${pool.commission}% Fee</small>
                         </div>
                     </div>
@@ -3470,7 +3470,7 @@
                     <div>
                         <small class="text-muted">Address:</small><br>
                         <code class="small">${worker.address}</code>
-                        ${worker.alias ? `<br><span class="badge bg-secondary">${worker.alias}</span>` : ''}
+                        ${worker.pool_name ? `<br><span class="badge bg-secondary">${worker.pool_name}</span>` : ''}
                     </div>
                     <button class="btn btn-sm btn-danger" onclick="removeWorker('${worker.address}')">
                         <i class="material-icons align-middle" style="font-size: 16px;">delete</i>
@@ -3499,7 +3499,7 @@
                     <div>
                         <small class="text-muted">Address:</small><br>
                         <code class="small">${lender.address}</code>
-                        ${lender.alias ? `<br><span class="badge bg-secondary">${lender.alias}</span>` : ''}
+                        ${lender.pool_name ? `<br><span class="badge bg-secondary">${lender.pool_name}</span>` : ''}
                     </div>
                 `;
                 lenderListEl.appendChild(lenderItem);
