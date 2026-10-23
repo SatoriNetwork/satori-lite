@@ -2,7 +2,7 @@
 Satori-Lite Web UI Flask Application.
 
 Minimal web interface for satori-lite functionality:
-- Vault unlock/login
+- Wallet unlock/login
 - Dashboard with balance, rewards, lending, and pool management
 """
 import os

@@ -2,7 +2,7 @@
 Satori-Lite Web UI Routes.
 
 Handles all web routes for the minimal UI:
-- Login/vault unlock
+- Login/wallet unlock
 - Dashboard
 - API proxy endpoints
 """
@@ -24,7 +24,7 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
-from web.balance_cache import get_balance_snapshot, get_wallet_balance
+from web.balance_cache import get_balance_snapshot, get_alias_balance
 
 
 def _base_token_info() -> dict:
@@ -96,45 +96,43 @@ from flask import (
 logger = logging.getLogger(__name__)
 _process_started_at = time.time()
 
-# Global vault reference (will be set by the application) - used by background processes
-_startup_vault = None
+# Global WalletManager (set by the application) - used by background processes
+_startup_wallet_manager = None
 
 # Global startup instance reference (will be set by the application)
 _startup_instance = None
 
-# Session-specific vaults - each browser session gets its own WalletManager
-_session_vaults = {}
-_vault_lock = Lock()
+# Session-specific keys - each browser session gets its own WalletManager
+_session_wallets = {}
+_wallet_lock = Lock()
 
 # JWT authentication lock to prevent concurrent login attempts
 _auth_lock = Lock()
 
 
-def check_vault_file_exists():
-    """Check if vault.yaml file exists.
+def check_wallet_file_exists():
+    """Check if the wallet's file exists (made at wallet setup).
 
     Returns:
-        bool: True if vault.yaml file exists, False otherwise
+        bool: True if the wallet's file exists, False otherwise
     """
     try:
         from satorineuron import config
-        import os
-        vault_path = config.walletPath('vault.yaml')
-        return os.path.exists(vault_path)
+        return os.path.exists(config.walletPath())
     except Exception as e:
-        logger.warning(f"Failed to check vault file: {e}")
+        logger.warning(f"Failed to check wallet file: {e}")
         return False
 
 
-def set_vault(vault):
-    """Set the startup vault instance (used by background processes)."""
-    global _startup_vault
-    _startup_vault = vault
+def set_wallet_manager(wallet_manager):
+    """Set the startup WalletManager (used by background processes)."""
+    global _startup_wallet_manager
+    _startup_wallet_manager = wallet_manager
 
 
-def get_vault():
-    """Get the startup vault instance (for backward compatibility)."""
-    return _startup_vault
+def get_wallet_manager():
+    """Get the startup WalletManager."""
+    return _startup_wallet_manager
 
 
 def set_startup(startup):
@@ -148,7 +146,7 @@ def get_startup():
     return _startup_instance
 
 
-def get_or_create_session_vault():
+def get_or_create_session_wallet():
     """Get or create WalletManager for current session.
 
     Each browser session gets its own WalletManager instance.
@@ -166,51 +164,48 @@ def get_or_create_session_vault():
         session.permanent = False  # Don't persist sessions indefinitely
         logger.info(f"Generated new session ID: {session_id}")
 
-    # Get or create vault for this session
-    with _vault_lock:
-        if session_id not in _session_vaults:
+    # Get or create the keys for this session
+    with _wallet_lock:
+        if session_id not in _session_wallets:
             try:
                 from satorineuron.init.wallet import WalletManager
-                from satorineuron import config
 
                 # Create NEW WalletManager instance for this session
-                # Don't auto-decrypt vault - user must provide password via login
+                # Don't auto-decrypt the wallet - user must provide password via login
                 logger.info(f"Creating new WalletManager for session: {session_id}")
-                _session_vaults[session_id] = WalletManager.create(
-                    walletPath=config.walletPath('wallet.yaml'),
-                    vaultPath=config.walletPath('vault.yaml'),
+                _session_wallets[session_id] = WalletManager.create(
                     useConfigPassword=False  # Don't auto-decrypt with config password
-                    # cachePath is optional and defaults to None
+                    # paths default to the install's alias and wallet files
                 )
             except Exception as e:
-                logger.error(f"Failed to create session vault: {e}")
+                logger.error(f"Failed to create session wallet: {e}")
                 return None
 
-    return _session_vaults[session_id]
+    return _session_wallets[session_id]
 
 
-def cleanup_session_vault(session_id):
-    """Clean up vault when session ends.
+def cleanup_session_wallet(session_id):
+    """Lock the wallet when the session ends.
 
     Args:
         session_id: The session ID to cleanup
     """
-    with _vault_lock:
-        if session_id in _session_vaults:
+    with _wallet_lock:
+        if session_id in _session_wallets:
             try:
-                logger.info(f"Cleaning up session vault: {session_id}")
-                _session_vaults[session_id].closeVault()
+                logger.info(f"Cleaning up session wallet: {session_id}")
+                _session_wallets[session_id].closeWallet()
             except Exception as e:
-                logger.warning(f"Error closing vault for session {session_id}: {e}")
+                logger.warning(f"Error closing wallet for session {session_id}: {e}")
 
             try:
-                del _session_vaults[session_id]
+                del _session_wallets[session_id]
             except Exception as e:
-                logger.warning(f"Error deleting session vault {session_id}: {e}")
+                logger.warning(f"Error deleting session wallet {session_id}: {e}")
 
 
-def encrypt_vault_password(password):
-    """Encrypt vault password for storage in session.
+def encrypt_wallet_password(password):
+    """Encrypt the wallet password for storage in session.
 
     Args:
         password: Plaintext password
@@ -224,14 +219,14 @@ def encrypt_vault_password(password):
     return encrypted_pw.decode(), session_key.decode()
 
 
-def decrypt_vault_password_from_session():
-    """Decrypt vault password from current session.
+def decrypt_wallet_password_from_session():
+    """Decrypt the wallet password from current session.
 
     Returns:
         str: Decrypted password, or None if not available
     """
     try:
-        encrypted_pw = session.get('encrypted_vault_password')
+        encrypted_pw = session.get('encrypted_wallet_password')
         session_key = session.get('session_key')
 
         if not encrypted_pw or not session_key:
@@ -241,88 +236,58 @@ def decrypt_vault_password_from_session():
         password = f.decrypt(encrypted_pw.encode()).decode()
         return password
     except Exception as e:
-        logger.error(f"Failed to decrypt vault password: {e}")
+        logger.error(f"Failed to decrypt wallet password: {e}")
         return None
 
 
 def ensure_peer_registered(app, wallet_manager, max_retries=3):
-    """Ensure the peer is registered with the API server.
+    """Register the alias with the Satori Network (register is idempotent).
 
-    This function should be called after vault is successfully unlocked.
-    It will:
-    1. Try to login (check if peer exists)
-    2. If not found, register the peer
-    3. Retry with delay if registration fails
+    Called after the wallet is unlocked. Sends the current form:
+    alias-pubkey, nostr-pubkey, neuron-version, and the wallet's link
+    (wallet-link, wallet-signature) when there is one. Without a link the
+    alias registers alone. Retries with a delay on a server error.
 
     Args:
         app: Flask app instance for config access
-        wallet_manager: The wallet manager instance with wallet and vault (both must be decrypted)
+        wallet_manager: the WalletManager (its alias is required; its wallet,
+            when unlocked, makes the link if none is stored)
         max_retries: Maximum number of retry attempts
 
     Returns:
-        dict with peer info if successful, None if failed
+        dict with the register answer if successful, None if failed
     """
+    from satorilib.wallet.link import linkHeaders
     api_url = app.config.get('SATORI_API_URL', get_api_url())
 
-    # Validate wallet exists
-    if not wallet_manager.wallet:
-        logger.error("Wallet not initialized - cannot register peer")
+    alias = getattr(wallet_manager, 'alias', None)
+    alias_pubkey = getattr(alias, 'pubkey', None) if alias else None
+    if not alias_pubkey:
+        logger.error("Alias not available - cannot register peer")
         return None
 
-    # Validate vault exists and is decrypted
-    if not wallet_manager.vault:
-        logger.error("Vault not initialized - cannot register peer")
-        return None
+    link = None
+    try:
+        link = wallet_manager.ensureWalletLink() or wallet_manager.walletLink
+    except Exception as e:
+        logger.warning(f"Could not read the wallet's link: {e}")
+    if not isinstance(link, dict):
+        link = None
 
-    if not hasattr(wallet_manager.vault, 'isDecrypted') or not wallet_manager.vault.isDecrypted:
-        logger.error("Vault is not decrypted - cannot register peer")
-        return None
-
-    # Get wallet pubkey (identity) - REQUIRED
-    wallet_pubkey = None
-    if hasattr(wallet_manager.wallet, 'pubkey'):
-        wallet_pubkey = wallet_manager.wallet.pubkey
-
-    # Get vault pubkey - REQUIRED (not optional)
-    vault_pubkey = None
-    if hasattr(wallet_manager.vault, 'pubkey'):
-        vault_pubkey = wallet_manager.vault.pubkey
-
-    # Validate both pubkeys are present
-    if not wallet_pubkey:
-        logger.error("Wallet pubkey not available - cannot register peer")
-        return None
-
-    if not vault_pubkey:
-        logger.error("Vault pubkey not available - cannot register peer")
-        return None
+    headers = {'alias-pubkey': alias_pubkey}
+    startup = get_startup()
+    nostr_pubkey = getattr(startup, 'nostrPubkey', None) if startup else None
+    if nostr_pubkey:
+        headers['nostr-pubkey'] = nostr_pubkey
+    try:
+        from satorineuron import VERSION
+        headers['neuron-version'] = VERSION
+    except Exception:
+        pass
+    headers.update(linkHeaders(link))
 
     for attempt in range(max_retries):
         try:
-            # Step 1: Try login first
-            headers = {'wallet-pubkey': wallet_pubkey}
-            resp = requests.get(
-                f"{api_url}/api/v1/peer/login",
-                headers=headers,
-                timeout=15
-            )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get('exists'):
-                    logger.info(f"Peer already registered: peer_id={data.get('peer_id')}")
-                    return data
-
-            # Step 2: Peer not found, register
-            # POST /api/v1/peer/register
-            # Required headers:
-            #   - wallet-pubkey: The identity wallet's public key (REQUIRED)
-            #   - vault-pubkey: The vault wallet's public key (REQUIRED - must be decrypted)
-            headers = {
-                'wallet-pubkey': wallet_pubkey,
-                'vault-pubkey': vault_pubkey
-            }
-
             resp = requests.post(
                 f"{api_url}/api/v1/peer/register",
                 headers=headers,
@@ -333,18 +298,28 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
                 data = resp.json()
                 if data.get('success'):
                     logger.info(f"Peer registered: peer_id={data.get('peer_id')}")
+                    if data.get('wallet_link_error'):
+                        logger.warning(
+                            "The Satori Network did not accept the wallet's link: "
+                            f"{data.get('wallet_link_error')}")
+                    wallet_address = data.get('wallet_address')
+                    try:
+                        session['wallet_address'] = wallet_address
+                    except RuntimeError:
+                        pass  # outside a request
+                    if startup is not None:
+                        startup.linkedWalletAddress = wallet_address
                     return data
 
             # 4xx responses are caused by the request itself — retrying with
-            # the same wallet/vault pubkeys won't change the outcome, so stop
+            # the same alias and link won't change the outcome, so stop
             # immediately and surface a clear message.
             if 400 <= resp.status_code < 500:
                 detail = _extract_error_detail(resp)
                 if resp.status_code == 409:
                     logger.error(
                         f"Peer registration rejected by server (409 Conflict): {detail}. "
-                        "This wallet pubkey is already registered to a different peer "
-                        "and cannot be re-used as an identity."
+                        "This alias pubkey is already registered to a different peer."
                     )
                 else:
                     logger.error(
@@ -392,30 +367,30 @@ def login_required(f):
             session.permanent = False  # Don't persist sessions indefinitely
 
         # Check if user is logged in via session flag
-        if not session.get('vault_open'):
-            # Not logged in - check if vault file exists
-            if not check_vault_file_exists():
-                # No vault file - redirect to create password
-                return redirect(url_for('vault_setup'))
-            # Vault exists but not logged in - redirect to login
+        if not session.get('wallet_open'):
+            # Not logged in - check if the wallet file exists
+            if not check_wallet_file_exists():
+                # No wallet yet - redirect to wallet setup
+                return redirect(url_for('wallet_setup'))
+            # Wallet exists but not logged in - redirect to login
             return redirect(url_for('login'))
 
-        # Validate that vault actually exists and is open (handles container restart)
-        # Check _session_vaults directly - don't call get_or_create (which creates new vault)
+        # Validate that the session's keys exist and the wallet is open (handles container restart)
+        # Check _session_wallets directly - don't call get_or_create (which creates a new one)
         session_id = session.get('session_id')
-        if session_id and session_id not in _session_vaults:
-            # Vault doesn't exist (container restarted) - require re-login
-            logger.info(f"Session vault missing for {session_id} - forcing re-login")
-            session.pop('vault_open', None)
+        if session_id and session_id not in _session_wallets:
+            # Session keys missing (container restarted) - require re-login
+            logger.info(f"Session wallet missing for {session_id} - forcing re-login")
+            session.pop('wallet_open', None)
             session['logged_out'] = True  # Prevent auto-login
             return redirect(url_for('login'))
 
-        # Also validate vault is actually decrypted
-        if session_id and session_id in _session_vaults:
-            wallet_manager = _session_vaults[session_id]
-            if not wallet_manager or not wallet_manager.vault or not wallet_manager.vault.isDecrypted:
-                logger.info(f"Session vault not decrypted for {session_id} - forcing re-login")
-                session.pop('vault_open', None)
+        # Also validate the wallet is actually decrypted
+        if session_id and session_id in _session_wallets:
+            wallet_manager = _session_wallets[session_id]
+            if not wallet_manager or not wallet_manager.wallet or not wallet_manager.wallet.isDecrypted:
+                logger.info(f"Session wallet not decrypted for {session_id} - forcing re-login")
+                session.pop('wallet_open', None)
                 session['logged_out'] = True  # Prevent auto-login
                 return redirect(url_for('login'))
 
@@ -453,26 +428,48 @@ def register_routes(app):
 
     @app.route('/')
     def index():
-        """Redirect to dashboard if logged in, vault setup if needed, otherwise to login."""
-        # Check if vault file exists first
-        if not check_vault_file_exists():
-            return redirect(url_for('vault_setup'))
+        """Redirect to dashboard if logged in, wallet setup if needed, otherwise to login."""
+        # Check if the wallet file exists first
+        if not check_wallet_file_exists():
+            return redirect(url_for('wallet_setup'))
 
-        if session.get('vault_open'):
+        if session.get('wallet_open'):
             return redirect(url_for('dashboard'))
         return redirect(url_for('login'))
 
+    def _wallet_unlocked(wallet_manager, password):
+        """Keep the unlocked wallet's password in the session and register
+        the alias (with the wallet's link) with the Satori Network."""
+        session['wallet_open'] = True
+        session.pop('logged_out', None)  # Clear logout flag
+
+        # Encrypt and store password in session for future use
+        encrypted_pw, session_key = encrypt_wallet_password(password)
+        session['encrypted_wallet_password'] = encrypted_pw
+        session['session_key'] = session_key
+
+        # Register peer with API server (non-blocking)
+        try:
+            peer_info = ensure_peer_registered(
+                current_app, wallet_manager, max_retries=2)
+            if peer_info:
+                session['peer_id'] = peer_info.get('peer_id')
+                logger.info(f"Peer registered: {peer_info}")
+        except Exception as e:
+            # Don't block login if registration fails
+            logger.warning(f"Peer registration warning: {e}")
+
     @app.route('/login', methods=['GET', 'POST'])
     def login():
-        """Handle vault unlock/login."""
+        """Handle wallet unlock/login."""
         from satorineuron import VERSION
 
         def render_login():
             return render_template('login.html', version=VERSION)
 
-        # Check if vault file exists, redirect to setup if not
-        if not check_vault_file_exists():
-            return redirect(url_for('vault_setup'))
+        # Check if the wallet file exists, redirect to setup if not
+        if not check_wallet_file_exists():
+            return redirect(url_for('wallet_setup'))
 
         # Auto-login on GET if config password exists
         if request.method == 'GET':
@@ -481,36 +478,17 @@ def register_routes(app):
                 return render_login()
 
             from satorineuron import config
-            config_password = config.get().get('vault password')
+            config_password = config.walletPassword()
 
             if config_password:
                 # Attempt auto-login with config password
-                wallet_manager = get_or_create_session_vault()
+                wallet_manager = get_or_create_session_wallet()
                 if wallet_manager:
                     try:
-                        vault = wallet_manager.openVault(password=config_password, create=True)
+                        wallet = wallet_manager.openWallet(password=config_password, create=True)
 
-                        if vault and vault.isDecrypted:
-                            # Successfully auto-logged in
-                            session['vault_open'] = True
-                            session.pop('logged_out', None)  # Clear logout flag
-
-                            # Encrypt and store password in session for future use
-                            encrypted_pw, session_key = encrypt_vault_password(config_password)
-                            session['encrypted_vault_password'] = encrypted_pw
-                            session['session_key'] = session_key
-
-                            # Register peer with API server (non-blocking)
-                            try:
-                                peer_info = ensure_peer_registered(
-                                    current_app, wallet_manager, max_retries=2)
-                                if peer_info:
-                                    session['peer_id'] = peer_info.get('peer_id')
-                                    logger.info(f"Auto-login successful, peer registered: {peer_info}")
-                            except Exception as e:
-                                logger.warning(f"Auto-login peer registration warning: {e}")
-
-                            # Auto-login successful - redirect to dashboard
+                        if wallet and wallet.isDecrypted:
+                            _wallet_unlocked(wallet_manager, config_password)
                             logger.info("Auto-login successful with config password")
                             return redirect(url_for('dashboard'))
                     except Exception as e:
@@ -524,64 +502,46 @@ def register_routes(app):
             password = request.form.get('password', '')
 
             # Get session-specific wallet manager
-            wallet_manager = get_or_create_session_vault()
+            wallet_manager = get_or_create_session_wallet()
             if wallet_manager:
                 try:
-                    # WalletManager.openVault(password) unlocks the vault
-                    vault = wallet_manager.openVault(password=password, create=True)
+                    # WalletManager.openWallet(password) unlocks the wallet
+                    wallet = wallet_manager.openWallet(password=password, create=True)
 
-                    # Verify the vault was actually decrypted
-                    # If wrong password, decryption fails silently and vault remains encrypted
-                    if vault is None:
-                        flash('Error: Could not open vault', 'error')
-                    elif not vault.isDecrypted:
-                        # Wrong password - vault is still encrypted
+                    # Verify the wallet was actually decrypted
+                    # If wrong password, decryption fails silently and the wallet remains encrypted
+                    if wallet is None:
+                        flash('Error: Could not open wallet', 'error')
+                    elif not wallet.isDecrypted:
+                        # Wrong password - the wallet is still encrypted
                         flash('Error: Invalid password', 'error')
                     else:
-                        # Successfully decrypted - vault stays unlocked for this session
-                        session['vault_open'] = True
-                        session.pop('logged_out', None)  # Clear logout flag
-
-                        # Encrypt and store password in session for future use
-                        encrypted_pw, session_key = encrypt_vault_password(password)
-                        session['encrypted_vault_password'] = encrypted_pw
-                        session['session_key'] = session_key
-
-                        # Register peer with API server (non-blocking)
-                        try:
-                            peer_info = ensure_peer_registered(
-                                current_app, wallet_manager, max_retries=2)
-                            if peer_info:
-                                session['peer_id'] = peer_info.get('peer_id')
-                                logger.info(f"Peer registered: {peer_info}")
-                        except Exception as e:
-                            # Don't block login if registration fails
-                            logger.warning(f"Peer registration warning: {e}")
-
+                        # Successfully decrypted - the wallet stays unlocked for this session
+                        _wallet_unlocked(wallet_manager, password)
                         return redirect(url_for('dashboard'))
                 except Exception as e:
-                    flash(f'Error: Invalid password or vault error', 'error')
+                    flash(f'Error: Invalid password or wallet error', 'error')
             else:
-                # For testing without vault
+                # For testing without a wallet
                 if app.config.get('TESTING'):
-                    session['vault_open'] = True
+                    session['wallet_open'] = True
                     return redirect(url_for('dashboard'))
-                flash('Error: Vault not initialized', 'error')
+                flash('Error: Wallet not initialized', 'error')
 
         return render_login()
 
-    @app.route('/vault-setup', methods=['GET', 'POST'])
-    def vault_setup():
-        """Handle initial vault password creation."""
+    @app.route('/wallet-setup', methods=['GET', 'POST'])
+    def wallet_setup():
+        """Handle initial wallet password creation."""
         from satorineuron import VERSION
 
-        def render_vault_setup():
-            return render_template('vault_setup.html', version=VERSION)
+        def render_wallet_setup():
+            return render_template('wallet_setup.html', version=VERSION)
 
-        # If vault file already exists, redirect to login with message
-        if check_vault_file_exists():
-            flash('Vault already exists. Please log in with your existing password.', 'info')
-            logger.info("Attempted to access vault setup but password already exists")
+        # If the wallet file already exists, redirect to login with message
+        if check_wallet_file_exists():
+            flash('Wallet already exists. Please log in with your existing password.', 'info')
+            logger.info("Attempted to access wallet setup but the wallet already exists")
             return redirect(url_for('login'))
 
         if request.method == 'POST':
@@ -591,46 +551,46 @@ def register_routes(app):
             # Validate password length
             if len(password) < 4:
                 flash('Password must be at least 4 characters long', 'error')
-                return render_vault_setup()
+                return render_wallet_setup()
 
             # Validate passwords match
             if password != password_confirm:
                 flash('Passwords do not match. Please try again.', 'error')
-                return render_vault_setup()
+                return render_wallet_setup()
 
-            # Create vault with password (DO NOT save password to config for security)
+            # Create the wallet with the password (DO NOT save password to config for security)
             try:
-                # Get session-specific wallet manager to create the vault
-                wallet_manager = get_or_create_session_vault()
+                # Get session-specific wallet manager to create the wallet
+                wallet_manager = get_or_create_session_wallet()
 
                 if wallet_manager:
-                    # Create the vault with the password
-                    vault = wallet_manager.openVault(password=password, create=True)
+                    # Create the wallet with the password (it links the alias as it opens)
+                    wallet = wallet_manager.openWallet(password=password, create=True)
 
-                    if vault and vault.isDecrypted:
-                        flash('Vault created successfully! Please log in with your password.', 'success')
-                        logger.info("Vault created via web UI (password NOT saved to config)")
+                    if wallet and wallet.isDecrypted:
+                        flash('Wallet created successfully! Please log in with your password.', 'success')
+                        logger.info("Wallet created via web UI (password NOT saved to config)")
                         return redirect(url_for('login'))
                     else:
-                        flash('Error creating vault. Please try again.', 'error')
-                        return render_vault_setup()
+                        flash('Error creating wallet. Please try again.', 'error')
+                        return render_wallet_setup()
                 else:
                     flash('Error initializing wallet manager', 'error')
-                    return render_vault_setup()
+                    return render_wallet_setup()
             except Exception as e:
-                logger.error(f"Failed to create vault: {e}")
-                flash(f'Error creating vault: {str(e)}', 'error')
-                return render_vault_setup()
+                logger.error(f"Failed to create wallet: {e}")
+                flash(f'Error creating wallet: {str(e)}', 'error')
+                return render_wallet_setup()
 
-        return render_vault_setup()
+        return render_wallet_setup()
 
     @app.route('/logout')
     def logout():
-        """Handle logout/vault lock."""
-        # Cleanup session-specific vault
+        """Handle logout/wallet lock."""
+        # Cleanup session-specific keys
         session_id = session.get('session_id')
         if session_id:
-            cleanup_session_vault(session_id)
+            cleanup_session_wallet(session_id)
 
         # Set flag before clearing to prevent auto-login
         session.clear()
@@ -642,18 +602,6 @@ def register_routes(app):
     def dashboard():
         """Main dashboard page."""
         from satorineuron import VERSION
-
-        # Derive eth_wallet_address locally from wallet pubkey
-        eth_wallet_address = None
-        try:
-            wallet_manager = get_or_create_session_vault()
-            if wallet_manager and wallet_manager.wallet and hasattr(wallet_manager.wallet, 'pubkey'):
-                wallet_pubkey = wallet_manager.wallet.pubkey
-                if wallet_pubkey:
-                    from satorineuron.common.eth_address import derive_eth_wallet_address_from_pubkey
-                    eth_wallet_address = derive_eth_wallet_address_from_pubkey(wallet_pubkey)
-        except Exception as e:
-            logger.warning(f"Could not derive eth_wallet_address: {e}")
 
         # Get nostr pubkey from startup instance
         nostr_pubkey = None
@@ -667,7 +615,6 @@ def register_routes(app):
         return render_template(
             'dashboard.html',
             version=VERSION,
-            eth_wallet_address=eth_wallet_address,
             nostr_pubkey=nostr_pubkey,
             page_mode='dashboard')
 
@@ -688,7 +635,6 @@ def register_routes(app):
         return render_template(
             'dashboard.html',
             version=VERSION,
-            eth_wallet_address=None,
             nostr_pubkey=nostr_pubkey,
             page_mode='p2p')
 
@@ -987,20 +933,20 @@ def register_routes(app):
 
         This implements JWT authentication:
         1. Check if we have a valid access token in session
-        2. If not or expired, login with an EIP-191 wallet signature to get JWT tokens
+        2. If not or expired, login with an EIP-191 signature by the alias to get JWT tokens
         3. If expiring soon, refresh the access token
         4. Return Authorization header with Bearer token
         """
         from datetime import datetime, timedelta
         import time
 
-        wallet_manager = get_or_create_session_vault()
-        if not wallet_manager or not wallet_manager.wallet:
+        wallet_manager = get_or_create_session_wallet()
+        if not wallet_manager or not wallet_manager.alias:
             return None
 
-        wallet = wallet_manager.wallet
-        if not hasattr(wallet, 'pubkey') or not hasattr(wallet, 'ethSign'):
-            logger.warning("Wallet missing pubkey or ethSign method")
+        alias = wallet_manager.alias
+        if not hasattr(alias, 'pubkey') or not hasattr(alias, 'ethSign'):
+            logger.warning("Alias missing pubkey or ethSign method")
             return None
 
         api_url = current_app.config.get('SATORI_API_URL', get_api_url())
@@ -1034,9 +980,9 @@ def register_routes(app):
                             resp = requests.post(
                                 f"{api_url}/api/v1/auth/login",
                                 headers={
-                                    'wallet-pubkey': wallet.pubkey,
+                                    'alias-pubkey': alias.pubkey,
                                     'message': challenge,
-                                    'signature': wallet.ethSign(challenge)
+                                    'signature': alias.ethSign(challenge)
                                 },
                                 timeout=15
                             )
@@ -1244,18 +1190,15 @@ def register_routes(app):
     @app.route('/api/wallet/address')
     @login_required
     def api_wallet_address():
-        """The identity's and the vault's Base addresses (what central keys
-        this neuron by), and the identity pubkey."""
-        wallet_manager = get_or_create_session_vault()
+        """The alias's and the wallet's Base addresses, and the alias pubkey."""
+        wallet_manager = get_or_create_session_wallet()
         if wallet_manager:
             result = {}
-            # Get wallet address
+            if wallet_manager.alias:
+                result['alias_address'] = wallet_manager.alias.ethAddress
+                result['alias_pubkey'] = getattr(wallet_manager.alias, 'pubkey', None)
             if wallet_manager.wallet:
                 result['wallet_address'] = wallet_manager.wallet.ethAddress
-                result['wallet_pubkey'] = getattr(wallet_manager.wallet, 'pubkey', None)
-            # Get vault address
-            if wallet_manager.vault:
-                result['vault_address'] = wallet_manager.vault.ethAddress
             startup = get_startup()
             if startup and hasattr(startup, 'nostrPubkey'):
                 result['nostr_pubkey'] = startup.nostrPubkey
@@ -1265,46 +1208,46 @@ def register_routes(app):
     @app.route('/api/wallet/private-key')
     @login_required
     def api_wallet_private_key():
-        """Get vault's private key (sensitive - requires login)."""
-        wallet_manager = get_or_create_session_vault()
-        if wallet_manager and wallet_manager.vault:
-            try:
-                privkey = wallet_manager.vault.privkey
-                return jsonify({'private_key': privkey})
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-        return jsonify({'error': 'Vault not initialized'}), 500
-
-    @app.route('/api/wallet/identity-private-key')
-    @login_required
-    def api_wallet_identity_private_key():
-        """Get identity wallet's private key (for backup - requires login)."""
-        wallet_manager = get_or_create_session_vault()
+        """Get wallet's private key (sensitive - requires login)."""
+        wallet_manager = get_or_create_session_wallet()
         if wallet_manager and wallet_manager.wallet:
             try:
                 privkey = wallet_manager.wallet.privkey
                 return jsonify({'private_key': privkey})
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
-        return jsonify({'error': 'Identity wallet not initialized'}), 500
+        return jsonify({'error': 'Wallet not initialized'}), 500
+
+    @app.route('/api/wallet/alias-private-key')
+    @login_required
+    def api_wallet_alias_private_key():
+        """Get the alias's private key (for backup - requires login)."""
+        wallet_manager = get_or_create_session_wallet()
+        if wallet_manager and wallet_manager.alias:
+            try:
+                privkey = wallet_manager.alias.privkey
+                return jsonify({'private_key': privkey})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Alias not initialized'}), 500
 
     @app.route('/api/wallet/base')
     @login_required
     def api_wallet_base():
-        """The vault key as its Base/EVM identity, for import into MetaMask.
+        """The wallet key as its Base/EVM key, for import into MetaMask.
 
-        The vault's Evrmore key and its EVM key are the same secp256k1 keypair,
+        The wallet's Evrmore key and its EVM key are the same secp256k1 keypair,
         so `ethAddress` is the address central keys the Merkle reward tree by
-        (derived from the vault pubkey) and `private_key` is the 0x-hex form
-        MetaMask imports. Requires a decrypted vault (login_required)."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        (derived from the wallet pubkey) and `private_key` is the 0x-hex form
+        MetaMask imports. Requires a decrypted wallet (login_required)."""
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            vault = wallet_manager.vault
+            wallet = wallet_manager.wallet
             return jsonify({
-                'base_address': vault.ethAddress,
-                'private_key': vault.account.key.to_0x_hex(),
+                'base_address': wallet.ethAddress,
+                'private_key': wallet.account.key.to_0x_hex(),
                 'token': _base_token_info(),
             })
         except Exception as e:
@@ -1319,19 +1262,19 @@ def register_routes(app):
     @app.route('/api/wallet/base/balances')
     @login_required
     def api_wallet_base_balances():
-        """SATORI and ETH on Base for the vault (holds and stakes SATORI) and the
-        identity (the predicting wallet, pays the daily prediction gas). A read
+        """SATORI and ETH on Base for the wallet (holds and stakes SATORI) and the
+        alias (predicts, pays the daily prediction gas). A read
         that fails comes back as that address's `error`, the rest still load."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
             claimer = _base_claimer()
         except Exception as e:
             return jsonify({'error': str(e)}), 500
         WEI = 10 ** 18
         result = {}
-        for whose, w in (('vault', wallet_manager.vault), ('identity', wallet_manager.wallet)):
+        for whose, w in (('wallet', wallet_manager.wallet), ('alias', wallet_manager.alias)):
             if not w:
                 continue
             entry = {'address': w.ethAddress}
@@ -1384,16 +1327,16 @@ def register_routes(app):
     def api_wallet_base_claimable():
         """How much this neuron can claim on Base: total lifetime entitlement
         (from central's published drop) minus what's already been minted
-        on-chain. Top level is the vault's Base address; `identity` is the
-        identity's, where central pays a neuron with no vault, or a reward
-        address naming this identity."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        on-chain. Top level is the wallet's Base address; `alias` is the
+        alias's, where central pays a neuron with no wallet, or a reward
+        address naming this alias."""
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
             claimer = _base_claimer()
-            _, result = _merkle_status(claimer, wallet_manager.vault.ethAddress)
-            _, result['identity'] = _merkle_status(claimer, wallet_manager.wallet.ethAddress)
+            _, result = _merkle_status(claimer, wallet_manager.wallet.ethAddress)
+            _, result['alias'] = _merkle_status(claimer, wallet_manager.alias.ethAddress)
             return jsonify(result)
         except Exception as e:
             return jsonify({'error': str(e)}), 500
@@ -1402,16 +1345,16 @@ def register_routes(app):
     @login_required
     def api_wallet_base_claim():
         """Claim the neuron's Base rewards: fetch the proof from central and
-        submit claimMerkle signed with the vault key, or with the identity key
-        for {"key": "identity"}. The neuron holds both keys, so it claims for
+        submit claimMerkle signed with the wallet key, or with the alias key
+        for {"key": "alias"}. The neuron holds both keys, so it claims for
         itself. The claiming address pays the gas, so it needs a little ETH on
         Base; with none, it says so."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            whose = 'identity' if (request.get_json(silent=True) or {}).get('key') == 'identity' else 'vault'
-            signer = wallet_manager.wallet if whose == 'identity' else wallet_manager.vault
+            whose = 'alias' if (request.get_json(silent=True) or {}).get('key') == 'alias' else 'wallet'
+            signer = wallet_manager.alias if whose == 'alias' else wallet_manager.wallet
             claimer = _base_claimer()
             entry, status = _merkle_status(claimer, signer.ethAddress)
             if not entry:
@@ -1437,11 +1380,11 @@ def register_routes(app):
     def api_wallet_base_airdrop():
         """Airdrop claim status: total allocation, already claimed, and what is
         currently vested-and-claimable (the contract computes vesting)."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            address = wallet_manager.vault.ethAddress
+            address = wallet_manager.wallet.ethAddress
             s = _base_claimer().airdrop_status(address)
             WEI = 10 ** 18
             return jsonify({
@@ -1460,18 +1403,18 @@ def register_routes(app):
     @login_required
     def api_wallet_base_airdrop_claim():
         """Claim the neuron's vested airdrop: submit claimAirdrop() signed with
-        the vault key. No proof needed — the contract computes vesting. Needs a
+        the wallet key. No proof needed — the contract computes vesting. Needs a
         little ETH on the user's Base address for gas."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            vault = wallet_manager.vault
+            wallet = wallet_manager.wallet
             claimer = _base_claimer()
-            status = claimer.airdrop_status(vault.ethAddress)
+            status = claimer.airdrop_status(wallet.ethAddress)
             if status['claimable'] <= 0:
                 return jsonify({'error': 'Nothing to claim from the airdrop right now.'}), 400
-            txhash = claimer.claim_airdrop(vault.account.key.to_0x_hex())
+            txhash = claimer.claim_airdrop(wallet.account.key.to_0x_hex())
             return jsonify({
                 'success': True,
                 'txhash': txhash,
@@ -1484,13 +1427,13 @@ def register_routes(app):
     @app.route('/api/wallet/base/prediction-rewards')
     @login_required
     def api_wallet_base_prediction_rewards():
-        """On-chain prediction rewards the vault can claim now: rewards credited
-        when this neuron's predictions were scored (via the vault's delegation)."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        """On-chain prediction rewards the wallet can claim now: rewards credited
+        when this neuron's predictions were scored (via the wallet's delegation)."""
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            address = wallet_manager.vault.ethAddress
+            address = wallet_manager.wallet.ethAddress
             r = _base_claimer().prediction_rewards(address)
             return jsonify({
                 'address': address,
@@ -1504,18 +1447,18 @@ def register_routes(app):
     @app.route('/api/wallet/base/prediction-rewards/claim', methods=['POST'])
     @login_required
     def api_wallet_base_prediction_rewards_claim():
-        """Claim on-chain prediction rewards: the vault calls SatoriHub.claim(),
-        which mints them to the vault. Needs a little ETH on the vault for gas."""
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault):
-            return jsonify({'error': 'Vault not initialized'}), 500
+        """Claim on-chain prediction rewards: the wallet calls SatoriHub.claim(),
+        which mints them to the wallet. Needs a little ETH on the wallet for gas."""
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            vault = wallet_manager.vault
+            wallet = wallet_manager.wallet
             claimer = _base_claimer()
-            r = claimer.prediction_rewards(vault.ethAddress)
+            r = claimer.prediction_rewards(wallet.ethAddress)
             if r['claimable'] <= 0:
                 return jsonify({'error': 'No prediction rewards to claim yet.'}), 400
-            txhash = claimer.claim_prediction_rewards(vault.account.key.to_0x_hex())
+            txhash = claimer.claim_prediction_rewards(wallet.account.key.to_0x_hex())
             return jsonify({
                 'success': True,
                 'txhash': txhash,
@@ -1533,12 +1476,12 @@ def register_routes(app):
             rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'], games_address=cfg['games'],
             hub_address=cfg.get('hub'), rewards_address=cfg['rewards'], token_address=cfg['token'])
 
-    def _stake_status_after(predictor, vault_addr, staked):
+    def _stake_status_after(predictor, wallet_addr, staked):
         """Stake status right after a (mined) stake/unstake tx. The public RPC is
         load balanced and a node can lag a block or two, so re-read briefly until
         it reflects the tx; if it still lags, trust the receipt."""
         for _ in range(5):
-            status = predictor.stake_status(vault_addr)
+            status = predictor.stake_status(wallet_addr)
             if status['staked'] == staked:
                 return status
             time.sleep(1)
@@ -1557,12 +1500,12 @@ def register_routes(app):
             'hour_utc': int(config.get().get('base predict hour utc', 20)),
         }
         try:
-            wm = get_or_create_session_vault()
-            if wm and wm.vault:
-                resp['vault_address'] = wm.vault.ethAddress
-                if wm.wallet:
-                    resp['identity_address'] = wm.wallet.ethAddress
-                resp['stake'] = _base_predictor().stake_status(wm.vault.ethAddress)
+            wm = get_or_create_session_wallet()
+            if wm and wm.wallet:
+                resp['wallet_address'] = wm.wallet.ethAddress
+                if wm.alias:
+                    resp['alias_address'] = wm.alias.ethAddress
+                resp['stake'] = _base_predictor().stake_status(wm.wallet.ethAddress)
         except Exception as e:
             resp['stake_error'] = str(e)
         return jsonify(resp)
@@ -1572,54 +1515,108 @@ def register_routes(app):
     def api_set_base_predict():
         """Turn on/off submitting predictions to Base on-chain. Off by default;
         it spends gas. Enabling also performs the one-time delegation setup so
-        the neuron can predict with the identity key (no vault unlock needed
-        afterward): the identity's predictor fee is set to 0, then the vault
-        delegates its prediction power to the identity. Needs the vault unlocked
+        the neuron can predict with the alias key (no wallet unlock needed
+        afterward): the alias's predictor fee is set to 0, then the wallet
+        delegates its prediction power to the alias. Needs the wallet unlocked
         (this session) and a little gas on both addresses."""
         from satorineuron import config
         data = request.json or {}
         enabled = bool(data.get('enabled', False))
 
-        # Both on (delegate) and off (undelegate) need the vault to sign, so it
+        # Both on (delegate) and off (undelegate) need the wallet to sign, so it
         # must be unlocked either way.
-        wallet_manager = get_or_create_session_vault()
-        if not (wallet_manager and wallet_manager.vault and wallet_manager.wallet):
-            return jsonify({'error': 'Unlock your vault to change staking.'}), 400
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet and wallet_manager.alias):
+            return jsonify({'error': 'Unlock your wallet to change staking.'}), 400
         try:
-            vault = wallet_manager.vault
-            identity = wallet_manager.wallet
+            wallet = wallet_manager.wallet
+            alias = wallet_manager.alias
             try:
-                vault_addr = vault.ethAddress
-                identity_addr = identity.ethAddress
+                wallet_addr = wallet.ethAddress
+                alias_addr = alias.ethAddress
             except Exception:
-                return jsonify({'error': 'Unlock your vault to change staking.'}), 400
+                return jsonify({'error': 'Unlock your wallet to change staking.'}), 400
             predictor = _base_predictor()
             if enabled:
-                # Stake: identity fee -> 0, then vault delegates to identity.
+                # Stake: alias fee -> 0, then the wallet delegates to the alias.
                 setup = predictor.ensure_delegation(
-                    vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr,
-                    identity_key=identity.account.key.to_0x_hex(), identity_address=identity_addr)
+                    wallet_key=wallet.account.key.to_0x_hex(), wallet_address=wallet_addr,
+                    alias_key=alias.account.key.to_0x_hex(), alias_address=alias_addr)
                 config.add(data={'predict base on-chain': True})
                 startup = get_startup()
                 if startup:
                     startup.ensureBaseStreamsSync()
                 return jsonify({'success': True, 'enabled': True, 'setup': setup,
-                                'stake': _stake_status_after(predictor, vault_addr, True)})
-            # Unstake: undelegate the vault (tokens unlock next round, ~24h) and
+                                'stake': _stake_status_after(predictor, wallet_addr, True)})
+            # Unstake: undelegate the wallet (tokens unlock next round, ~24h) and
             # stop predicting. Predictions stop as soon as the toggle is off.
             result = predictor.ensure_undelegated(
-                vault_key=vault.account.key.to_0x_hex(), vault_address=vault_addr)
+                wallet_key=wallet.account.key.to_0x_hex(), wallet_address=wallet_addr)
             config.add(data={'predict base on-chain': False})
             return jsonify({'success': True, 'enabled': False, 'unstake': result,
-                            'stake': _stake_status_after(predictor, vault_addr, False)})
+                            'stake': _stake_status_after(predictor, wallet_addr, False)})
         except Exception as e:
-            return jsonify({'error': f'Failed (need gas on your vault?): {e}'}), 500
+            return jsonify({'error': f'Failed (need gas on your wallet?): {e}'}), 500
 
-    @app.route('/api/wallet/send-from-wallet', methods=['POST'])
+    @app.route('/api/wallet/send-from-alias', methods=['POST'])
     @login_required
-    def api_wallet_send_from_wallet():
-        """Send SATORI tokens from wallet (identity wallet)."""
-        wallet_manager = get_or_create_session_vault()
+    def api_wallet_send_from_alias():
+        """Send SATORI tokens from the alias."""
+        wallet_manager = get_or_create_session_wallet()
+        if not wallet_manager or not wallet_manager.alias:
+            return jsonify({'error': 'Alias not initialized'}), 500
+
+        data = request.json or {}
+        address = data.get('address', '').strip()
+        amount = data.get('amount')
+        sweep = data.get('sweep', False)
+
+        # Validate address
+        if not address:
+            return jsonify({'error': 'Address is required'}), 400
+        if not address.startswith('E') or len(address) != 34:
+            return jsonify({'error': 'Invalid address format'}), 400
+
+        # Validate amount (unless sweep)
+        if not sweep:
+            try:
+                amount = float(amount)
+                if amount <= 0:
+                    return jsonify({'error': 'Amount must be greater than 0'}), 400
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Invalid amount'}), 400
+
+        try:
+            alias = wallet_manager.alias
+            # Get ready to send
+            alias.get()
+            alias.getReadyToSend()
+
+            # typicalNeuronTransaction handles both direct (has EVR) and
+            # indirect (no EVR, uses Mundo) paths, including sweep
+            result = alias.typicalNeuronTransaction(
+                amount=amount if not sweep else 0,
+                address=address,
+                sweep=sweep,
+                requestSimplePartialFn=_mundoRequestSimplePartial,
+                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
+
+            if hasattr(result, 'success') and hasattr(result, 'msg'):
+                if result.success and result.msg and len(result.msg) == 64:
+                    return jsonify({'success': True, 'txid': result.msg})
+                else:
+                    error_msg = result.msg or 'Transaction failed'
+                    return jsonify({'error': error_msg}), 500
+            else:
+                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/send', methods=['POST'])
+    @login_required
+    def api_wallet_send():
+        """Send SATORI tokens from wallet."""
+        wallet_manager = get_or_create_session_wallet()
         if not wallet_manager or not wallet_manager.wallet:
             return jsonify({'error': 'Wallet not initialized'}), 500
 
@@ -1669,60 +1666,6 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/wallet/send', methods=['POST'])
-    @login_required
-    def api_wallet_send():
-        """Send SATORI tokens from vault."""
-        wallet_manager = get_or_create_session_vault()
-        if not wallet_manager or not wallet_manager.vault:
-            return jsonify({'error': 'Vault not initialized'}), 500
-
-        data = request.json or {}
-        address = data.get('address', '').strip()
-        amount = data.get('amount')
-        sweep = data.get('sweep', False)
-
-        # Validate address
-        if not address:
-            return jsonify({'error': 'Address is required'}), 400
-        if not address.startswith('E') or len(address) != 34:
-            return jsonify({'error': 'Invalid address format'}), 400
-
-        # Validate amount (unless sweep)
-        if not sweep:
-            try:
-                amount = float(amount)
-                if amount <= 0:
-                    return jsonify({'error': 'Amount must be greater than 0'}), 400
-            except (TypeError, ValueError):
-                return jsonify({'error': 'Invalid amount'}), 400
-
-        try:
-            vault = wallet_manager.vault
-            # Get ready to send
-            vault.get()
-            vault.getReadyToSend()
-
-            # typicalNeuronTransaction handles both direct (has EVR) and
-            # indirect (no EVR, uses Mundo) paths, including sweep
-            result = vault.typicalNeuronTransaction(
-                amount=amount if not sweep else 0,
-                address=address,
-                sweep=sweep,
-                requestSimplePartialFn=_mundoRequestSimplePartial,
-                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
-
-            if hasattr(result, 'success') and hasattr(result, 'msg'):
-                if result.success and result.msg and len(result.msg) == 64:
-                    return jsonify({'success': True, 'txid': result.msg})
-                else:
-                    error_msg = result.msg or 'Transaction failed'
-                    return jsonify({'error': error_msg}), 500
-            else:
-                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
     @app.route('/api/wallet/qr/<address>')
     @login_required
     def api_wallet_qr(address: str):
@@ -1748,7 +1691,7 @@ def register_routes(app):
     @app.route('/api/wallet/balance/direct')
     @login_required
     def api_wallet_balance_direct():
-        """Combined wallet+vault balance, backed by an in-process TTL cache.
+        """Combined alias+wallet balance, backed by an in-process TTL cache.
 
         A process-global WalletManager holds a persistent ElectrumX socket,
         and the snapshot is cached for 30 s. Pass ?refresh=1 (wired to the
@@ -1763,13 +1706,13 @@ def register_routes(app):
             logger.error(traceback.format_exc())
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/wallet/balance/wallet-only')
+    @app.route('/api/wallet/balance/alias-only')
     @login_required
-    def api_wallet_balance_wallet_only():
-        """Wallet-only SATORI balance (skips vault). Cheap to call; used by marketplace."""
+    def api_wallet_balance_alias_only():
+        """The alias's SATORI balance alone (skips the wallet). Cheap to call."""
         try:
-            balance = get_wallet_balance()
-            return jsonify({'wallet_balance': balance})
+            balance = get_alias_balance()
+            return jsonify({'alias_balance': balance})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -2303,129 +2246,133 @@ def register_routes(app):
     @app.route('/api/wallet/import', methods=['POST'])
     @login_required
     def api_wallet_import():
-        """Import wallet from uploaded files with automatic rollback on failure.
+        """Import the alias's and the wallet's files, with automatic rollback on failure.
 
-        Security: Requires vault to be unlocked (login_required decorator)
+        Security: Requires the wallet to be unlocked (login_required decorator)
         Process:
-        1. Validate uploaded files
-        2. Create timestamped backup of existing wallet directory
-        3. Save uploaded files to temporary directory
+        1. Validate uploaded file names
+        2. Create timestamped backup of the existing keys folder
+        3. Save uploaded files to a temporary folder and read their layout
+           (config.keyFiles of that folder: which file is the alias, which the wallet)
         4. Validate YAML structure
-        5. Move files to wallet directory
+        5. Write them by role under this install's names (config.keyFiles)
         6. Trigger container restart (critical for safety)
 
         Rollback: If ANY step fails, automatically restores from backup
 
-        Expected files in upload:
-        - wallet.yaml (required)
-        - vault.yaml (required)
-        - wallet.yaml.bak (optional)
-        - vault.yaml.bak (optional)
+        Expected files in upload ('files'): the alias's and the wallet's files
+        as a download names them (either layout), each optionally with its .bak.
         """
         import tempfile
         import shutil
         import datetime
         from pathlib import Path
         import yaml
+        from satorineuron import config
 
         try:
             # 1. Validate request has files
             if 'files' not in request.files:
                 return jsonify({'error': 'No files uploaded'}), 400
 
-            files = request.files.getlist('files')
+            files = [f for f in request.files.getlist('files') if f.filename]
             if not files:
                 return jsonify({'error': 'No files selected'}), 400
 
-            # 2. Validate required files are present
-            file_names = [f.filename for f in files if f.filename]
-            required_files = {'wallet.yaml', 'vault.yaml'}
-            uploaded_files = set(file_names)
-
-            if not required_files.issubset(uploaded_files):
-                missing = required_files - uploaded_files
-                return jsonify({
-                    'error': f'Missing required files: {", ".join(missing)}'
-                }), 400
-
-            # 3. Validate file names (security: prevent directory traversal)
-            allowed_files = {'wallet.yaml', 'vault.yaml', 'wallet.yaml.bak', 'vault.yaml.bak'}
+            # Validate file names (security: prevent directory traversal)
+            file_names = [f.filename for f in files]
             for name in file_names:
-                if name not in allowed_files:
+                if (
+                    name != os.path.basename(name) or name.startswith('.') or
+                    not (name.endswith('.yaml') or name.endswith('.yaml.bak'))
+                ):
                     return jsonify({
-                        'error': f'Invalid file: {name}. Only wallet files allowed.'
+                        'error': f'Invalid file: {name}. Only key files allowed.'
+                    }), 400
+            if len(set(file_names)) != len(file_names) or len(file_names) > 4:
+                return jsonify({'error': 'Upload the alias file and the wallet file (and their .bak).'}), 400
+
+            # 2. Get the keys folder path
+            keys_dir = Path(config.keysPath())
+
+            # 3. Save uploaded files to temporary location first, and read their layout
+            temp_dir = Path(tempfile.mkdtemp())
+            try:
+                for file in files:
+                    file.save(str(temp_dir / file.filename))
+                uploaded = config.keyFiles(str(temp_dir))
+                names = config.keyFiles(str(keys_dir))
+                # role -> (uploaded name, this install's name)
+                moves = {}
+                for role in ('alias', 'wallet'):
+                    moves[uploaded[role]] = names[role]
+                    moves[uploaded[role] + '.bak'] = names[role] + '.bak'
+                missing = [uploaded[role] for role in ('alias', 'wallet')
+                           if uploaded[role] not in file_names]
+                if missing:
+                    shutil.rmtree(temp_dir)
+                    return jsonify({
+                        'error': f'Missing required files: {", ".join(missing)}'
+                    }), 400
+                unexpected = [name for name in file_names if name not in moves]
+                if unexpected:
+                    shutil.rmtree(temp_dir)
+                    return jsonify({
+                        'error': f'Invalid file: {", ".join(unexpected)}. Only the alias and wallet files allowed.'
                     }), 400
 
-            # 4. Get wallet directory path
-            from satorineuron import config
-            wallet_dir = Path(config.walletPath())
+                # 4. Validate file contents (basic YAML check)
+                for role in ('alias', 'wallet'):
+                    file_name = uploaded[role]
+                    try:
+                        with open(temp_dir / file_name, 'r') as f:
+                            yaml.safe_load(f)
+                        logger.info(f"Validated {file_name}")
+                    except Exception as e:
+                        shutil.rmtree(temp_dir)
+                        logger.error(f"Invalid {file_name}: {e}")
+                        return jsonify({
+                            'error': f'Invalid {file_name}: {str(e)}',
+                            'rolled_back': False
+                        }), 400
+            except Exception as e:
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                return jsonify({'error': str(e)}), 500
 
-            # 5. Create timestamped backup of wallet files inside wallet directory
+            # 5. Create timestamped backup of the key files inside the keys folder
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_dir = wallet_dir / f'backup_{timestamp}'
-
+            backup_dir = keys_dir / f'backup_{timestamp}'
             try:
-                if wallet_dir.exists():
-                    # Create backup directory inside wallet folder
+                if keys_dir.exists():
                     backup_dir.mkdir(parents=True, exist_ok=True)
-
-                    # Copy all wallet files to backup (excluding other backup folders)
-                    for item in wallet_dir.iterdir():
+                    # Copy all key files to backup (excluding other backup folders)
+                    for item in keys_dir.iterdir():
                         if item.is_file():
                             shutil.copy2(item, backup_dir / item.name)
-
                     logger.info(f"Created backup at {backup_dir}")
                 else:
-                    logger.warning(f"Wallet directory doesn't exist yet: {wallet_dir}")
-                    wallet_dir.mkdir(parents=True, exist_ok=True)
+                    logger.warning(f"Keys folder doesn't exist yet: {keys_dir}")
+                    keys_dir.mkdir(parents=True, exist_ok=True)
             except Exception as e:
+                shutil.rmtree(temp_dir)
                 logger.error(f"Backup failed: {e}")
                 return jsonify({
                     'error': f'Failed to create backup: {str(e)}'
                 }), 500
 
-            # 6. Save uploaded files to temporary location first
-            temp_dir = Path(tempfile.mkdtemp())
+            written = []
             try:
-                # Save files to temp
-                for file in files:
-                    if file.filename:
-                        file_path = temp_dir / file.filename
-                        file.save(str(file_path))
-                        logger.info(f"Saved {file.filename} to temp: {file_path}")
-
-                # 7. Validate file contents (basic YAML check)
-                for file_name in ['wallet.yaml', 'vault.yaml']:
-                    file_path = temp_dir / file_name
-                    try:
-                        with open(file_path, 'r') as f:
-                            yaml.safe_load(f)
-                        logger.info(f"Validated {file_name}")
-                    except Exception as e:
-                        # Validation failed - cleanup and rollback
-                        shutil.rmtree(temp_dir)
-                        logger.error(f"Invalid {file_name}: {e}")
-
-                        # Rollback: This shouldn't be needed as we haven't modified wallet_dir yet
-                        # but include for safety
-                        if backup_dir.exists():
-                            logger.info("Validation failed before any changes - no rollback needed")
-
-                        return jsonify({
-                            'error': f'Invalid {file_name}: {str(e)}',
-                            'rolled_back': False
-                        }), 400
-
-                # 8. Files validated - move to wallet directory
+                # 6. Files validated - write them by role under this install's names
                 for file_name in file_names:
-                    src = temp_dir / file_name
-                    dst = wallet_dir / file_name
-                    shutil.move(str(src), str(dst))
-                    logger.info(f"Moved {file_name} to wallet directory")
+                    dst = keys_dir / moves[file_name]
+                    shutil.move(str(temp_dir / file_name), str(dst))
+                    written.append(dst)
+                    logger.info(f"Imported {file_name} as {dst.name}")
 
-                logger.info(f"Wallet import: saved {len(file_names)} files")
+                logger.info(f"Wallet import: saved {len(written)} files")
 
-                # 8.5. Clear reward address from config since wallet changed
+                # 6.5. Clear reward address from config since the wallet changed
                 try:
                     # Read config, remove reward address, and write back
                     config_data = config.get()
@@ -2456,20 +2403,20 @@ def register_routes(app):
                 # Error during file operations - ROLLBACK
                 logger.error(f"Import failed during file operations: {e}. Rolling back...")
 
-                # Delete any partial changes in wallet_dir
-                for file_name in file_names:
+                # Delete any partial changes in the keys folder
+                for dst in written:
                     try:
-                        (wallet_dir / file_name).unlink(missing_ok=True)
+                        dst.unlink(missing_ok=True)
                     except Exception as cleanup_error:
-                        logger.warning(f"Cleanup error for {file_name}: {cleanup_error}")
+                        logger.warning(f"Cleanup error for {dst.name}: {cleanup_error}")
 
                 # Restore from backup
                 if backup_dir.exists():
                     try:
                         for item in backup_dir.iterdir():
                             if item.is_file():
-                                shutil.copy2(item, wallet_dir / item.name)
-                        logger.info("Rollback completed. Old wallet restored.")
+                                shutil.copy2(item, keys_dir / item.name)
+                        logger.info("Rollback completed. Old keys restored.")
                     except Exception as rollback_error:
                         logger.error(f"Rollback failed: {rollback_error}")
                         return jsonify({
@@ -2487,7 +2434,7 @@ def register_routes(app):
                 if temp_dir.exists():
                     shutil.rmtree(temp_dir)
 
-            # 9. Schedule container restart (happens after response sent)
+            # 7. Schedule container restart (happens after response sent)
             def delayed_restart():
                 import time
                 time.sleep(2)  # Give response time to be sent
@@ -2649,15 +2596,15 @@ def register_routes(app):
             None)
         price_per_obs = int((server_stream or {}).get('price_per_obs') or 0)
         if price_per_obs > 0:
-            # Buy: the vault opens a channel on Base (Unlock, gas), then the
+            # Buy: the wallet opens a channel on Base (Unlock, gas), then the
             # subscription names it (satorineuron.market).
-            wallet_manager = get_or_create_session_vault()
+            wallet_manager = get_or_create_session_wallet()
             try:
-                vault_key = wallet_manager.vault.account.key.to_0x_hex()
+                wallet_key = wallet_manager.wallet.account.key.to_0x_hex()
             except Exception:
-                vault_key = None
+                wallet_key = None
             try:
-                startup.marketBuySync(server_stream, vault_key)
+                startup.marketBuySync(server_stream, wallet_key)
             except Exception as e:
                 return jsonify({'error': str(e)}), 400
         relay_url = data.get('relay_url', '')
@@ -2700,7 +2647,7 @@ def register_routes(app):
         data = request.get_json()
         if not data or 'stream_name' not in data or 'nostr_pubkey' not in data:
             return jsonify({'error': 'Missing stream_name or nostr_pubkey'}), 400
-        # A bought stream: Stop (the identity asks to close the channel, then
+        # A bought stream: Stop (the alias asks to close the channel, then
         # the unsubscribe); the refund comes after the 7-day grace period.
         try:
             buying = startup.marketBuyingSync(
@@ -3250,7 +3197,8 @@ def register_routes(app):
     @app.route('/api/wallet/download', methods=['GET'])
     @login_required
     def api_wallet_download():
-        """Download wallet folder as ZIP compatible with wallet import."""
+        """Download the alias's and the wallet's files (named by this install's
+        layout, with their .bak when present) as a ZIP the import takes."""
         import io
         import zipfile
         import datetime
@@ -3258,14 +3206,15 @@ def register_routes(app):
         from satorineuron import config
 
         try:
-            wallet_dir = Path(config.walletPath())
-            if not wallet_dir.exists():
-                return jsonify({'error': 'Wallet directory not found'}), 404
+            keys_dir = Path(config.keysPath())
+            if not keys_dir.exists():
+                return jsonify({'error': 'Keys folder not found'}), 404
 
-            allowed_files = ['wallet.yaml', 'vault.yaml', 'wallet.yaml.bak', 'vault.yaml.bak']
-            required_files = ['wallet.yaml', 'vault.yaml']
+            names = config.keyFiles(str(keys_dir))
+            required_files = [names['alias'], names['wallet']]
+            allowed_files = required_files + [name + '.bak' for name in required_files]
 
-            missing_required = [name for name in required_files if not (wallet_dir / name).exists()]
+            missing_required = [name for name in required_files if not (keys_dir / name).exists()]
             if missing_required:
                 return jsonify({
                     'error': f'Missing required wallet files: {", ".join(missing_required)}'
@@ -3274,7 +3223,7 @@ def register_routes(app):
             archive = io.BytesIO()
             with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as zipf:
                 for file_name in allowed_files:
-                    src = wallet_dir / file_name
+                    src = keys_dir / file_name
                     if src.exists() and src.is_file():
                         # Keep top-level "wallet" folder so extracted content is import-compatible.
                         zipf.write(src, arcname=f'wallet/{file_name}')
@@ -3373,7 +3322,7 @@ def register_routes(app):
         except Exception as e:
             msg = str(e)
             if 'not enough satori' in msg.lower():
-                return jsonify({'error': 'Insufficient SATORIEVR balance. Add SATORIEVR to your wallet before opening a channel.'}), 400
+                return jsonify({'error': 'Insufficient SATORIEVR balance. Add SATORIEVR to your alias before opening a channel.'}), 400
             if 'bad params' in msg.lower():
                 return jsonify({'error': 'Invalid channel parameters. Check the amount and timeout values.'}), 400
             if 'invalid' in msg.lower() or 'pubkey' in msg.lower():

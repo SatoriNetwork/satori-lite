@@ -62,18 +62,18 @@ def test_get_challenge_fallback_on_missing_challenge_field(client_instance, mock
 
 
 @pytest.mark.unit
-def test_make_authenticated_call_headers_generation(client_instance, mock_response, test_wallet):
+def test_make_authenticated_call_headers_generation(client_instance, mock_response, test_alias):
     """Test _makeAuthenticatedCall() generates correct authentication headers."""
     challenge = "test-challenge-123"
-    # NOTE: Real wallet class exposes 'pubkey', NOT 'publicKey'
+    # NOTE: the real key class exposes 'pubkey', NOT 'publicKey'
     expected_auth_payload = {
-        "wallet-pubkey": test_wallet.pubkey,
+        "alias-pubkey": test_alias.pubkey,
         "message": challenge,
         "signature": "test_signature"
     }
 
-    # Mock wallet's authPayload method
-    test_wallet.authPayload.return_value = expected_auth_payload
+    # Mock the alias's authPayload method
+    test_alias.authPayload.return_value = expected_auth_payload
 
     with patch('requests.post', return_value=mock_response) as mock_post:
         client_instance._makeAuthenticatedCall(
@@ -88,7 +88,7 @@ def test_make_authenticated_call_headers_generation(client_instance, mock_respon
 
     assert "headers" in call_kwargs
     headers = call_kwargs["headers"]
-    assert "wallet-pubkey" in headers
+    assert "alias-pubkey" in headers
     assert "message" in headers
     assert "signature" in headers
 
@@ -149,7 +149,7 @@ def test_make_authenticated_call_no_raise_when_disabled(client_instance, mock_re
 
 
 @pytest.mark.unit
-def test_make_authenticated_call_uses_custom_challenge(client_instance, mock_response, test_wallet):
+def test_make_authenticated_call_uses_custom_challenge(client_instance, mock_response, test_alias):
     """Test _makeAuthenticatedCall() uses provided challenge instead of fetching new one."""
     custom_challenge = "custom-challenge-xyz"
 
@@ -164,9 +164,9 @@ def test_make_authenticated_call_uses_custom_challenge(client_instance, mock_res
             # Should NOT call _getChallenge since challenge was provided
             mock_get_challenge.assert_not_called()
 
-    # Verify wallet was called with the custom challenge
-    test_wallet.authPayload.assert_called()
-    call_kwargs = test_wallet.authPayload.call_args[1]
+    # Verify the alias was called with the custom challenge
+    test_alias.authPayload.assert_called()
+    call_kwargs = test_alias.authPayload.call_args[1]
     assert call_kwargs.get('challenge') == custom_challenge
 
 
@@ -203,4 +203,4 @@ def test_make_authenticated_call_extra_headers(client_instance, mock_response):
     # Should have both auth headers and custom header
     assert "X-Custom-Header" in headers
     assert headers["X-Custom-Header"] == "custom-value"
-    assert "wallet-pubkey" in headers
+    assert "alias-pubkey" in headers

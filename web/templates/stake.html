@@ -1041,7 +1041,7 @@
         const block = document.getElementById('stkStatusBlock');
 
         block.classList.remove('is-staking');
-        if (!walletData || !walletData.wallet_address) {
+        if (!walletData || !walletData.alias_address) {
             statusEl.className = 'alert alert-warning';
             statusEl.textContent = 'Unable to load staking status';
             title.textContent = 'Unable to load staking status';
@@ -1049,7 +1049,7 @@
             return;
         }
 
-        const result = await apiCall(`/lender/status?wallet_address=${encodeURIComponent(walletData.wallet_address)}`);
+        const result = await apiCall(`/lender/status?wallet_address=${encodeURIComponent(walletData.alias_address)}`);
         if (result && result.pool_address) {
             isStakingToPool = true;
             statusEl.className = 'alert alert-success';

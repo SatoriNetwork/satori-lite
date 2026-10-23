@@ -147,12 +147,12 @@ def web():
     import web.routes as routes
     client = create_app(testing=True).test_client()
     with client.session_transaction() as sess:
-        sess['vault_open'] = True
+        sess['wallet_open'] = True
         sess['session_id'] = 'sid'
     manager = mock.MagicMock()
-    manager.vault.isDecrypted = True
+    manager.wallet.isDecrypted = True
     startup = mock.MagicMock(configRewardAddress=EVRMORE)
-    with mock.patch.dict(routes._session_vaults, {'sid': manager}), \
+    with mock.patch.dict(routes._session_wallets, {'sid': manager}), \
             mock.patch.object(routes, 'get_startup', return_value=startup):
         yield client, startup
 

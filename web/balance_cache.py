@@ -1,4 +1,4 @@
-"""Process-global wallet balance cache.
+"""Process-global balance cache for the alias and the wallet.
 
 One long-lived WalletManager (persistent=True) + a cache that never
 auto-expires. The cache is populated on first load and only refreshed when
@@ -18,13 +18,13 @@ from satorineuron.init.wallet import WalletManager
 log = logging.getLogger(__name__)
 
 _BALANCE_KEY = "balance"
-_WALLET_KEY = "wallet_only"
+_ALIAS_KEY = "alias_only"
 
 _manager: Optional[WalletManager] = None
 _manager_lock = threading.Lock()
 _cache: Dict[str, Any] = {}
 _fetch_lock = threading.Lock()
-_wallet_fetch_lock = threading.Lock()
+_alias_fetch_lock = threading.Lock()
 
 
 def _get_manager() -> WalletManager:
@@ -59,18 +59,18 @@ def _fetch_snapshot() -> Dict[str, Any]:
         evr = obj.currency.amount if getattr(obj, "currency", None) else 0.0
         return float(satori), float(evr)
 
+    alias_sat, alias_evr = _read(manager.alias, "alias")
     wallet_sat, wallet_evr = _read(manager.wallet, "wallet")
-    vault_sat, vault_evr = _read(manager.vault, "vault")
 
     return {
-        "total": wallet_sat + vault_sat,
+        "total": alias_sat + wallet_sat,
+        "alias_balance": alias_sat,
         "wallet_balance": wallet_sat,
-        "vault_balance": vault_sat,
-        "total_evr": wallet_evr + vault_evr,
+        "total_evr": alias_evr + wallet_evr,
+        "alias_evr": alias_evr,
         "wallet_evr": wallet_evr,
-        "vault_evr": vault_evr,
-        "vault_unlocked": bool(
-            manager.vault and getattr(manager.vault, "isDecrypted", True)
+        "wallet_unlocked": bool(
+            manager.wallet and getattr(manager.wallet, "isDecrypted", True)
         ),
         "fetched_at": time.time(),
     }
@@ -94,37 +94,37 @@ def get_balance_snapshot(force: bool = False) -> Dict[str, Any]:
             return snap
         snapshot = _fetch_snapshot()
         _cache[_BALANCE_KEY] = snapshot
-        _cache[_WALLET_KEY] = snapshot["wallet_balance"]
+        _cache[_ALIAS_KEY] = snapshot["alias_balance"]
         out = dict(snapshot)
         out["cache_hit"] = False
         return out
 
 
-def get_wallet_balance(force: bool = False) -> float:
-    """Return wallet-only SATORI balance, cached independently of the full snapshot.
+def get_alias_balance(force: bool = False) -> float:
+    """Return the alias's SATORI balance alone, cached independently of the full snapshot.
 
-    Skips vault entirely so it's cheaper to call on pages that only need the
-    wallet balance (e.g. marketplace subscribe check).
+    Skips the wallet entirely so it's cheaper to call on pages that only need
+    the alias's balance.
     """
-    if not force and _WALLET_KEY in _cache:
-        return _cache[_WALLET_KEY]
-    with _wallet_fetch_lock:
-        if not force and _WALLET_KEY in _cache:
-            return _cache[_WALLET_KEY]
+    if not force and _ALIAS_KEY in _cache:
+        return _cache[_ALIAS_KEY]
+    with _alias_fetch_lock:
+        if not force and _ALIAS_KEY in _cache:
+            return _cache[_ALIAS_KEY]
         manager = _get_manager()
         manager.connect()
-        wallet_sat = 0.0
-        if manager.wallet and hasattr(manager.wallet, 'getBalances'):
+        alias_sat = 0.0
+        if manager.alias and hasattr(manager.alias, 'getBalances'):
             try:
-                manager.wallet.getBalances()
-                wallet_sat = float(manager.wallet.balance.amount) if getattr(manager.wallet, 'balance', None) else 0.0
+                manager.alias.getBalances()
+                alias_sat = float(manager.alias.balance.amount) if getattr(manager.alias, 'balance', None) else 0.0
             except Exception as e:
-                log.error("wallet-only getBalances failed: %s", e)
-        _cache[_WALLET_KEY] = wallet_sat
-        return wallet_sat
+                log.error("alias-only getBalances failed: %s", e)
+        _cache[_ALIAS_KEY] = alias_sat
+        return alias_sat
 
 
 def invalidate() -> None:
     """Drop the cached snapshots — call after a send so the next read is fresh."""
     _cache.pop(_BALANCE_KEY, None)
-    _cache.pop(_WALLET_KEY, None)
+    _cache.pop(_ALIAS_KEY, None)

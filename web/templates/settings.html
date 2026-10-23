@@ -748,12 +748,12 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center">
                     <div style="max-width: 80%;">
-                        <div><strong>Stake your vault &amp; predict on Base</strong></div>
+                        <div><strong>Stake your wallet &amp; predict on Base</strong></div>
                         <div class="text-muted" style="font-size: 12px;">
-                            On: your vault stakes (delegates its prediction power to your predicting
-                            wallet) and the neuron predicts on Base once a day, earning to your vault.
+                            On: your wallet stakes (delegates its prediction power to your
+                            alias) and the neuron predicts on Base once a day, earning to your wallet.
                             <strong>Your staked tokens can't be moved while staked.</strong> Turn it
-                            off to unstake; your tokens unlock ~24h later. Needs your vault
+                            off to unstake; your tokens unlock ~24h later. Needs your wallet
                             <strong>unlocked</strong> to change.
                         </div>
                     </div>
@@ -765,26 +765,26 @@
 
                 <div class="alert alert-warning mt-3 mb-2" style="font-size: 12px;">
                     <strong>Before you turn this on, both Base addresses need a little ETH for gas:</strong>
-                    the <strong>Vault</strong> spends gas once (to stake), and the
-                    <strong>Predicting wallet</strong> needs the most, since it sends a prediction
+                    the <strong>Wallet</strong> spends gas once (to stake), and the
+                    <strong>Alias</strong> needs the most, since it sends a prediction
                     transaction every day. Fund them first, then flip the switch.
                 </div>
                 <div id="baseGasAddresses" class="row g-3" style="display:none;">
                     <div class="col-12 col-sm-6">
-                        <div class="small"><strong>Vault Base address</strong> <span class="text-muted">(gas once)</span></div>
+                        <div class="small"><strong>Wallet Base address</strong> <span class="text-muted">(gas once)</span></div>
                         <div class="input-group input-group-sm mt-1">
-                            <input type="text" class="form-control font-monospace" id="baseVaultAddr" readonly style="font-size:0.72rem;">
-                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseVaultAddr')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
+                            <input type="text" class="form-control font-monospace" id="baseWalletAddr" readonly style="font-size:0.72rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseWalletAddr')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
                         </div>
-                        <div class="text-center mt-2"><img id="baseVaultQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
+                        <div class="text-center mt-2"><img id="baseWalletQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
                     </div>
                     <div class="col-12 col-sm-6">
-                        <div class="small"><strong>Predicting wallet Base address</strong> <span class="text-muted">(needs the most gas)</span></div>
+                        <div class="small"><strong>Alias Base address</strong> <span class="text-muted">(needs the most gas)</span></div>
                         <div class="input-group input-group-sm mt-1">
-                            <input type="text" class="form-control font-monospace" id="baseIdentityAddr" readonly style="font-size:0.72rem;">
-                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseIdentityAddr')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
+                            <input type="text" class="form-control font-monospace" id="baseAliasAddr" readonly style="font-size:0.72rem;">
+                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseAliasAddr')" title="Copy"><i class="material-icons align-middle" style="font-size:16px;">content_copy</i></button>
                         </div>
-                        <div class="text-center mt-2"><img id="baseIdentityQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
+                        <div class="text-center mt-2"><img id="baseAliasQr" alt="" style="width:120px;height:120px;background:white;padding:6px;border-radius:8px;display:none;"></div>
                     </div>
                 </div>
 
@@ -804,14 +804,14 @@
                 let _qrDone = false;
                 function renderAddresses(j) {
                     const box = document.getElementById('baseGasAddresses');
-                    if (!box || !j.vault_address) return;
+                    if (!box || !j.wallet_address) return;
                     box.style.display = 'flex';
-                    document.getElementById('baseVaultAddr').value = j.vault_address;
-                    if (j.identity_address) document.getElementById('baseIdentityAddr').value = j.identity_address;
+                    document.getElementById('baseWalletAddr').value = j.wallet_address;
+                    if (j.alias_address) document.getElementById('baseAliasAddr').value = j.alias_address;
                     if (!_qrDone) {  // fetch QRs once
                         _qrDone = true;
-                        fillQr('baseVaultQr', j.vault_address);
-                        if (j.identity_address) fillQr('baseIdentityQr', j.identity_address);
+                        fillQr('baseWalletQr', j.wallet_address);
+                        if (j.alias_address) fillQr('baseAliasQr', j.alias_address);
                     }
                 }
                 function renderState(j) {
@@ -821,7 +821,7 @@
                     if (toggle) toggle.checked = !!j.enabled;
                     if (!el) return;
                     const s = j.stake;
-                    if (!s) { el.textContent = j.stake_error ? '' : 'Unlock your vault to see staking status.'; return; }
+                    if (!s) { el.textContent = j.stake_error ? '' : 'Unlock your wallet to see staking status.'; return; }
                     if (s.staked) {
                         el.className = 'small mt-2 text-success';
                         el.textContent = '● Staked and predicting on Base. Tokens are locked while staked.';

@@ -20,7 +20,7 @@ for candidate in CANDIDATE_PATHS:
 
 from satorineuron.relay_manager import LocalRelayManager
 from web.app import create_app
-from web.routes import _session_vaults, set_startup
+from web.routes import _session_wallets, set_startup
 
 
 class DummyStartup:
@@ -58,12 +58,12 @@ class DummyStartup:
     localRelay = RelayStub()
 
 
-class DummyVault:
+class DummyWallet:
     isDecrypted = True
 
 
 class DummyWalletManager:
-    vault = DummyVault()
+    wallet = DummyWallet()
 
 
 def test_public_strfry_conf_has_open_write():
@@ -123,8 +123,8 @@ def test_settings_page_renders_for_logged_in_session():
     client = app.test_client()
     with client.session_transaction() as sess:
         sess['session_id'] = 'test-session'
-        sess['vault_open'] = True
-    _session_vaults['test-session'] = DummyWalletManager()
+        sess['wallet_open'] = True
+    _session_wallets['test-session'] = DummyWalletManager()
     try:
         resp = client.get('/settings')
         assert resp.status_code == 200
@@ -140,4 +140,4 @@ def test_settings_page_renders_for_logged_in_session():
         assert b'Last Health Check' in resp.data
         assert b'relayDockerHelpBox' in resp.data
     finally:
-        _session_vaults.pop('test-session', None)
+        _session_wallets.pop('test-session', None)

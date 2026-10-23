@@ -166,7 +166,7 @@
         .card-header-3col .card-header-actions { grid-column: 2; grid-row: 1; }
         .card-header-3col .bal-tabs    { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; }
         .card-header-3col .bal-tabs .bal-tab { flex: 1; text-align: center; }
-        /* Drop the "(Identity)" qualifier on mobile so all 3 tabs fit one line */
+        /* Drop a tab's suffix on mobile so all 3 tabs fit one line */
         .bal-tab .bal-tab-suffix { display: none; }
         .bal-tab { padding: 0.3rem 0.4rem; font-size: 0.66rem; letter-spacing: 0.04em; }
         /* Row-by-row balance layout on mobile */
@@ -1961,7 +1961,7 @@
         <div class="modal-content">
             <div class="iw-head">
                 <div class="iw-head-text">
-                    <span class="iw-eyebrow">Vault · Restore</span>
+                    <span class="iw-eyebrow">Wallet · Restore</span>
                     <h5 class="iw-title" id="importWalletModalLabel">Import Wallet</h5>
                 </div>
                 <button type="button" class="iw-close" data-bs-dismiss="modal" aria-label="Close">
@@ -1985,8 +1985,8 @@
                         <label class="iw-step" id="iwStep1" data-step="1">
                             <span class="iw-step-num" id="iwStep1Num">1</span>
                             <span class="iw-step-body">
-                                <span class="iw-step-title">Wallet file <code>wallet.yaml</code></span>
-                                <span class="iw-step-sub" id="iwStep1Sub">Click to choose · must be named wallet.yaml</span>
+                                <span class="iw-step-title">Alias file</span>
+                                <span class="iw-step-sub" id="iwStep1Sub">Click to choose · the alias's .yaml file from your backup</span>
                             </span>
                             <span class="iw-step-action">Choose</span>
                             <button type="button" class="iw-step-reset" onclick="resetWalletStep(1, event)" aria-label="Remove file">
@@ -1998,7 +1998,7 @@
                         <label class="iw-step iw-step-locked" id="iwStep2" data-step="2">
                             <span class="iw-step-num" id="iwStep2Num">2</span>
                             <span class="iw-step-body">
-                                <span class="iw-step-title">Vault file <code>vault.yaml</code></span>
+                                <span class="iw-step-title">Wallet file</span>
                                 <span class="iw-step-sub" id="iwStep2Sub">Locked · complete step 1 first</span>
                             </span>
                             <span class="iw-step-action">Choose</span>
@@ -2032,7 +2032,7 @@
             <span class="dash-hero-eyebrow">Overview</span>
             <h1 class="dash-hero-h1">Neuron <span class="dash-accent">Dashboard</span></h1>
             <p class="dash-hero-sub">
-                Manage your vault, send SATORI, and monitor the health of your neuron at a glance.
+                Manage your wallet, send SATORI, and monitor the health of your neuron at a glance.
             </p>
         </div>
         <div class="dash-hero-meta">
@@ -2081,8 +2081,8 @@
                         Addresses
                     </h5>
                     <div class="bal-tabs">
-                        <button class="bal-tab bal-tab-active" onclick="switchWalletTab('vault', this)">Vault</button>
-                        <button class="bal-tab" onclick="switchWalletTab('identity', this)">Wallet<span class="bal-tab-suffix"> (Identity)</span></button>
+                        <button class="bal-tab bal-tab-active" onclick="switchWalletTab('wallet', this)">Wallet</button>
+                        <button class="bal-tab" onclick="switchWalletTab('alias', this)">Alias</button>
                         <button class="bal-tab" onclick="switchWalletTab('nostr', this)">Nostr</button>
                     </div>
                     <div class="card-header-actions">
@@ -2092,15 +2092,15 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <!-- Vault pane -->
-                    <div id="walletVaultPane">
+                    <!-- Wallet pane -->
+                    <div id="walletPane">
                         <div class="text-center mb-3">
                             <div id="walletQrCode" class="mb-3" style="display: inline-block; background: white; padding: 10px; border-radius: 10px;">
                                 <p class="text-muted mb-0">Loading QR code...</p>
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Vault Address (Base)</label>
+                            <label class="form-label">Wallet Address (Base)</label>
                             <div class="input-group">
                                 <input type="text" class="form-control" id="walletAddress" readonly placeholder="Loading...">
                                 <button class="btn btn-outline-secondary" onclick="copyToClipboard('walletAddress')" title="Copy to clipboard">
@@ -2129,35 +2129,35 @@
                             </div>
                         </div>
                     </div>
-                    <!-- Identity pane -->
-                    <div id="walletIdentityPane" style="display: none;">
+                    <!-- Alias pane -->
+                    <div id="aliasPane" style="display: none;">
                         <div class="mb-3">
-                            <label class="form-label">Identity Address (Base)</label>
+                            <label class="form-label">Alias Address (Base)</label>
                             <div class="input-group">
-                                <input type="text" class="form-control" id="identityAddress" readonly placeholder="Loading...">
-                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityAddress')" title="Copy">
+                                <input type="text" class="form-control" id="aliasAddress" readonly placeholder="Loading...">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('aliasAddress')" title="Copy">
                                     <i class="material-icons align-middle">content_copy</i>
                                 </button>
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Wallet Public Key</label>
+                            <label class="form-label">Alias Public Key</label>
                             <div class="input-group">
-                                <input type="text" class="form-control font-monospace" id="identityPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
-                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityPubkey')" title="Copy">
+                                <input type="text" class="form-control font-monospace" id="aliasPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('aliasPubkey')" title="Copy">
                                     <i class="material-icons align-middle">content_copy</i>
                                 </button>
                             </div>
                             <div class="form-text text-muted" style="font-size:0.72rem;">Share this key with others so they can open payment channels to you.</div>
                         </div>
                         <div class="mb-0">
-                            <label class="form-label">Identity Private Key (Evrmore WIF)</label>
+                            <label class="form-label">Alias Private Key (Evrmore WIF)</label>
                             <div class="input-group">
-                                <input type="password" class="form-control" id="identityPrivateKey" readonly placeholder="Click to reveal...">
-                                <button class="btn btn-outline-secondary" onclick="toggleIdentityPrivateKey()" title="Show/Hide">
-                                    <i class="material-icons align-middle" id="identityKeyIcon">visibility</i>
+                                <input type="password" class="form-control" id="aliasPrivateKey" readonly placeholder="Click to reveal...">
+                                <button class="btn btn-outline-secondary" onclick="toggleAliasPrivateKey()" title="Show/Hide">
+                                    <i class="material-icons align-middle" id="aliasKeyIcon">visibility</i>
                                 </button>
-                                <button class="btn btn-outline-secondary" onclick="copyIdentityPrivateKey()" title="Copy">
+                                <button class="btn btn-outline-secondary" onclick="copyAliasPrivateKey()" title="Copy">
                                     <i class="material-icons align-middle">content_copy</i>
                                 </button>
                             </div>
@@ -2168,8 +2168,8 @@
                         <div class="mb-3">
                             <label class="form-label">Nostr Public Key</label>
                             <div class="input-group">
-                                <input type="text" class="form-control font-monospace" id="identityNostrPubkey" readonly placeholder="Loading..." style="font-size:0.78rem;">
-                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('identityNostrPubkey')" title="Copy">
+                                <input type="text" class="form-control font-monospace" id="nostrPubkeyField" readonly placeholder="Loading..." style="font-size:0.78rem;">
+                                <button class="btn btn-outline-secondary" onclick="copyToClipboard('nostrPubkeyField')" title="Copy">
                                     <i class="material-icons align-middle">content_copy</i>
                                 </button>
                             </div>
@@ -2210,14 +2210,14 @@
                         Claim
                     </button>
                     <div class="d-flex justify-content-between align-items-center mt-3" style="font-size: 12px;">
-                        <span class="text-muted">On your identity's Base address:
-                            <strong id="claimIdentityClaimable">–</strong> SATORI</span>
-                        <button class="btn btn-sm btn-outline-primary" id="claimIdentityBtn" onclick="doClaim('identity')" disabled>Claim</button>
+                        <span class="text-muted">On your alias's Base address:
+                            <strong id="claimAliasClaimable">–</strong> SATORI</span>
+                        <button class="btn btn-sm btn-outline-primary" id="claimAliasBtn" onclick="doClaim('alias')" disabled>Claim</button>
                     </div>
                     <div id="claimStatus" class="small mt-3" style="display:none;"></div>
                     <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
-                        The neuron claims for you with your vault key, or your identity key for
-                        rewards paid to your identity. The claiming address needs a little ETH
+                        The neuron claims for you with your wallet key, or your alias key for
+                        rewards paid to your alias. The claiming address needs a little ETH
                         on Base for gas.
                     </p>
                 </div>
@@ -2256,7 +2256,7 @@
                     <div id="airdropStatus" class="small mt-3" style="display:none;"></div>
                     <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
                         Your airdrop vests over time; you can claim the vested portion whenever.
-                        The neuron claims for you with your vault key (needs a little ETH for gas).
+                        The neuron claims for you with your wallet key (needs a little ETH for gas).
                     </p>
                 </div>
             </div>
@@ -2294,7 +2294,7 @@
                     <div id="predRewardsStatus" class="small mt-3" style="display:none;"></div>
                     <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
                         Earned by this neuron's on-chain predictions. A prediction is scored about a day
-                        after it is made. The neuron claims for you with your vault key (needs a little ETH for gas).
+                        after it is made. The neuron claims for you with your wallet key (needs a little ETH for gas).
                     </p>
                 </div>
             </div>
@@ -2314,8 +2314,8 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-3" style="font-size: 12px;">
-                        Satori rewards are moving to the SATORI token on Base. Your vault key
-                        <em>is</em> your Base wallet. Your balances are below, and you can also
+                        Satori rewards are moving to the SATORI token on Base. Your wallet's key
+                        <em>is</em> its Base key. Your balances are below, and you can also
                         import the key into MetaMask. Your neuron keeps working exactly as before.
                     </p>
                     <div class="mb-3">
@@ -2329,18 +2329,18 @@
                             <thead><tr><th></th><th class="text-end">SATORI</th><th class="text-end">ETH</th></tr></thead>
                             <tbody>
                                 <tr>
-                                    <td><a id="baseVaultLink" href="#" target="_blank" rel="noopener">Vault</a></td>
-                                    <td class="text-end font-monospace" id="baseVaultSatori">--</td>
-                                    <td class="text-end font-monospace" id="baseVaultEth">--</td>
+                                    <td><a id="baseWalletLink" href="#" target="_blank" rel="noopener">Wallet</a></td>
+                                    <td class="text-end font-monospace" id="baseWalletSatori">--</td>
+                                    <td class="text-end font-monospace" id="baseWalletEth">--</td>
                                 </tr>
                                 <tr>
-                                    <td><a id="baseIdentityLink" href="#" target="_blank" rel="noopener">Predicting wallet</a></td>
-                                    <td class="text-end font-monospace" id="baseIdentitySatori">--</td>
-                                    <td class="text-end font-monospace" id="baseIdentityEth">--</td>
+                                    <td><a id="baseAliasLink" href="#" target="_blank" rel="noopener">Alias</a></td>
+                                    <td class="text-end font-monospace" id="baseAliasSatori">--</td>
+                                    <td class="text-end font-monospace" id="baseAliasEth">--</td>
                                 </tr>
                             </tbody>
                         </table>
-                        <div class="form-text text-muted" style="font-size:0.72rem;">Vault SATORI includes staked SATORI. ETH pays gas: the predicting wallet spends some every day.</div>
+                        <div class="form-text text-muted" style="font-size:0.72rem;">Wallet SATORI includes staked SATORI. ETH pays gas: the alias spends some every day.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Your Base Address</label>
@@ -2350,7 +2350,7 @@
                                 <i class="material-icons align-middle">content_copy</i>
                             </button>
                         </div>
-                        <div class="form-text text-muted" style="font-size:0.72rem;">Derived from your vault key &mdash; this is where your Base rewards land.</div>
+                        <div class="form-text text-muted" style="font-size:0.72rem;">Derived from your wallet key &mdash; this is where your Base rewards land.</div>
                     </div>
                     <button class="btn btn-primary w-100 mb-3" onclick="addSatoriToMetaMask()" id="addToMetaMaskBtn">
                         <i class="material-icons align-middle me-1">add_circle_outline</i>
@@ -2395,22 +2395,22 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-3" style="font-size: 12px;">
-                        Sends SATORIEVR on Evrmore from your vault's or identity's Evrmore address.
+                        Sends SATORIEVR on Evrmore from your wallet's or alias's Evrmore address.
                     </p>
                     <div id="sendFormFields" class="send-form-fields">
                         <div class="mb-3">
                             <label class="form-label">Send From</label>
                             <div class="d-flex gap-3">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromVault" value="vault" checked>
-                                    <label class="form-check-label" for="sendFromVault">
-                                        Vault <small class="text-muted" id="vaultBalanceLabel" style="display:none;">(--)</small>
+                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet" checked>
+                                    <label class="form-check-label" for="sendFromWallet">
+                                        Wallet <small class="text-muted" id="walletBalanceLabel" style="display:none;">(--)</small>
                                     </label>
                                 </div>
                                 <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromWallet" value="wallet">
-                                    <label class="form-check-label" for="sendFromWallet">
-                                        Wallet (Identity) <small class="text-muted" id="walletBalanceLabel" style="display:none;">(--)</small>
+                                    <input class="form-check-input" type="radio" name="sendSource" id="sendFromAlias" value="alias">
+                                    <label class="form-check-label" for="sendFromAlias">
+                                        Alias <small class="text-muted" id="aliasBalanceLabel" style="display:none;">(--)</small>
                                     </label>
                                 </div>
                             </div>
@@ -2454,8 +2454,8 @@
                         Balance
                     </h5>
                     <div class="bal-tabs">
-                        <button class="bal-tab bal-tab-active" onclick="switchBalTab('vault', this)">Vault</button>
-                        <button class="bal-tab" onclick="switchBalTab('identity', this)">Wallet<span class="bal-tab-suffix"> (Identity)</span></button>
+                        <button class="bal-tab bal-tab-active" onclick="switchBalTab('wallet', this)">Wallet</button>
+                        <button class="bal-tab" onclick="switchBalTab('alias', this)">Alias</button>
                     </div>
                     <div class="card-header-actions">
                         <button class="btn btn-sm btn-outline-secondary" onclick="refreshBalance(true)">
@@ -2467,8 +2467,8 @@
                     </div>
                 </div>
                 <div class="card-body p-0 balance-card-body">
-                    <!-- Vault pane -->
-                    <div id="balVaultPane" class="dash-stat-row">
+                    <!-- Wallet pane -->
+                    <div id="balWalletPane" class="dash-stat-row">
                         <div class="dash-stat">
                             <div class="dash-stat-value" id="tokenBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
@@ -2488,16 +2488,16 @@
                             <div class="dash-stat-label">EVR</div>
                         </div>
                     </div>
-                    <!-- Identity pane -->
-                    <div id="balIdentityPane" class="dash-stat-row" style="display:none;">
+                    <!-- Alias pane -->
+                    <div id="balAliasPane" class="dash-stat-row" style="display:none;">
                         <div class="dash-stat">
-                            <div class="dash-stat-value" id="identityWalletBalance">
+                            <div class="dash-stat-value" id="aliasSatoriBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
                             </div>
                             <div class="dash-stat-label">SATORIEVR</div>
                         </div>
                         <div class="dash-stat">
-                            <div class="dash-stat-value" id="identityEvrBalance">
+                            <div class="dash-stat-value" id="aliasEvrBalance">
                                 <span class="spinner-border spinner-border-sm" role="status"></span>
                             </div>
                             <div class="dash-stat-label">EVR</div>
@@ -2528,7 +2528,7 @@
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label">Current Address</label>
-                        <input type="text" class="form-control" id="currentRewardAddress" readonly placeholder="Not set: rewards go to your vault">
+                        <input type="text" class="form-control" id="currentRewardAddress" readonly placeholder="Not set: rewards go to your wallet">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">New Address</label>
@@ -2748,7 +2748,7 @@
                         </div>
 
                         <div class="ds-form-body">
-                            <!-- Identity -->
+                            <!-- Stream name -->
                             <div class="ds-field-group" style="grid-template-columns: 1fr 1fr 2fr;">
                                 <div class="ds-field">
                                     <label>Stream Name</label>
@@ -3203,19 +3203,19 @@
         // `force=true` (wired to the Refresh button) bypasses the 30 s cache.
         setBalanceLoading('tokenBalance', true);
         setBalanceLoading('evrBalance', true);
-        setBalanceLoading('identityWalletBalance', true);
-        setBalanceLoading('identityEvrBalance', true);
+        setBalanceLoading('aliasSatoriBalance', true);
+        setBalanceLoading('aliasEvrBalance', true);
 
         try {
             const endpoint = '/wallet/balance/direct' + (force ? '?refresh=1' : '');
             const result = await apiCall(endpoint);
             if (result && !result.error) {
-                // Vault pane
-                document.getElementById('tokenBalance').textContent = result.vault_balance !== undefined ? formatBalance(result.vault_balance) : '--';
-                document.getElementById('evrBalance').textContent = result.vault_evr !== undefined ? formatBalance(result.vault_evr) : '--';
-                // Identity pane
-                document.getElementById('identityWalletBalance').textContent = result.wallet_balance !== undefined ? formatBalance(result.wallet_balance) : '--';
-                document.getElementById('identityEvrBalance').textContent = result.wallet_evr !== undefined ? formatBalance(result.wallet_evr) : '--';
+                // Wallet pane
+                document.getElementById('tokenBalance').textContent = result.wallet_balance !== undefined ? formatBalance(result.wallet_balance) : '--';
+                document.getElementById('evrBalance').textContent = result.wallet_evr !== undefined ? formatBalance(result.wallet_evr) : '--';
+                // Alias pane
+                document.getElementById('aliasSatoriBalance').textContent = result.alias_balance !== undefined ? formatBalance(result.alias_balance) : '--';
+                document.getElementById('aliasEvrBalance').textContent = result.alias_evr !== undefined ? formatBalance(result.alias_evr) : '--';
 
                 // Show/hide no-EVR warning (check total EVR)
                 const noEvrWarning = document.getElementById('noEvrWarning');
@@ -3224,26 +3224,26 @@
                 }
 
                 // Update balance labels in send section
-                if (result.vault_balance !== undefined) {
-                    document.getElementById('vaultBalanceLabel').textContent = '(' + formatBalance(result.vault_balance) + ')';
-                }
                 if (result.wallet_balance !== undefined) {
                     document.getElementById('walletBalanceLabel').textContent = '(' + formatBalance(result.wallet_balance) + ')';
                 }
-                // Hero pills: combined wallet + vault totals
+                if (result.alias_balance !== undefined) {
+                    document.getElementById('aliasBalanceLabel').textContent = '(' + formatBalance(result.alias_balance) + ')';
+                }
+                // Hero pills: combined alias + wallet totals
                 updateDashHeroTotals({
-                    satori: (parseFloat(result.vault_balance) || 0) + (parseFloat(result.wallet_balance) || 0),
+                    satori: (parseFloat(result.wallet_balance) || 0) + (parseFloat(result.alias_balance) || 0),
                     evr: result.total_evr !== undefined
                         ? parseFloat(result.total_evr)
-                        : (parseFloat(result.vault_evr) || 0) + (parseFloat(result.wallet_evr) || 0),
+                        : (parseFloat(result.wallet_evr) || 0) + (parseFloat(result.alias_evr) || 0),
                 });
             } else {
                 document.getElementById('tokenBalance').textContent = '--';
                 document.getElementById('evrBalance').textContent = '--';
-                document.getElementById('identityWalletBalance').textContent = '--';
-                document.getElementById('identityEvrBalance').textContent = '--';
-                document.getElementById('vaultBalanceLabel').textContent = '(--)';
+                document.getElementById('aliasSatoriBalance').textContent = '--';
+                document.getElementById('aliasEvrBalance').textContent = '--';
                 document.getElementById('walletBalanceLabel').textContent = '(--)';
+                document.getElementById('aliasBalanceLabel').textContent = '(--)';
                 updateDashHeroTotals(null);
                 if (result && result.error) {
                     console.error('ElectrumX balance fetch error:', result.error);
@@ -3253,10 +3253,10 @@
             console.error('Failed to fetch balance from ElectrumX:', error);
             document.getElementById('tokenBalance').textContent = '--';
             document.getElementById('evrBalance').textContent = '--';
-            document.getElementById('identityWalletBalance').textContent = '--';
-            document.getElementById('identityEvrBalance').textContent = '--';
-            document.getElementById('vaultBalanceLabel').textContent = '(--)';
+            document.getElementById('aliasSatoriBalance').textContent = '--';
+            document.getElementById('aliasEvrBalance').textContent = '--';
             document.getElementById('walletBalanceLabel').textContent = '(--)';
+            document.getElementById('aliasBalanceLabel').textContent = '(--)';
             updateDashHeroTotals(null);
         }
     }
@@ -3275,15 +3275,15 @@
     }
 
     function switchBalTab(tab, btn) {
-        document.getElementById('balVaultPane').style.display = tab === 'vault' ? 'flex' : 'none';
-        document.getElementById('balIdentityPane').style.display = tab === 'identity' ? 'flex' : 'none';
+        document.getElementById('balWalletPane').style.display = tab === 'wallet' ? 'flex' : 'none';
+        document.getElementById('balAliasPane').style.display = tab === 'alias' ? 'flex' : 'none';
         btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
         btn.classList.add('bal-tab-active');
     }
 
     function switchWalletTab(tab, btn) {
-        document.getElementById('walletVaultPane').style.display = tab === 'vault' ? 'block' : 'none';
-        document.getElementById('walletIdentityPane').style.display = tab === 'identity' ? 'block' : 'none';
+        document.getElementById('walletPane').style.display = tab === 'wallet' ? 'block' : 'none';
+        document.getElementById('aliasPane').style.display = tab === 'alias' ? 'block' : 'none';
         document.getElementById('walletNostrPane').style.display = tab === 'nostr' ? 'block' : 'none';
         btn.closest('.bal-tabs').querySelectorAll('.bal-tab').forEach(b => b.classList.remove('bal-tab-active'));
         btn.classList.add('bal-tab-active');
@@ -3333,17 +3333,17 @@
     }
 
     async function loadStakingStatus() {
-        // Get wallet address first
+        // Get the alias's address first (central keys this neuron by it)
         const walletData = await apiCall('/wallet/address');
-        if (!walletData || !walletData.wallet_address) {
+        if (!walletData || !walletData.alias_address) {
             const statusEl = document.getElementById('stakingStatus');
             statusEl.className = 'alert alert-warning';
             statusEl.textContent = 'Unable to load staking status';
             return;
         }
 
-        // Query lender status with wallet address
-        const result = await apiCall(`/lender/status?wallet_address=${encodeURIComponent(walletData.wallet_address)}`);
+        // Query lender status with the alias's address
+        const result = await apiCall(`/lender/status?wallet_address=${encodeURIComponent(walletData.alias_address)}`);
         const statusEl = document.getElementById('stakingStatus');
         if (result && result.pool_address) {
             isStakingToPool = true;
@@ -3662,41 +3662,41 @@
     async function loadWalletAddresses() {
         const result = await apiCall('/wallet/address');
         if (result) {
-            // Main wallet uses vault address
-            if (result.vault_address) {
-                document.getElementById('walletAddress').value = result.vault_address;
-                loadQrCode(result.vault_address);
+            // The wallet's address
+            if (result.wallet_address) {
+                document.getElementById('walletAddress').value = result.wallet_address;
+                loadQrCode(result.wallet_address);
             } else {
                 document.getElementById('walletAddress').value = 'Not available';
                 document.getElementById('walletQrCode').innerHTML = '<p class="text-muted mb-0">No address</p>';
             }
-            // Identity wallet (for backup)
-            if (result.wallet_address) {
-                document.getElementById('identityAddress').value = result.wallet_address;
+            // The alias (for backup)
+            if (result.alias_address) {
+                document.getElementById('aliasAddress').value = result.alias_address;
             } else {
-                document.getElementById('identityAddress').value = 'Not available';
+                document.getElementById('aliasAddress').value = 'Not available';
             }
-            if (result.wallet_pubkey) {
-                document.getElementById('identityPubkey').value = result.wallet_pubkey;
+            if (result.alias_pubkey) {
+                document.getElementById('aliasPubkey').value = result.alias_pubkey;
             } else {
-                document.getElementById('identityPubkey').value = 'Not available';
+                document.getElementById('aliasPubkey').value = 'Not available';
             }
             if (result.nostr_pubkey) {
-                document.getElementById('identityNostrPubkey').value = result.nostr_pubkey;
+                document.getElementById('nostrPubkeyField').value = result.nostr_pubkey;
             } else {
-                document.getElementById('identityNostrPubkey').value = 'Not available';
+                document.getElementById('nostrPubkeyField').value = 'Not available';
             }
         }
     }
 
     // ── Base / MetaMask ──────────────────────────────────────────
-    // The vault key is the Base wallet: `/wallet/base` returns the vault's EVM
+    // The wallet key is also its Base key: `/wallet/base` returns the wallet's EVM
     // address (where rewards land) and the 0x-hex key MetaMask imports, plus
     // the SATORI-on-Base token + network params for wallet_watchAsset.
     let baseTokenInfo = null;
     let _baseKeyLoaded = null;
 
-    async function loadBaseIdentity() {
+    async function loadBaseWallet() {
         const result = await apiCall('/wallet/base');
         const addrEl = document.getElementById('baseAddress');
         if (!addrEl) return;
@@ -3782,7 +3782,7 @@
         }
     }
 
-    // ── Claim SATORI rewards (neuron claims with the vault key) ──────────
+    // ── Claim SATORI rewards (neuron claims with the wallet key) ──────────
     function _fmtSatori(n) {
         return (typeof n === 'number')
             ? n.toLocaleString(undefined, { maximumFractionDigits: 8 })
@@ -3790,7 +3790,7 @@
     }
 
     async function loadBaseBalances() {
-        const ids = { vault: 'baseVault', identity: 'baseIdentity' };
+        const ids = { wallet: 'baseWallet', alias: 'baseAlias' };
         for (const p of Object.values(ids)) {
             document.getElementById(p + 'Satori').textContent = '…';
             document.getElementById(p + 'Eth').textContent = '…';
@@ -3818,14 +3818,14 @@
         try {
             const r = await apiCall('/wallet/base/claimable');
             const btn = document.getElementById('claimBtn');
-            const idEl = document.getElementById('claimIdentityClaimable');
-            const idBtn = document.getElementById('claimIdentityBtn');
+            const idEl = document.getElementById('claimAliasClaimable');
+            const idBtn = document.getElementById('claimAliasBtn');
             if (r && !r.error) {
                 el.textContent = _fmtSatori(r.claimable);
                 document.getElementById('claimTotal').textContent = _fmtSatori(r.total);
                 document.getElementById('claimClaimed').textContent = _fmtSatori(r.claimed);
                 if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
-                const id = r.identity || {};
+                const id = r.alias || {};
                 idEl.textContent = _fmtSatori(id.claimable);
                 idEl.title = id.address || '';
                 idBtn.disabled = !(parseFloat(id.claimable) > 0);
@@ -3842,7 +3842,7 @@
 
     async function doClaim(key) {
         const status = document.getElementById('claimStatus');
-        const btn = document.getElementById(key === 'identity' ? 'claimIdentityBtn' : 'claimBtn');
+        const btn = document.getElementById(key === 'alias' ? 'claimAliasBtn' : 'claimBtn');
         const show = (msg, ok) => {
             status.style.display = 'block';
             status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
@@ -3855,7 +3855,7 @@
             // fetch, not apiCall: show central's/the chain's reason here, not as 'Claim failed'
             const res = await fetch(API_URL + '/wallet/base/claim', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: key || 'vault' }) });
+                body: JSON.stringify({ key: key || 'wallet' }) });
             const r = await res.json().catch(() => null);
             if (r && r.success) {
                 const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
@@ -3875,7 +3875,7 @@
         }
     }
 
-    // ── Claim Airdrop (neuron claims with the vault key; no proof needed) ─
+    // ── Claim Airdrop (neuron claims with the wallet key; no proof needed) ─
     async function loadAirdrop(force) {
         const el = document.getElementById('airdropClaimable');
         if (!el) return;
@@ -3927,7 +3927,7 @@
         }
     }
 
-    // ── Claim on-chain prediction rewards (vault calls SatoriHub.claim) ───
+    // ── Claim on-chain prediction rewards (wallet calls SatoriHub.claim) ───
     async function loadPredictionRewards(force) {
         const el = document.getElementById('predRewardsClaimable');
         if (!el) return;
@@ -3979,50 +3979,50 @@
         }
     }
 
-    // Identity Wallet functions
-    let identityWalletVisible = false;
-    let identityPrivateKeyLoaded = false;
-    let identityPrivateKeyVisible = false;
+    // Alias functions
+    let aliasSectionVisible = false;
+    let aliasPrivateKeyLoaded = false;
+    let aliasPrivateKeyVisible = false;
 
-    function toggleIdentityWallet() {
-        const section = document.getElementById('identityWalletSection');
-        identityWalletVisible = !identityWalletVisible;
-        section.style.display = identityWalletVisible ? 'block' : 'none';
+    function toggleAliasSection() {
+        const section = document.getElementById('aliasSection');
+        aliasSectionVisible = !aliasSectionVisible;
+        section.style.display = aliasSectionVisible ? 'block' : 'none';
     }
 
-    async function toggleIdentityPrivateKey() {
-        const input = document.getElementById('identityPrivateKey');
-        const icon = document.getElementById('identityKeyIcon');
+    async function toggleAliasPrivateKey() {
+        const input = document.getElementById('aliasPrivateKey');
+        const icon = document.getElementById('aliasKeyIcon');
 
-        if (!identityPrivateKeyLoaded) {
-            // Load the identity private key from API
-            const result = await apiCall('/wallet/identity-private-key');
+        if (!aliasPrivateKeyLoaded) {
+            // Load the alias private key from API
+            const result = await apiCall('/wallet/alias-private-key');
             if (result && result.private_key) {
                 input.value = result.private_key;
-                identityPrivateKeyLoaded = true;
+                aliasPrivateKeyLoaded = true;
             } else {
                 input.value = 'Unable to load';
             }
         }
 
-        identityPrivateKeyVisible = !identityPrivateKeyVisible;
-        input.type = identityPrivateKeyVisible ? 'text' : 'password';
-        icon.textContent = identityPrivateKeyVisible ? 'visibility_off' : 'visibility';
+        aliasPrivateKeyVisible = !aliasPrivateKeyVisible;
+        input.type = aliasPrivateKeyVisible ? 'text' : 'password';
+        icon.textContent = aliasPrivateKeyVisible ? 'visibility_off' : 'visibility';
     }
 
-    function copyIdentityPrivateKey() {
-        const input = document.getElementById('identityPrivateKey');
+    function copyAliasPrivateKey() {
+        const input = document.getElementById('aliasPrivateKey');
         if (input.value && input.value !== 'Click to reveal...' && input.value !== 'Unable to load') {
             // Check if Clipboard API is available (requires HTTPS or localhost)
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(input.value).then(() => {
-                    showToast('Identity private key copied to clipboard');
+                    showToast('Alias private key copied to clipboard');
                 }).catch(() => {
                     // Fallback for older browsers or non-HTTPS
                     input.select();
                     try {
                         document.execCommand('copy');
-                        showToast('Identity private key copied to clipboard');
+                        showToast('Alias private key copied to clipboard');
                     } catch (err) {
                         showToast('Failed to copy', true);
                     }
@@ -4032,7 +4032,7 @@
                 input.select();
                 try {
                     document.execCommand('copy');
-                    showToast('Identity private key copied to clipboard');
+                    showToast('Alias private key copied to clipboard');
                 } catch (err) {
                     showToast('Failed to copy', true);
                 }
@@ -5395,7 +5395,7 @@
         const section = document.getElementById('privateKeySection');
 
         if (section.style.display === 'none') {
-            // Show private key (vault private key)
+            // Show the wallet's private key
             if (!privateKeyLoaded) {
                 const result = await apiCall('/wallet/private-key');
                 if (result && result.private_key) {
@@ -5485,7 +5485,7 @@
         const amountRaw = document.getElementById('sendAmount').value;
         const sweep = document.getElementById('sendSweep').checked;
         const sendSource = document.querySelector('input[name="sendSource"]:checked').value;
-        const sourceName = sendSource === 'wallet' ? 'Identity Wallet' : 'Vault';
+        const sourceName = sendSource === 'alias' ? 'Alias' : 'Wallet';
 
         if (!address) { showToast('Please enter a destination address', true); return; }
         if (!isValidAddress(address)) {
@@ -5604,8 +5604,8 @@
         try {
             const data = { address: tx.address, sweep: tx.sweep };
             if (!tx.sweep) data.amount = tx.amount;
-            const endpoint = tx.sendSource === 'wallet'
-                ? '/wallet/send-from-wallet' : '/wallet/send';
+            const endpoint = tx.sendSource === 'alias'
+                ? '/wallet/send-from-alias' : '/wallet/send';
             const result = await apiCall(endpoint, 'POST', data);
 
             if (result && result.success) {
@@ -6110,10 +6110,17 @@
         modal.show();
     }
 
+    // The two key files, as a download names them; the server tells the alias
+    // from the wallet by those names.
     const IW_STEPS = {
-        1: { expected: 'wallet.yaml', subDefault: 'Click to choose · must be named wallet.yaml' },
-        2: { expected: 'vault.yaml',  subDefault: 'Click to choose · must be named vault.yaml' }
+        1: { subDefault: "Click to choose · the alias's .yaml file from your backup" },
+        2: { subDefault: "Click to choose · the wallet's .yaml file from your backup" }
     };
+    const iwFiles = { 1: null, 2: null };
+
+    function iwSyncImportFiles() {
+        walletImportFilesModal = [iwFiles[1], iwFiles[2]].filter(Boolean);
+    }
 
     function setStepState(stepNum, state, subText) {
         const step = document.getElementById(`iwStep${stepNum}`);
@@ -6147,14 +6154,17 @@
         if (resultDiv) resultDiv.style.display = 'none';
 
         if (stepNum === 1) {
-            walletImportFilesModal = [];
+            iwFiles[1] = null;
+            iwFiles[2] = null;
+            iwSyncImportFiles();
             document.getElementById('iwStep1Input').value = '';
             document.getElementById('iwStep2Input').value = '';
             setStepState(1, 'open', IW_STEPS[1].subDefault);
             setStepState(2, 'locked', 'Locked · complete step 1 first');
             importBtn.disabled = true;
         } else if (stepNum === 2) {
-            walletImportFilesModal = walletImportFilesModal.filter(f => f.name !== 'vault.yaml');
+            iwFiles[2] = null;
+            iwSyncImportFiles();
             document.getElementById('iwStep2Input').value = '';
             setStepState(2, 'open', IW_STEPS[2].subDefault);
             importBtn.disabled = true;
@@ -6164,16 +6174,21 @@
     function handleStepFile(stepNum, event) {
         const file = event.target.files && event.target.files[0];
         if (!file) return;
-        const expected = IW_STEPS[stepNum].expected;
         const importBtn = document.getElementById('importWalletBtnModal');
+        const other = iwFiles[stepNum === 1 ? 2 : 1];
+        const badName = !/\.yaml$/.test(file.name);
+        const sameName = other && other.name === file.name;
 
-        if (file.name !== expected) {
-            setStepState(stepNum, 'error', `${file.name} · expected ${expected}`);
-            showToast(`Wrong file: select ${expected}`, true);
+        if (badName || sameName) {
+            const why = badName ? 'expected a .yaml file' : 'already chosen in the other step';
+            setStepState(stepNum, 'error', `${file.name} · ${why}`);
+            showToast(`Wrong file: ${file.name} (${why})`, true);
             event.target.value = '';
             // Lower steps after this remain locked
             if (stepNum === 1) {
-                walletImportFilesModal = [];
+                iwFiles[1] = null;
+                iwFiles[2] = null;
+                iwSyncImportFiles();
                 setStepState(2, 'locked', 'Locked · complete step 1 first');
             }
             importBtn.disabled = true;
@@ -6184,17 +6199,14 @@
         const subText = `${file.name} · ${sizeKb} KB`;
         setStepState(stepNum, 'done', subText);
 
-        // Track in walletImportFilesModal (replace any existing entry of same name)
-        walletImportFilesModal = walletImportFilesModal.filter(f => f.name !== file.name);
-        walletImportFilesModal.push(file);
+        iwFiles[stepNum] = file;
+        iwSyncImportFiles();
 
         if (stepNum === 1) {
             setStepState(2, 'open', IW_STEPS[2].subDefault);
             importBtn.disabled = true;
         } else if (stepNum === 2) {
-            const hasWallet = walletImportFilesModal.some(f => f.name === 'wallet.yaml');
-            const hasVault = walletImportFilesModal.some(f => f.name === 'vault.yaml');
-            importBtn.disabled = !(hasWallet && hasVault);
+            importBtn.disabled = !(iwFiles[1] && iwFiles[2]);
         }
     }
 
@@ -6231,7 +6243,7 @@
                 resultDiv.className = 'iw-result iw-result-success';
                 resultDiv.innerHTML =
                     '<div class="iw-result-title"><i class="material-icons">check_circle</i>Wallet imported · restarting</div>' +
-                    'Redirecting to login in 15s. After restart, log in with your vault password and set a new reward address.' +
+                    'Redirecting to login in 15s. After restart, log in with your wallet password and set a new reward address.' +
                     '<span class="iw-result-meta">backup → ' + (data.backup_location || '-') + '</span>';
                 resultDiv.style.display = 'block';
 
@@ -6584,8 +6596,8 @@
             // Health check disabled to reduce API load
             // checkHealth();
             loadWalletAddresses();
-            loadBaseIdentity();  // Base/EVM address + token info for MetaMask
-            loadBaseBalances();  // SATORI and ETH on Base, vault and predicting wallet
+            loadBaseWallet();  // Base/EVM address + token info for MetaMask
+            loadBaseBalances();  // SATORI and ETH on Base, wallet and predicting wallet
             loadClaimable();  // Base reward claim amount
             loadAirdrop();  // Base airdrop claim amount
             loadPredictionRewards();  // Base on-chain prediction rewards

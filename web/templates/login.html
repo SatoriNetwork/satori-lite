@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Satori - Unlock Vault{% endblock %}
+{% block title %}Satori - Unlock Wallet{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -462,7 +462,7 @@
         <form action="{{ url_for('login') }}" method="POST" id="loginForm">
             <div class="login-field" id="passwordField">
                 <div class="login-field-label">
-                    <span>Vault password</span>
+                    <span>Wallet password</span>
                     <span class="caps-lock-hint" id="capsLockHint">Caps lock</span>
                 </div>
                 <div class="login-input-wrap">
@@ -484,7 +484,7 @@
 
             <button type="submit" class="login-submit" id="unlockBtn">
                 <i class="material-icons">lock_open</i>
-                <span>Unlock vault</span>
+                <span>Unlock wallet</span>
             </button>
         </form>
 
@@ -504,7 +504,7 @@
             <circle cx="32" cy="50" r="5.2" fill="var(--bg-card)"/>
             <rect x="29.5" y="50" width="5" height="9" rx="2.5" fill="var(--bg-card)"/>
         </svg>
-        <div class="auth-loading-label">Unlocking vault</div>
+        <div class="auth-loading-label">Unlocking wallet</div>
         <div class="auth-loading-progress">
             <div id="authLoadingProgressBar" class="auth-loading-progress-bar"></div>
         </div>

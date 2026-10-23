@@ -1,8 +1,8 @@
 """
-Unit tests for session-specific vault management.
+Unit tests for session-specific wallet management.
 
 Tests that each browser session gets its own WalletManager instance
-and vault unlock state is isolated per session.
+and wallet unlock state is isolated per session.
 """
 import pytest
 from unittest.mock import MagicMock, patch, Mock
@@ -28,8 +28,8 @@ def client(app):
     return app.test_client()
 
 
-class TestSessionVaultManagement:
-    """Test session-specific vault management."""
+class TestSessionWalletManagement:
+    """Test session-specific wallet management."""
 
     @pytest.mark.unit
     def test_session_id_generated_on_first_access(self, client):
@@ -64,34 +64,34 @@ class TestSessionVaultManagement:
         assert session_id_1 != session_id_2
 
     @pytest.mark.unit
-    def test_session_vault_created_on_login(self, client):
+    def test_session_wallet_created_on_login(self, client):
         """Each session should get its own WalletManager instance."""
         mock_wallet_manager = MagicMock()
-        mock_vault = MagicMock()
-        mock_vault.isDecrypted = True
-        mock_wallet_manager.openVault.return_value = mock_vault
+        mock_wallet = MagicMock()
+        mock_wallet.isDecrypted = True
+        mock_wallet_manager.openWallet.return_value = mock_wallet
 
-        # Mock vault password check and session vault creation
-        with patch('web.routes.check_vault_password_exists', return_value=True):
-            with patch('web.routes.get_or_create_session_vault', return_value=mock_wallet_manager):
+        # Mock wallet password check and session wallet creation
+        with patch('web.routes.check_wallet_file_exists', return_value=True):
+            with patch('web.routes.get_or_create_session_wallet', return_value=mock_wallet_manager):
                 response = client.post('/login', data={'password': 'test_password'})
 
         # Should have created a WalletManager for this session
         assert response.status_code in [302, 303]
 
         with client.session_transaction() as sess:
-            assert sess.get('vault_open') is True
+            assert sess.get('wallet_open') is True
 
     @pytest.mark.unit
-    def test_multiple_sessions_get_separate_vaults(self, app):
-        """Multiple sessions should each get their own vault instance."""
+    def test_multiple_sessions_get_separate_wallets(self, app):
+        """Multiple sessions should each get their own wallet instance."""
         client1 = app.test_client()
         client2 = app.test_client()
 
-        mock_vault1 = MagicMock()
-        mock_vault1.isDecrypted = True
-        mock_vault2 = MagicMock()
-        mock_vault2.isDecrypted = True
+        mock_wallet1 = MagicMock()
+        mock_wallet1.isDecrypted = True
+        mock_wallet2 = MagicMock()
+        mock_wallet2.isDecrypted = True
 
         # Create different wallet managers for each call
         call_count = 0
@@ -100,46 +100,46 @@ class TestSessionVaultManagement:
             call_count += 1
             manager = MagicMock()
             if call_count == 1:
-                manager.openVault.return_value = mock_vault1
+                manager.openWallet.return_value = mock_wallet1
             else:
-                manager.openVault.return_value = mock_vault2
+                manager.openWallet.return_value = mock_wallet2
             return manager
 
         # Login with both clients
-        with patch('web.routes.check_vault_password_exists', return_value=True):
-            with patch('web.routes.get_or_create_session_vault', side_effect=create_wallet_manager):
+        with patch('web.routes.check_wallet_file_exists', return_value=True):
+            with patch('web.routes.get_or_create_session_wallet', side_effect=create_wallet_manager):
                 client1.post('/login', data={'password': 'test_password'})
                 client2.post('/login', data={'password': 'test_password'})
 
-        # Both sessions should be logged in (this verifies separate vaults were created)
+        # Both sessions should be logged in (this verifies separate wallets were created)
         assert call_count == 2
 
     @pytest.mark.unit
-    def test_vault_password_encrypted_in_session(self, client):
-        """Vault password should be encrypted when stored in session."""
+    def test_wallet_password_encrypted_in_session(self, client):
+        """Wallet password should be encrypted when stored in session."""
         mock_wallet_manager = MagicMock()
-        mock_vault = MagicMock()
-        mock_vault.isDecrypted = True
-        mock_wallet_manager.openVault.return_value = mock_vault
+        mock_wallet = MagicMock()
+        mock_wallet.isDecrypted = True
+        mock_wallet_manager.openWallet.return_value = mock_wallet
 
-        with patch('web.routes.check_vault_password_exists', return_value=True):
-            with patch('web.routes.get_or_create_session_vault', return_value=mock_wallet_manager):
+        with patch('web.routes.check_wallet_file_exists', return_value=True):
+            with patch('web.routes.get_or_create_session_wallet', return_value=mock_wallet_manager):
                 response = client.post('/login', data={'password': 'my_secret_password'})
 
         assert response.status_code in [302, 303]
 
         with client.session_transaction() as sess:
             # Password should be encrypted in session
-            assert 'encrypted_vault_password' in sess
+            assert 'encrypted_wallet_password' in sess
             assert 'session_key' in sess
             # Should NOT store plaintext password
-            assert 'vault_password' not in sess
+            assert 'wallet_password' not in sess
             # Encrypted password should not be the plaintext
-            assert sess['encrypted_vault_password'] != 'my_secret_password'
+            assert sess['encrypted_wallet_password'] != 'my_secret_password'
 
     @pytest.mark.unit
-    def test_decrypt_vault_password_from_session(self, client):
-        """Should be able to decrypt vault password from session."""
+    def test_decrypt_wallet_password_from_session(self, client):
+        """Should be able to decrypt wallet password from session."""
         # Simulate encrypted password in session
         password = 'my_secret_password'
         session_key = Fernet.generate_key()
@@ -147,25 +147,25 @@ class TestSessionVaultManagement:
         encrypted_pw = f.encrypt(password.encode())
 
         with client.session_transaction() as sess:
-            sess['encrypted_vault_password'] = encrypted_pw.decode()
+            sess['encrypted_wallet_password'] = encrypted_pw.decode()
             sess['session_key'] = session_key.decode()
 
         # Function to decrypt should work
-        from web.routes import decrypt_vault_password_from_session
+        from web.routes import decrypt_wallet_password_from_session
 
         with client:
             client.get('/dashboard')  # Establish session context
-            decrypted = decrypt_vault_password_from_session()
+            decrypted = decrypt_wallet_password_from_session()
             assert decrypted == password
 
     @pytest.mark.unit
-    @patch('web.routes.cleanup_session_vault')
-    def test_logout_cleans_up_session_vault(self, mock_cleanup, client):
-        """Logout should cleanup the session's vault."""
+    @patch('web.routes.cleanup_session_wallet')
+    def test_logout_cleans_up_session_wallet(self, mock_cleanup, client):
+        """Logout should cleanup the session's wallet."""
         # Setup session
         with client.session_transaction() as sess:
             sess['session_id'] = 'test-session-123'
-            sess['vault_open'] = True
+            sess['wallet_open'] = True
 
         # Logout
         response = client.get('/logout')
@@ -175,84 +175,86 @@ class TestSessionVaultManagement:
 
         # Session should be cleared
         with client.session_transaction() as sess:
-            assert 'vault_open' not in sess
+            assert 'wallet_open' not in sess
 
     @pytest.mark.unit
-    def test_session_vault_isolation_on_logout(self, app):
+    def test_session_wallet_isolation_on_logout(self, app):
         """One session logging out should not affect other sessions."""
         client1 = app.test_client()
         client2 = app.test_client()
 
         mock_wallet_manager = MagicMock()
-        mock_vault = MagicMock()
-        mock_vault.isDecrypted = True
-        mock_wallet_manager.openVault.return_value = mock_vault
+        mock_wallet = MagicMock()
+        mock_wallet.isDecrypted = True
+        mock_wallet_manager.openWallet.return_value = mock_wallet
 
         # Login both sessions
-        with patch('web.routes.check_vault_password_exists', return_value=True):
-            with patch('web.routes.get_or_create_session_vault', return_value=mock_wallet_manager):
+        with patch('web.routes.check_wallet_file_exists', return_value=True):
+            with patch('web.routes.get_or_create_session_wallet', return_value=mock_wallet_manager):
                 client1.post('/login', data={'password': 'test_password'})
                 client2.post('/login', data={'password': 'test_password'})
 
         # Verify both are logged in
         with client1.session_transaction() as sess1:
-            assert sess1.get('vault_open') is True
+            assert sess1.get('wallet_open') is True
 
         with client2.session_transaction() as sess2:
-            assert sess2.get('vault_open') is True
+            assert sess2.get('wallet_open') is True
 
         # Logout client1
         client1.get('/logout')
 
         # Client1 should be logged out
         with client1.session_transaction() as sess1:
-            assert sess1.get('vault_open') is not True
+            assert sess1.get('wallet_open') is not True
 
         # Client2 should STILL be logged in
         with client2.session_transaction() as sess2:
-            assert sess2.get('vault_open') is True
+            assert sess2.get('wallet_open') is True
 
 
-class TestVaultOnDemandOperations:
-    """Test vault unlock on-demand for specific operations."""
+class TestWalletOnDemandOperations:
+    """Test wallet unlock on-demand for specific operations."""
 
     @pytest.mark.unit
-    @patch('web.routes.get_or_create_session_vault')
-    def test_private_key_endpoint_uses_session_vault(self, mock_get_vault, client):
-        """Private key endpoint should use session-specific vault."""
+    @patch('web.routes.get_or_create_session_wallet')
+    def test_private_key_endpoint_uses_session_wallet(self, mock_get_wallet, client):
+        """Private key endpoint should use session-specific wallet."""
         mock_wallet_manager = MagicMock()
-        mock_vault = MagicMock()
-        mock_vault.privkey = 'test_private_key'
-        mock_wallet_manager.vault = mock_vault
-        mock_get_vault.return_value = mock_wallet_manager
+        mock_wallet = MagicMock()
+        mock_wallet.privkey = 'test_private_key'
+        mock_wallet_manager.wallet = mock_wallet
+        mock_get_wallet.return_value = mock_wallet_manager
 
         # Setup logged in session
         with client.session_transaction() as sess:
-            sess['vault_open'] = True
+            sess['wallet_open'] = True
             sess['session_id'] = 'test-session'
 
-        response = client.get('/api/wallet/private-key')
+        with patch.dict('web.routes._session_wallets', {'test-session': mock_wallet_manager}):
+            response = client.get('/api/wallet/private-key')
 
-        # Should have gotten session vault
-        mock_get_vault.assert_called_once()
+        # Should have gotten session wallet
+        mock_get_wallet.assert_called_once()
 
     @pytest.mark.unit
-    @patch('web.routes.get_or_create_session_vault')
-    def test_send_transaction_uses_session_vault(self, mock_get_vault, client):
-        """Send transaction should use session-specific vault for signing."""
+    @patch('web.routes.get_or_create_session_wallet')
+    def test_send_transaction_uses_session_wallet(self, mock_get_wallet, client):
+        """Send transaction should use session-specific wallet for signing."""
         mock_wallet_manager = MagicMock()
-        mock_wallet_manager.vault.send.return_value = {'txHash': 'test_hash'}
-        mock_get_vault.return_value = mock_wallet_manager
+        mock_wallet_manager.wallet.send.return_value = {'txHash': 'test_hash'}
+        mock_get_wallet.return_value = mock_wallet_manager
 
         # Setup logged in session
         with client.session_transaction() as sess:
-            sess['vault_open'] = True
+            sess['wallet_open'] = True
             sess['session_id'] = 'test-session'
 
-        response = client.post('/api/wallet/send', json={
-            'address': 'test_address',
-            'amount': 10
-        })
+        with patch.dict('web.routes._session_wallets', {'test-session': mock_wallet_manager}):
+            response = client.post('/api/wallet/send', json={
+                'address': 'test_address',
+                'amount': 10
+            })
 
-        # Should have used session vault
-        mock_get_vault.assert_called_once()
+        # Should have used session wallet
+        mock_get_wallet.assert_called_once()

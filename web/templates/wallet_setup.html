@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Satori - Create Vault{% endblock %}
+{% block title %}Satori - Create Wallet{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -351,9 +351,9 @@
             <div class="login-logo-wrap">
                 <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori">
             </div>
-            <h1 class="login-title"><span class="accent">Set a vault password</span></h1>
+            <h1 class="login-title"><span class="accent">Set a wallet password</span></h1>
             <p class="login-sub">
-                This password encrypts your private keys and wallet data locally.
+                This password encrypts your wallet's private key locally.
             </p>
         </div>
 
@@ -370,10 +370,10 @@
             {% endif %}
         {% endwith %}
 
-        <form action="{{ url_for('vault_setup') }}" method="POST" id="setupForm">
+        <form action="{{ url_for('wallet_setup') }}" method="POST" id="setupForm">
             <div class="login-field" id="passwordField">
                 <div class="login-field-label">
-                    <span>Vault password</span>
+                    <span>Wallet password</span>
                     <span class="caps-lock-hint" id="capsLockHint">Caps lock</span>
                 </div>
                 <div class="login-input-wrap">
@@ -424,7 +424,7 @@
 
             <button type="submit" class="login-submit" id="submitBtn">
                 <i class="material-icons">key</i>
-                <span>Create vault</span>
+                <span>Create wallet</span>
             </button>
 
             <p class="login-foot-note">Keep it safe. We can't recover it.</p>

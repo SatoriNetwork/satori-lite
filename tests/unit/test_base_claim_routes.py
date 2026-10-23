@@ -1,8 +1,8 @@
-"""Merkle rewards on Base can land on the vault's address or on the identity's.
+"""Merkle rewards on Base can land on the wallet's address or on the alias's.
 
-Central records a neuron's rewards at its reward address, else its vault's Base
-address, else (no vault) its identity's. A reward address naming an identity
-is paid at that identity's Base address. So the dashboard shows what is
+Central records a neuron's rewards at its reward address, else its wallet's Base
+address, else (no wallet) its alias's. A reward address naming an alias
+is paid at that alias's Base address. So the dashboard shows what is
 claimable on both, and claims either one, signed by that key. A claim is sent
 from the claiming address, so with no ETH there it says so instead of failing.
 """
@@ -10,10 +10,10 @@ from unittest import mock
 
 import pytest
 
-VAULT = '0x7ECAb9668d259057206b2DdfA0D786CD977e9345'
-IDENTITY = '0x987560CEf66Df36EB5D4B4A11AaD0C46950Fc8a1'
-VAULT_KEY = '0x' + '11' * 32
-IDENTITY_KEY = '0x' + '22' * 32
+WALLET = '0x7ECAb9668d259057206b2DdfA0D786CD977e9345'
+ALIAS = '0x987560CEf66Df36EB5D4B4A11AaD0C46950Fc8a1'
+WALLET_KEY = '0x' + '11' * 32
+ALIAS_KEY = '0x' + '22' * 32
 CENTRAL = 'http://central.test'
 WEI = 10 ** 18
 
@@ -55,14 +55,14 @@ def web():
     app.config['SATORI_API_URL'] = CENTRAL
     client = app.test_client()
     with client.session_transaction() as sess:
-        sess['vault_open'] = True
+        sess['wallet_open'] = True
         sess['session_id'] = 'sid'
     manager = mock.MagicMock()
-    manager.vault = _key(VAULT_KEY)
-    manager.vault.ethAddress = VAULT
-    manager.vault.isDecrypted = True
-    manager.wallet = _key(IDENTITY_KEY)
-    manager.wallet.ethAddress = IDENTITY
+    manager.wallet = _key(WALLET_KEY)
+    manager.wallet.ethAddress = WALLET
+    manager.wallet.isDecrypted = True
+    manager.alias = _key(ALIAS_KEY)
+    manager.alias.ethAddress = ALIAS
     drop = {}
 
     def proof(url, timeout=None):
@@ -73,77 +73,77 @@ def web():
             'amountWei': str(drop[address]), 'proof': ['0x' + 'ab' * 32]}})
 
     claimer = FakeClaimer()
-    with mock.patch.dict(routes._session_vaults, {'sid': manager}), \
-            mock.patch.object(routes, 'get_or_create_session_vault', return_value=manager), \
+    with mock.patch.dict(routes._session_wallets, {'sid': manager}), \
+            mock.patch.object(routes, 'get_or_create_session_wallet', return_value=manager), \
             mock.patch.object(routes, '_base_claimer', return_value=claimer), \
             mock.patch.object(routes.requests, 'get', side_effect=proof):
         yield client, drop.update, claimer
 
 
-def test_claimable_shows_vault_and_identity(web):
+def test_claimable_shows_wallet_and_alias(web):
     client, set_drop, claimer = web
-    set_drop({VAULT: 10 * WEI, IDENTITY: 3 * WEI})
-    claimer.minted = {VAULT: 4 * WEI}
+    set_drop({WALLET: 10 * WEI, ALIAS: 3 * WEI})
+    claimer.minted = {WALLET: 4 * WEI}
     r = client.get('/api/wallet/base/claimable').get_json()
-    assert (r['address'], r['claimable'], r['total'], r['claimed']) == (VAULT, 6.0, 10.0, 4.0)
-    identity = r['identity']
-    assert (identity['address'], identity['claimable'], identity['total']) == (IDENTITY, 3.0, 3.0)
-    assert identity['claimable_wei'] == str(3 * WEI)
+    assert (r['address'], r['claimable'], r['total'], r['claimed']) == (WALLET, 6.0, 10.0, 4.0)
+    alias = r['alias']
+    assert (alias['address'], alias['claimable'], alias['total']) == (ALIAS, 3.0, 3.0)
+    assert alias['claimable_wei'] == str(3 * WEI)
 
 
-def test_claimable_identity_not_in_drop(web):
+def test_claimable_alias_not_in_drop(web):
     client, set_drop, _ = web
-    set_drop({VAULT: WEI})
+    set_drop({WALLET: WEI})
     r = client.get('/api/wallet/base/claimable').get_json()
     assert r['claimable'] == 1.0
-    assert r['identity']['claimable'] == 0
+    assert r['alias']['claimable'] == 0
 
 
-def test_claim_identity_signs_with_identity(web):
+def test_claim_alias_signs_with_alias(web):
     client, set_drop, claimer = web
-    set_drop({IDENTITY: 3 * WEI})
-    claimer.minted = {IDENTITY: WEI}
-    claimer.eth = {IDENTITY: 1}
-    r = client.post('/api/wallet/base/claim', json={'key': 'identity'})
+    set_drop({ALIAS: 3 * WEI})
+    claimer.minted = {ALIAS: WEI}
+    claimer.eth = {ALIAS: 1}
+    r = client.post('/api/wallet/base/claim', json={'key': 'alias'})
     assert r.status_code == 200
     assert r.get_json()['claimed'] == 2.0
-    assert claimer.claims == [(IDENTITY_KEY, 3 * WEI, ['0x' + 'ab' * 32])]
+    assert claimer.claims == [(ALIAS_KEY, 3 * WEI, ['0x' + 'ab' * 32])]
 
 
-def test_claim_identity_without_eth_says_so(web):
+def test_claim_alias_without_eth_says_so(web):
     client, set_drop, claimer = web
-    set_drop({IDENTITY: 3 * WEI})
-    r = client.post('/api/wallet/base/claim', json={'key': 'identity'})
+    set_drop({ALIAS: 3 * WEI})
+    r = client.post('/api/wallet/base/claim', json={'key': 'alias'})
     assert r.status_code == 400
     error = r.get_json()['error']
-    assert 'no ETH' in error and IDENTITY in error
+    assert 'no ETH' in error and ALIAS in error
     assert claimer.claims == []
 
 
-def test_claim_defaults_to_vault(web):
+def test_claim_defaults_to_wallet(web):
     client, set_drop, claimer = web
-    set_drop({VAULT: 2 * WEI, IDENTITY: 3 * WEI})
-    claimer.eth = {VAULT: 1}
+    set_drop({WALLET: 2 * WEI, ALIAS: 3 * WEI})
+    claimer.eth = {WALLET: 1}
     r = client.post('/api/wallet/base/claim')
     assert r.status_code == 200
-    assert claimer.claims == [(VAULT_KEY, 2 * WEI, ['0x' + 'ab' * 32])]
+    assert claimer.claims == [(WALLET_KEY, 2 * WEI, ['0x' + 'ab' * 32])]
 
 
-def test_balances_shows_vault_and_identity(web):
+def test_balances_shows_wallet_and_alias(web):
     client, _, claimer = web
-    claimer.satori = {VAULT: 250 * WEI}
-    claimer.eth = {VAULT: WEI // 100, IDENTITY: WEI // 20}
+    claimer.satori = {WALLET: 250 * WEI}
+    claimer.eth = {WALLET: WEI // 100, ALIAS: WEI // 20}
     r = client.get('/api/wallet/base/balances').get_json()
-    assert (r['vault']['address'], r['vault']['satori'], r['vault']['eth']) == (VAULT, 250.0, 0.01)
-    assert r['vault']['satori_wei'] == str(250 * WEI)
-    assert (r['identity']['address'], r['identity']['satori'], r['identity']['eth']) == (IDENTITY, 0.0, 0.05)
+    assert (r['wallet']['address'], r['wallet']['satori'], r['wallet']['eth']) == (WALLET, 250.0, 0.01)
+    assert r['wallet']['satori_wei'] == str(250 * WEI)
+    assert (r['alias']['address'], r['alias']['satori'], r['alias']['eth']) == (ALIAS, 0.0, 0.05)
 
 
 def test_balances_one_failed_read_keeps_the_other(web):
     client, _, claimer = web
-    claimer.satori = {VAULT: RuntimeError('rpc down'), IDENTITY: WEI}
+    claimer.satori = {WALLET: RuntimeError('rpc down'), ALIAS: WEI}
     r = client.get('/api/wallet/base/balances')
     assert r.status_code == 200
     body = r.get_json()
-    assert body['vault'] == {'address': VAULT, 'error': 'rpc down'}
-    assert body['identity']['satori'] == 1.0
+    assert body['wallet'] == {'address': WALLET, 'error': 'rpc down'}
+    assert body['alias']['satori'] == 1.0
