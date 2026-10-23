@@ -272,40 +272,40 @@ def test_multiple_topics_tracked_separately(client_instance):
 
 
 @pytest.mark.unit
-def test_client_initialization(test_wallet, test_server_url):
+def test_client_initialization(test_alias, test_server_url):
     """Test SatoriServerClient initializes correctly."""
     from satorilib.server.server import SatoriServerClient
 
     client = SatoriServerClient(
-        wallet=test_wallet,
+        alias=test_alias,
         url=test_server_url
     )
 
-    assert client.wallet == test_wallet
+    assert client.alias == test_alias
     assert client.url == test_server_url
     assert isinstance(client.topicTime, dict)
     assert client.lastCheckin == 0
 
 
 @pytest.mark.unit
-def test_client_uses_environment_variable_for_url(test_wallet):
+def test_client_uses_environment_variable_for_url(test_alias):
     """Test client uses SATORI_CENTRAL_URL environment variable."""
     from satorilib.server.server import SatoriServerClient
 
     with patch.dict('os.environ', {'SATORI_CENTRAL_URL': 'http://custom-server:9000'}):
-        client = SatoriServerClient(wallet=test_wallet)
+        client = SatoriServerClient(alias=test_alias)
 
         assert client.url == 'http://custom-server:9000'
 
 
 @pytest.mark.unit
-def test_client_defaults_to_localhost(test_wallet):
+def test_client_defaults_to_localhost(test_alias):
     """Test client defaults to localhost when no env var set."""
     from satorilib.server.server import SatoriServerClient
 
     with patch.dict('os.environ', {}, clear=True):
         # Remove SATORI_CENTRAL_URL if it exists
-        client = SatoriServerClient(wallet=test_wallet)
+        client = SatoriServerClient(alias=test_alias)
 
         assert 'localhost:8000' in client.url or client.url == 'http://localhost:8000'
 

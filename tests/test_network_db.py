@@ -614,3 +614,50 @@ class TestMeta:
         db.set_meta('market', '{"sales": {}}')
         db.set_meta('market', '{"sales": {"a": 1}}')
         assert db.get_meta('market') == '{"sales": {"a": 1}}'
+
+
+# ── The alias pubkey columns ──────────────────────────────────────
+
+
+class TestAliasPubkeyColumns:
+    """subscriptions.provider_alias_pubkey and bounty_predictions.predictor_alias_pubkey."""
+
+    def test_a_new_database_has_them(self, db):
+        conn = db._get_conn()
+        subs = {r[1] for r in conn.execute('PRAGMA table_info(subscriptions)')}
+        preds = {r[1] for r in conn.execute('PRAGMA table_info(bounty_predictions)')}
+        assert 'provider_alias_pubkey' in subs and 'provider_wallet_pubkey' not in subs
+        assert 'predictor_alias_pubkey' in preds and 'predictor_wallet_pubkey' not in preds
+
+    def test_an_older_database_keeps_its_keys_under_the_new_names(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'older.db')
+            conn = sqlite3.connect(path)
+            conn.execute(
+                'CREATE TABLE subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+                'stream_name TEXT NOT NULL, relay_url TEXT NOT NULL, '
+                'provider_pubkey TEXT NOT NULL, provider_wallet_pubkey TEXT, '
+                'subscribed_at INTEGER NOT NULL, '
+                'UNIQUE(stream_name, provider_pubkey))')
+            conn.execute(
+                "INSERT INTO subscriptions (stream_name, relay_url, provider_pubkey, "
+                "provider_wallet_pubkey, subscribed_at) VALUES ('s', 'r', 'p', '02aa', 1)")
+            conn.commit()
+            conn.close()
+            db = NetworkDB(path)
+            row = db._get_conn().execute(
+                'SELECT provider_alias_pubkey FROM subscriptions').fetchone()
+            assert row[0] == '02aa'
+
+    def test_subscribe_reads_the_announced_alias_pubkey(self, db, sample_stream):
+        conn = db._get_conn()
+        db.subscribe({**sample_stream, 'metadata': {'alias_pubkey': '02cc'}}, 'wss://r')
+        assert conn.execute(
+            'SELECT provider_alias_pubkey FROM subscriptions').fetchone()[0] == '02cc'
+
+    def test_subscribe_reads_an_older_announcements_wallet_pubkey_as_the_alias(self, db, sample_stream):
+        conn = db._get_conn()
+        db.subscribe({**sample_stream, 'metadata': {'wallet_pubkey': '02dd'}}, 'wss://r')
+        assert conn.execute(
+            'SELECT provider_alias_pubkey FROM subscriptions').fetchone()[0] == '02dd'

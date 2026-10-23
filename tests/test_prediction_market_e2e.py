@@ -3,18 +3,18 @@
 Exercises the full predictor→host→payment path without mocking the pieces
 under test:
 
-  1. A predictor builds a PredictionSubmission (with wallet pubkey) and
+  1. A predictor builds a PredictionSubmission (with alias pubkey) and
      delivers it to the host via the same save path the real listener uses.
   2. The host's scoring pipeline runs on a new observation using
      compute_payouts + the MAE scorer.
-  3. The wallet pubkey is read from the bounty_predictions table
-     (not from subscriptions) — this is the fix for the wallet-lookup bug.
+  3. The alias pubkey is read from the bounty_predictions table
+     (not from subscriptions) — this is the fix for the alias-lookup bug.
   4. A simulated channel payment is recorded in bounty_payments.
   5. The leaderboard and host stats reflect the real numbers.
 
 The payment primitives (openChannel, sendChannelPayment) are replaced with
-deterministic stubs because they otherwise require a live wallet + relay.
-Everything else — DB writes, scoring, wallet-pubkey propagation — is real.
+deterministic stubs because they otherwise require a live alias + relay.
+Everything else — DB writes, scoring, alias-pubkey propagation — is real.
 """
 
 import importlib.util
@@ -50,17 +50,17 @@ class FakePaymentAdapter:
 
     Mirrors what _bountyPayPredictor does: opens a channel if needed,
     then sends a payment. Here we just record the calls so the test can
-    assert the correct wallet pubkey was resolved and routed to.
+    assert the correct alias pubkey was resolved and routed to.
     """
     def __init__(self):
-        self.channels: dict[str, dict] = {}  # receiver_wallet -> channel dict
-        self.payments: list[dict] = []  # list of {receiver_wallet, sats, stream}
+        self.channels: dict[str, dict] = {}  # receiver_alias -> channel dict
+        self.payments: list[dict] = []  # list of {receiver_alias, sats, stream}
 
-    def open_channel(self, receiver_wallet_pubkey: str, amount_sats: int) -> str:
-        p2sh = f'p2sh_for_{receiver_wallet_pubkey}'
-        self.channels[receiver_wallet_pubkey] = {
+    def open_channel(self, receiver_alias_pubkey: str, amount_sats: int) -> str:
+        p2sh = f'p2sh_for_{receiver_alias_pubkey}'
+        self.channels[receiver_alias_pubkey] = {
             'p2sh_address': p2sh,
-            'receiver_pubkey': receiver_wallet_pubkey,
+            'receiver_pubkey': receiver_alias_pubkey,
             'remainder_sats': amount_sats,
         }
         return p2sh
@@ -77,8 +77,8 @@ class FakePaymentAdapter:
             'stream_name': stream_name,
         })
 
-    def get_channel_for(self, receiver_wallet_pubkey: str, min_sats: int):
-        ch = self.channels.get(receiver_wallet_pubkey)
+    def get_channel_for(self, receiver_alias_pubkey: str, min_sats: int):
+        ch = self.channels.get(receiver_alias_pubkey)
         if ch and ch['remainder_sats'] >= min_sats:
             return ch
         return None
@@ -96,7 +96,7 @@ def score_and_pay(
     """Host-side pipeline that mirrors _bountyScoreAndPay +
     _bountyPayPredictor without async/network concerns.
 
-    The purpose is to hit the exact same wallet-lookup-from-predictions
+    The purpose is to hit the exact same alias-lookup-from-predictions
     path that the real code uses, so the test exercises the bug fix.
     """
     bounty = db.get_bounty(
@@ -118,17 +118,17 @@ def score_and_pay(
 
     for predictor_pubkey, sats in payouts.items():
         row = preds_by_pubkey.get(predictor_pubkey) or {}
-        wallet_pubkey = row.get('predictor_wallet_pubkey')
-        if not wallet_pubkey:
-            # This is the bug-fix gate: if wallet pubkey wasn't carried
+        alias_pubkey = row.get('predictor_alias_pubkey')
+        if not alias_pubkey:
+            # This is the bug-fix gate: if alias pubkey wasn't carried
             # through, we skip. In the broken code this was always the
             # outcome — the test asserts it is NOT the outcome here.
             continue
 
-        channel = payment_adapter.get_channel_for(wallet_pubkey, sats)
+        channel = payment_adapter.get_channel_for(alias_pubkey, sats)
         if not channel:
-            p2sh = payment_adapter.open_channel(wallet_pubkey, 1_000_000)
-            channel = payment_adapter.get_channel_for(wallet_pubkey, sats)
+            p2sh = payment_adapter.open_channel(alias_pubkey, 1_000_000)
+            channel = payment_adapter.get_channel_for(alias_pubkey, sats)
             assert channel is not None
 
         payment_adapter.send_payment(channel['p2sh_address'], sats, stream_name)
@@ -176,10 +176,10 @@ def _add_bounty(db, pay=1000, paid_predictors=3):
     )
 
 
-def _predictor_submits(db, predictor_pk, wallet_pk, predicted_value,
+def _predictor_submits(db, predictor_pk, alias_pk, predicted_value,
                        seq_num=1):
     """Simulate a prediction DM arriving at the host: save to DB with
-    wallet pubkey, the same way _incomingPredictionsLoop does."""
+    alias pubkey, the same way _incomingPredictionsLoop does."""
     db.save_bounty_prediction(
         stream_name=STREAM,
         stream_provider_pubkey=PROVIDER_PK,
@@ -188,37 +188,37 @@ def _predictor_submits(db, predictor_pk, wallet_pk, predicted_value,
         seq_num=seq_num,
         predicted_value=str(predicted_value),
         received_at=int(time.time()),
-        predictor_wallet_pubkey=wallet_pk,
+        predictor_alias_pubkey=alias_pk,
     )
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
-class TestWalletPubkeyPropagation:
-    """BUG #1 — wallet pubkey must be read from the predictions table,
+class TestAliasPubkeyPropagation:
+    """BUG #1 — alias pubkey must be read from the predictions table,
     not looked up via subscriptions/get_active."""
 
-    def test_wallet_pubkey_stored_with_prediction(self, db):
+    def test_alias_pubkey_stored_with_prediction(self, db):
         _add_bounty(db)
-        _predictor_submits(db, 'alice_nostr', 'alice_wallet', 100.0)
+        _predictor_submits(db, 'alice_nostr', 'alice_alias', 100.0)
 
         rows = db.get_bounty_predictions(STREAM, PROVIDER_PK, 1)
         assert len(rows) == 1
-        assert rows[0]['predictor_wallet_pubkey'] == 'alice_wallet'
+        assert rows[0]['predictor_alias_pubkey'] == 'alice_alias'
 
-    def test_payment_flows_to_wallet_from_prediction_row(self, db, adapter):
+    def test_payment_flows_to_alias_from_prediction_row(self, db, adapter):
         _add_bounty(db)
-        _predictor_submits(db, 'alice_nostr', 'alice_wallet', 100.0)
+        _predictor_submits(db, 'alice_nostr', 'alice_alias', 100.0)
 
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
                       seq_num=1, observed_value=100.0)
 
         assert len(adapter.payments) == 1
         assert adapter.payments[0]['sats'] == 1000
-        assert 'alice_wallet' in adapter.channels
+        assert 'alice_alias' in adapter.channels
 
-    def test_predictor_with_no_wallet_pubkey_is_skipped(self, db, adapter):
-        """Safety: if (somehow) the prediction row has no wallet, skip the
+    def test_predictor_with_no_alias_pubkey_is_skipped(self, db, adapter):
+        """Safety: if (somehow) the prediction row has no alias, skip the
         payment rather than crashing or paying the wrong person."""
         _add_bounty(db)
         db.save_bounty_prediction(
@@ -229,7 +229,7 @@ class TestWalletPubkeyPropagation:
             seq_num=1,
             predicted_value='100.0',
             received_at=int(time.time()),
-            predictor_wallet_pubkey=None,
+            predictor_alias_pubkey=None,
         )
 
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
@@ -244,9 +244,9 @@ class TestEndToEndScoringRun:
     def test_three_predictors_one_observation(self, db, adapter):
         _add_bounty(db, pay=1000, paid_predictors=3)
         # Use non-zero errors so inverse-error weighting splits between all three
-        _predictor_submits(db, 'alice', 'alice_wallet', 98.0)    # err=2
-        _predictor_submits(db, 'bob',   'bob_wallet',   95.0)    # err=5
-        _predictor_submits(db, 'carol', 'carol_wallet', 80.0)    # err=20
+        _predictor_submits(db, 'alice', 'alice_alias', 98.0)    # err=2
+        _predictor_submits(db, 'bob',   'bob_alias',   95.0)    # err=5
+        _predictor_submits(db, 'carol', 'carol_alias', 80.0)    # err=20
 
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
                       seq_num=1, observed_value=100.0)
@@ -255,10 +255,10 @@ class TestEndToEndScoringRun:
         assert len(adapter.payments) == 3
         # Total pot respected
         assert sum(p['sats'] for p in adapter.payments) <= 1000
-        # All three wallets had channels opened
-        assert 'alice_wallet' in adapter.channels
-        assert 'bob_wallet' in adapter.channels
-        assert 'carol_wallet' in adapter.channels
+        # All three aliases had channels opened
+        assert 'alice_alias' in adapter.channels
+        assert 'bob_alias' in adapter.channels
+        assert 'carol_alias' in adapter.channels
 
         # bounty_payments table populated
         pays = db.get_bounty_payments(STREAM, PROVIDER_PK)
@@ -271,27 +271,27 @@ class TestEndToEndScoringRun:
     def test_paid_predictors_cap_honoured(self, db, adapter):
         """paid_predictors=2 means only the top 2 get paid even with 3 submissions."""
         _add_bounty(db, pay=1000, paid_predictors=2)
-        _predictor_submits(db, 'alice', 'alice_wallet', 100.0)
-        _predictor_submits(db, 'bob',   'bob_wallet',    95.0)
-        _predictor_submits(db, 'carol', 'carol_wallet',  50.0)
+        _predictor_submits(db, 'alice', 'alice_alias', 100.0)
+        _predictor_submits(db, 'bob',   'bob_alias',    95.0)
+        _predictor_submits(db, 'carol', 'carol_alias',  50.0)
 
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
                       seq_num=1, observed_value=100.0)
 
         assert len(adapter.payments) == 2
-        paid_wallets = set(adapter.channels.keys())
-        assert paid_wallets == {'alice_wallet', 'bob_wallet'}
+        paid_aliases = set(adapter.channels.keys())
+        assert paid_aliases == {'alice_alias', 'bob_alias'}
 
     def test_leaderboard_aggregates_multiple_observations(self, db, adapter):
         _add_bounty(db, pay=1000, paid_predictors=2)
         # seq 1
-        _predictor_submits(db, 'alice', 'alice_wallet', 100.0, seq_num=1)
-        _predictor_submits(db, 'bob',   'bob_wallet',    50.0, seq_num=1)
+        _predictor_submits(db, 'alice', 'alice_alias', 100.0, seq_num=1)
+        _predictor_submits(db, 'bob',   'bob_alias',    50.0, seq_num=1)
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
                       seq_num=1, observed_value=100.0)
         # seq 2
-        _predictor_submits(db, 'alice', 'alice_wallet', 200.0, seq_num=2)
-        _predictor_submits(db, 'bob',   'bob_wallet',   150.0, seq_num=2)
+        _predictor_submits(db, 'alice', 'alice_alias', 200.0, seq_num=2)
+        _predictor_submits(db, 'bob',   'bob_alias',   150.0, seq_num=2)
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
                       seq_num=2, observed_value=200.0)
 
@@ -314,7 +314,7 @@ class TestNonNumericObservation:
 
     def test_non_numeric_value_does_not_crash(self, db, adapter):
         _add_bounty(db)
-        _predictor_submits(db, 'alice', 'alice_wallet', 100.0)
+        _predictor_submits(db, 'alice', 'alice_alias', 100.0)
 
         # Should silently skip rather than raise
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
@@ -383,13 +383,13 @@ class TestLateArrival:
     def test_late_prediction_gets_scored_on_second_pass(self, db, adapter):
         _add_bounty(db, pay=1000, paid_predictors=2)
         # Alice predicts early, observation arrives, she gets paid
-        _predictor_submits(db, 'alice', 'alice_wallet', 100.0)
+        _predictor_submits(db, 'alice', 'alice_alias', 100.0)
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
                       seq_num=1, observed_value=100.0)
         assert len(db.get_bounty_payments(STREAM, PROVIDER_PK)) == 1
 
         # Bob's prediction shows up late (after scoring already ran)
-        _predictor_submits(db, 'bob', 'bob_wallet', 95.0)
+        _predictor_submits(db, 'bob', 'bob_alias', 95.0)
         # Re-running the pipeline picks Bob up and pays him too
         score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
                       seq_num=1, observed_value=100.0)

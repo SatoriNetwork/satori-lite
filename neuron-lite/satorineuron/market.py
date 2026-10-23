@@ -5,10 +5,10 @@ and fields.
 
   sell: a publication priced with price_per_obs (satoshis, 10^-8 SATORI) is
   announced encrypted, with metadata.market = {chain, contract, token, payee:
-  the vault}; each observation goes to each buyer in good standing.
-  buy: the vault opens a channel (deposit 100 × the price by default), the
-  34602 names it with the identity's binding; each delivery received → the
-  identity's next cumulative voucher in a 34603 for seq + 1.
+  the wallet}; each observation goes to each buyer in good standing.
+  buy: the wallet opens a channel (deposit 100 × the price by default), the
+  34602 names it with the alias's binding; each delivery received → the
+  alias's next cumulative voucher in a 34603 for seq + 1.
   The seller checks the channel on chain and each voucher, settles at most
   once a day (settleMany), and stops on an unsubscribe or a close request;
   a buyer's Stop asks to close (requestClose) and withdraws after the grace
@@ -82,18 +82,18 @@ class Market:
     """
     db: get_meta(key) / set_meta(key, text) (network_db)
     nostr_pubkey: our Nostr key (hex)
-    identity_key: () → the identity's 0x key: vouchers, the binding, settle, close, withdraw
-    vault_address: () → the vault's address (the seller's payee), or None
+    alias_key: () → the alias's 0x key: vouchers, the binding, settle, close, withdraw
+    wallet_address: () → the wallet's address (the seller's payee), or None
     chain: () → satorilib's PaymentChannels on the current chain
     send: async subscription(provider, stream, payment_channel), unsubscribe(provider, stream),
           payment(provider, stream, seq, amount_sats, voucher), deliver(observation, buyer) → a relay took it
     prices: () → {stream: price_per_obs (satoshis)} of our priced publications
     """
 
-    def __init__(self, db, nostr_pubkey, identity_key, vault_address, chain, send, chain_id, contract, token,
+    def __init__(self, db, nostr_pubkey, alias_key, wallet_address, chain, send, chain_id, contract, token,
                  prices, now=time.time):
         self.db, self.pubkey, self.send = db, nostr_pubkey, send
-        self._identity, self._vault_address, self._chain, self._prices = identity_key, vault_address, chain, prices
+        self._alias, self._wallet_address, self._chain, self._prices = alias_key, wallet_address, chain, prices
         self.chain_id, self.contract, self.token = int(chain_id), contract, token
         self._now = now
         self.m = {'sales': {}, 'buys': {}, 'settled_at': 0}
@@ -113,10 +113,10 @@ class Market:
     async def _save(self):
         await asyncio.to_thread(self.db.set_meta, 'market', json.dumps(self.m))
 
-    def _need_identity(self):
-        key = self._identity()
+    def _need_alias(self):
+        key = self._alias()
         if not key:
-            raise MarketError('No identity to sign with.')
+            raise MarketError('No alias to sign with.')
         return key
 
     def _sales_of(self, stream):
@@ -131,7 +131,7 @@ class Market:
     def listing(self, stream):
         """Its listing for the announcement: price_per_obs (satoshis) and the channel's market, or None when free."""
         sats = self._price(stream)
-        payee = self._vault_address()
+        payee = self._wallet_address()
         if sats <= 0 or not payee:
             return None
         return {'price_per_obs': sats,
@@ -191,7 +191,7 @@ class Market:
             return  # seen (a relay sends it again on each connect)
         ch = await asyncio.to_thread(self._chain().read_channel, cid)
         signer = binding_signer(cid, buyer, c.get('binding'))
-        if (not ch or not same(ch['payee'], self._vault_address()) or not same(ch['token'], self.token)
+        if (not ch or not same(ch['payee'], self._wallet_address()) or not same(ch['token'], self.token)
                 or not same(ch['signer'], signer) or ch['closed'] or ch['close_requested_at']
                 or ch['deposit'] - ch['settled'] < price or cid in self.m['sales']):
             return
@@ -227,11 +227,11 @@ class Market:
 
     async def _collect(self):
         """Once a day at most: every sale's newest voucher above what is settled, in one transaction (the
-        seller's identity, into the vault). A closing sale goes once nothing is due."""
+        seller's alias, into the wallet). A closing sale goes once nothing is due."""
         sales = list(self.m['sales'].values())
         due = [s for s in sales if s['signature'] and s['cumulative'] > s['settled']]
         if due and self._t() - self.m.get('settled_at', 0) >= SETTLE_EVERY_S:
-            r = await asyncio.to_thread(self._chain().settle_many, self._need_identity(),
+            r = await asyncio.to_thread(self._chain().settle_many, self._need_alias(),
                                         [{'id': s['channel'], 'cumulative': s['cumulative'], 'signature': s['signature']}
                                          for s in due])
             for x in r['settled']:
@@ -255,17 +255,17 @@ class Market:
 
     def _payment_channel(self, b):
         return {'chain': self.chain_id, 'contract': self.contract, 'id': b['channel'],
-                'binding': sign_binding(self._need_identity(), b['channel'], self.pubkey)}
+                'binding': sign_binding(self._need_alias(), b['channel'], self.pubkey)}
 
     def payment_channel(self, provider, stream):
         """The 34602's payment_channel for a stream we buy (Lite re-sends its subscription), or None."""
         b = self._open_buy(provider, stream)
         return self._payment_channel(b) if b else None
 
-    async def buy(self, entry, deposit=None, vault_key=None):
-        """Buy a listed stream (`entry`: its discovered catalog entry): the vault (`vault_key`, unlocked) opens a
+    async def buy(self, entry, deposit=None, wallet_key=None):
+        """Buy a listed stream (`entry`: its discovered catalog entry): the wallet (`wallet_key`, unlocked) opens a
         channel to the payee with `deposit` (wei; 100 observations by default), then the 34602 names it with the
-        identity's binding to our Nostr key. → its view"""
+        alias's binding to our Nostr key. → its view"""
         listing = listing_of(entry, self.chain_id, self.contract, self.token)
         if not listing:
             raise MarketError('That stream is not for sale on the Satori contract.')
@@ -276,11 +276,11 @@ class Market:
         amount = deposit if deposit is not None else listing['price'] * DEPOSIT_OBS
         if amount < listing['price']:
             raise MarketError(f'The deposit must cover at least one observation ({sat(listing["price"])} SATORI).')
-        if not vault_key:
-            raise MarketError('Unlock the vault first')
-        identity = self._need_identity()
+        if not wallet_key:
+            raise MarketError('Unlock the wallet first')
+        alias = self._need_alias()
         try:
-            r = await asyncio.to_thread(self._chain().open_channel, vault_key, Account.from_key(identity).address,
+            r = await asyncio.to_thread(self._chain().open_channel, wallet_key, Account.from_key(alias).address,
                                         listing['payee'], amount)
         except Exception as e:
             raise MarketError(channel_error_text(e)) from e
@@ -293,7 +293,7 @@ class Market:
         return self._view(cid)
 
     async def received(self, provider, stream, seq):
-        """A delivery to us of a stream we buy (already decrypted by satorilib): paid with the identity's next
+        """A delivery to us of a stream we buy (already decrypted by satorilib): paid with the alias's next
         voucher (never past the deposit), sent in a 34603 for seq + 1. → the voucher, or None"""
         b = self._open_buy(provider, stream)
         if not b or (b['seq'] is not None and seq <= b['seq']):
@@ -303,7 +303,7 @@ class Market:
         if nxt > b['deposit']:
             await self._save()
             return None
-        signature = sign_voucher(self._need_identity(), self.chain_id, b['channel'], nxt, self.contract)
+        signature = sign_voucher(self._need_alias(), self.chain_id, b['channel'], nxt, self.contract)
         b['cumulative'] = nxt
         await self._save()  # kept before it is sent: a restart never signs it again
         voucher = {'channel': b['channel'], 'cumulative': str(nxt), 'signature': signature}
@@ -314,14 +314,14 @@ class Market:
         return voucher
 
     async def stop(self, provider, stream):
-        """Stop: the identity asks to close the channel (no Unlock), then Lite's unsubscribe; the refund comes
+        """Stop: the alias asks to close the channel (no Unlock), then Lite's unsubscribe; the refund comes
         after the 7-day grace period. → its view"""
         b = self._open_buy(provider, stream)
         if not b:
             raise MarketError(f'Not buying {stream} from {provider[:8]}….')
         chans = self._chain()
         try:
-            await asyncio.to_thread(chans.request_close, self._need_identity(), b['channel'])
+            await asyncio.to_thread(chans.request_close, self._need_alias(), b['channel'])
         except Exception as e:
             raise MarketError(channel_error_text(e)) from e
         ch = await asyncio.to_thread(chans.read_channel, b['channel'])
@@ -338,7 +338,7 @@ class Market:
     async def pass_(self):
         """Each sale's channel read again (its deposit, what is settled, a close asked: no more deliveries,
         closed: gone), then at most once a day one settleMany for every voucher above what is settled; each
-        bought channel whose grace period has ended is withdrawn (the refund to the vault)."""
+        bought channel whose grace period has ended is withdrawn (the refund to the wallet)."""
         try:
             sales = list(self.m['sales'].values())
             closing = [b for b in self.m['buys'].values() if b['status'] == 'closing']
@@ -362,8 +362,8 @@ class Market:
                 if ch and not ch['closed'] and not (ch['grace_ends_at'] is not None and ch['grace_ends_at'] <= at):
                     continue  # its grace period runs
                 if ch and not ch['closed']:
-                    await asyncio.to_thread(chans.withdraw, self._need_identity(), b['channel'])
-                del self.m['buys'][b['channel']]  # refunded to the vault
+                    await asyncio.to_thread(chans.withdraw, self._need_alias(), b['channel'])
+                del self.m['buys'][b['channel']]  # refunded to the wallet
             await self._save()
             self.last_error = None
         except Exception as e:

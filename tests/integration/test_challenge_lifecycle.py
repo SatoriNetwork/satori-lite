@@ -10,7 +10,7 @@ import time
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_challenge_token_single_use_consumption(server_url, server_available, test_wallet):
+def test_challenge_token_single_use_consumption(server_url, server_available, test_alias):
     """Test that challenge token can only be used once (consumed after auth)."""
     # Get a challenge token
     response = requests.get(f"{server_url}/api/v1/auth/challenge")
@@ -18,7 +18,7 @@ def test_challenge_token_single_use_consumption(server_url, server_available, te
     challenge = response.json()["challenge"]
 
     # Create auth headers
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge)
 
     # First attempt: use the challenge
     response1 = requests.get(
@@ -80,7 +80,7 @@ def test_challenge_token_format_consistency(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_expired_challenge_rejected(server_url, server_available, test_wallet):
+def test_expired_challenge_rejected(server_url, server_available, test_alias):
     """Test that expired challenge tokens are rejected.
 
     Note: Challenge tokens expire after 60 seconds.
@@ -91,7 +91,7 @@ def test_expired_challenge_rejected(server_url, server_available, test_wallet):
     challenge = response.json()["challenge"]
 
     # Immediately try to use it (should work or fail auth, but not fail expiration)
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge)
     response = requests.get(f"{server_url}/api/v1/balance/get", headers=headers)
 
     # Should get either success (200) or auth failure (401), but not expiration error
@@ -156,7 +156,7 @@ def test_challenge_storage_memory_bounds(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_invalid_challenge_token_format_rejected(server_url, server_available, test_wallet):
+def test_invalid_challenge_token_format_rejected(server_url, server_available, test_alias):
     """Test that malformed challenge tokens are rejected."""
     # Use an invalid challenge format
     invalid_challenges = [
@@ -168,7 +168,7 @@ def test_invalid_challenge_token_format_rejected(server_url, server_available, t
     ]
 
     for invalid_challenge in invalid_challenges:
-        headers = test_wallet.authPayload(asDict=True, challenge=invalid_challenge)
+        headers = test_alias.authPayload(asDict=True, challenge=invalid_challenge)
 
         response = requests.get(
             f"{server_url}/api/v1/balance/get",
@@ -196,7 +196,7 @@ def test_challenge_response_structure(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_concurrent_auth_with_different_challenges(server_url, server_available, test_wallet):
+def test_concurrent_auth_with_different_challenges(server_url, server_available, test_alias):
     """Test that concurrent authentications with different challenges work."""
     from concurrent.futures import ThreadPoolExecutor
 
@@ -209,7 +209,7 @@ def test_concurrent_auth_with_different_challenges(server_url, server_available,
         challenge = challenge_resp.json()["challenge"]
 
         # Try to authenticate
-        headers = test_wallet.authPayload(asDict=True, challenge=challenge)
+        headers = test_alias.authPayload(asDict=True, challenge=challenge)
         auth_resp = requests.get(f"{server_url}/api/v1/balance/get", headers=headers)
 
         # Should either succeed or fail auth (not crash)

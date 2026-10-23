@@ -35,9 +35,9 @@ def test_set_reward_address_requires_auth(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.peer
-def test_get_reward_address_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_get_reward_address_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test GET reward address with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.get(
         f"{server_url}/api/v1/peer/reward-address",
@@ -50,9 +50,9 @@ def test_get_reward_address_with_invalid_auth(server_url, server_available, chal
 
 @pytest.mark.integration
 @pytest.mark.peer
-def test_set_reward_address_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_set_reward_address_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test POST reward address with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.post(
         f"{server_url}/api/v1/peer/reward-address",
@@ -66,9 +66,9 @@ def test_set_reward_address_with_invalid_auth(server_url, server_available, chal
 
 @pytest.mark.integration
 @pytest.mark.peer
-def test_reward_address_payload_structure(server_url, server_available, challenge_token, test_wallet):
+def test_reward_address_payload_structure(server_url, server_available, challenge_token, test_alias):
     """Test reward address payload is correctly structured."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     payload = {"reward_address": REWARD_ADDRESS}
 
@@ -86,9 +86,9 @@ def test_reward_address_payload_structure(server_url, server_available, challeng
 
 @pytest.mark.integration
 @pytest.mark.peer
-def test_get_reward_address_response_structure(server_url, server_available, challenge_token, test_wallet):
+def test_get_reward_address_response_structure(server_url, server_available, challenge_token, test_alias):
     """Test GET reward address response structure (via error response)."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.get(
         f"{server_url}/api/v1/peer/reward-address",

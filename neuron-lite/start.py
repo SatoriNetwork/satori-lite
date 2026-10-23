@@ -11,13 +11,12 @@ import yaml
 from satorilib.concepts.structs import StreamId, Stream
 from satorilib.concepts import constants
 from satorilib.wallet import EvrmoreWallet
-from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.server import SatoriServerClient
 from satorineuron import logging
 from satorineuron import config
 from satorineuron import VERSION
 from satorineuron.relay_manager import LocalRelayManager
-from satorineuron.init.wallet import WalletManager
+from satorineuron.init.wallet import WalletManager, readWalletLink
 from satorineuron.structs.start import RunMode, StartupDagStruct
 # from satorilib.utils.ip import getPublicIpv4UsingCurl  # Removed - not needed
 from satoriengine.veda.engine import Engine
@@ -140,7 +139,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._engineLock: threading.RLock = threading.RLock()
         self.publications: list[Stream] = []  # Keep for engine
         self.subscriptions: list[Stream] = []  # Keep for engine
-        self.identity: EvrmoreIdentity = EvrmoreIdentity(config.walletPath('wallet.yaml'))
+        # the wallet's Base address the Satori Network pays (its register answer)
+        self.linkedWalletAddress: Optional[str] = None
         self.nostrPubkey: Optional[str] = self._initNostrKeys()
         self.localRelay = LocalRelayManager(self)
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
@@ -189,7 +189,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         Returns the 64-char lowercase hex public key, or None on failure.
         """
-        nostrPath = config.walletPath('nostr.yaml')
+        nostrPath = config.keysPath('nostr.yaml')
         try:
             if os.path.exists(nostrPath):
                 with open(nostrPath, 'r') as f:
@@ -230,7 +230,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not self.nostrPubkey:
             logging.info('Network client not started: missing keys', color='yellow')
             return
-        nostrPath = config.walletPath('nostr.yaml')
+        nostrPath = config.keysPath('nostr.yaml')
         try:
             with open(nostrPath, 'r') as f:
                 data = yaml.safe_load(f)
@@ -693,7 +693,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     obs.stream_name,
                     obs.nostr_pubkey,
                     obs.observation)
-            # A paid delivery of a stream we buy: the identity's next voucher
+            # A paid delivery of a stream we buy: the alias's next voucher
             if obs.paid and self.market is not None:
                 try:
                     await self.market.received(
@@ -780,15 +780,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 compute_payouts, bounty, predictions, observed_value,
                 observed_at, prev_observed_at)
 
-            # Index predictions by pubkey so we can look up wallet pubkey
+            # Index predictions by pubkey so we can look up the alias pubkey
             preds_by_pubkey = {
                 row['predictor_pubkey']: row for row in predictions}
 
             for pubkey, sats in payouts.items():
                 row = preds_by_pubkey.get(pubkey)
-                wallet_pubkey = (row or {}).get('predictor_wallet_pubkey')
+                alias_pubkey = (row or {}).get('predictor_alias_pubkey')
                 await self._bountyPayPredictor(
-                    pubkey, wallet_pubkey, sats,
+                    pubkey, alias_pubkey, sats,
                     stream_name, provider_pubkey, seq_num)
         except Exception as e:
             logging.warning(f'Bounty: score-and-pay failed: {e}')
@@ -838,7 +838,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     async def _bountyPayPredictor(
         self,
         predictor_nostr_pubkey: str,
-        predictor_wallet_pubkey: Optional[str],
+        predictor_alias_pubkey: Optional[str],
         sats: int,
         stream_name: str,
         provider_pubkey: str,
@@ -848,7 +848,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         Always records the payment obligation in the DB (for leaderboard /
         accountability) even if the actual channel payment fails.  The channel
-        payment is best-effort — wallet balance or network issues should not
+        payment is best-effort — the alias's balance or network issues should not
         prevent scoring results from being persisted.
         """
         import time as _time
@@ -874,9 +874,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
 
         # Now attempt the actual channel payment (best-effort)
-        if not predictor_wallet_pubkey:
+        if not predictor_alias_pubkey:
             logging.warning(
-                f'Bounty: no wallet pubkey for predictor '
+                f'Bounty: no alias pubkey for predictor '
                 f'{predictor_nostr_pubkey[:12]}…, payment recorded but '
                 f'channel transfer skipped')
             return
@@ -886,7 +886,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self.networkDB.get_channels_as_sender)
             channel = next(
                 (c for c in channels
-                 if c['receiver_pubkey'] == predictor_wallet_pubkey
+                 if c['receiver_pubkey'] == predictor_alias_pubkey
                  and c['remainder_sats'] >= sats),
                 None)
             if not channel:
@@ -894,11 +894,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 timeout_minutes = self._channelTimeoutMinutes()
                 logging.info(
                     f'Bounty: opening channel to predictor '
-                    f'{predictor_wallet_pubkey[:16]}… '
+                    f'{predictor_alias_pubkey[:16]}… '
                     f'fund={fund_sats} sats',
                     color='cyan')
                 p2sh = await self.openChannel(
-                    receiver_pubkey=predictor_wallet_pubkey,
+                    receiver_pubkey=predictor_alias_pubkey,
                     amount_sats=fund_sats,
                     minutes=timeout_minutes,
                     receiver_nostr_pubkey=predictor_nostr_pubkey,
@@ -908,7 +908,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if not channel or channel['remainder_sats'] < sats:
                     logging.warning(
                         f'Bounty: channel insufficient for '
-                        f'{sats} sats to {predictor_wallet_pubkey[:16]}… '
+                        f'{sats} sats to {predictor_alias_pubkey[:16]}… '
                         f'(payment recorded, transfer pending)')
                     return
 
@@ -1025,8 +1025,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         forecast from the local DB (kept fresh by the subscription) — the same
         pull-and-predict-all pattern we use for central streams — derive up/down
         for each, and submit them ALL in ONE on-chain batch (the contract allows
-        one prediction tx per day). Signs with the IDENTITY wallet (the vault
-        delegated its prediction power to it), so no vault unlock is needed.
+        one prediction tx per day). Signs with the alias (the wallet
+        delegated its prediction power to it), so no wallet unlock is needed.
         Stateless: no in-memory hoarding, no window. Skips if disabled, not
         staked, already predicted this round, or nothing to predict."""
         if not self._basePredictEnabled():
@@ -1041,23 +1041,23 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             from satorineuron.base_config import base_config
             cfg = base_config()
             chain_id = int(cfg.get('chainId', 0))
-            identity = self.wallet
-            address = identity.ethAddress
-            private_key = identity.account.key.to_0x_hex()
+            alias = self.alias
+            address = alias.ethAddress
+            private_key = alias.account.key.to_0x_hex()
             predictor = BasePredictor(
                 rpc_url=cfg['rpcUrl'], engine_address=cfg['engine'],
                 games_address=cfg['games'], hub_address=cfg.get('hub'),
                 rewards_address=cfg['rewards'], registry_address=cfg.get('registry'))
             # Not staked (no delegated power) = predicting would earn nothing.
             if predictor.incoming_delegated_power(address) == 0:
-                vault = None
+                wallet = None
                 try:
-                    pubkey = self.getVaultInfoFromFile().get('pubkey')
-                    vault = evm_address_from_pubkey(pubkey) if pubkey else None
+                    pubkey = self.getWalletInfoFromFile().get('pubkey')
+                    wallet = evm_address_from_pubkey(pubkey) if pubkey else None
                 except Exception:
                     pass
                 logging.info(
-                    f'base predict: skipping, {no_power_reason(predictor, address, vault)}',
+                    f'base predict: skipping, {no_power_reason(predictor, address, wallet)}',
                     color='yellow')
                 return None
             if predictor.already_predicted(address):
@@ -1381,7 +1381,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 streamUuid=sub_uuid,
                 predictionStreamUuid=pub_uuid,
                 server=self.server,
-                wallet=self.wallet,
+                alias=self.alias,
                 subscriptionStream=subscriptionStream,
                 publicationStream=publicationStream,
                 pauseAll=engine.pause,
@@ -1460,7 +1460,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     # ── Paid streams on Base (satorineuron.market) ───────────────────────────
 
     def _networkCreateMarket(self):
-        """The paid-stream market: the vault funds channels, the identity
+        """The paid-stream market: the wallet funds channels, the alias
         signs vouchers and the binding, settles, closes and withdraws."""
         from satorilib.chain.channels import ADDRESS, PaymentChannels
         from satorilib.chain.evm import EvmClient
@@ -1471,15 +1471,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         chans = PaymentChannels(
             EvmClient(cfg['rpcUrl']), int(cfg['chainId']), cfg['token'])
 
-        def identity_key():
+        def alias_key():
             try:
-                return self.wallet.account.key.to_0x_hex()
+                return self.alias.account.key.to_0x_hex()
             except Exception:
                 return None
 
-        def vault_address():
+        def wallet_address():
             try:
-                pubkey = self.getVaultInfoFromFile().get('pubkey')
+                pubkey = self.getWalletInfoFromFile().get('pubkey')
                 return evm_address_from_pubkey(pubkey) if pubkey else None
             except Exception:
                 return None
@@ -1491,7 +1491,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         return Market(
             db=self.networkDB, nostr_pubkey=self.nostrPubkey,
-            identity_key=identity_key, vault_address=vault_address,
+            alias_key=alias_key, wallet_address=wallet_address,
             chain=lambda: chans, send=_MarketRelays(self),
             chain_id=int(cfg['chainId']), contract=ADDRESS,
             token=cfg['token'], prices=prices)
@@ -1538,10 +1538,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return asyncio.run_coroutine_threadsafe(make(), loop).result(
             timeout=timeout)
 
-    def marketBuySync(self, entry: dict, vault_key: str, deposit: int = None):
-        """Buy a priced stream (its discovered entry) with the unlocked vault."""
+    def marketBuySync(self, entry: dict, wallet_key: str, deposit: int = None):
+        """Buy a priced stream (its discovered entry) with the unlocked wallet."""
         return self._marketRun(
-            lambda: self.market.buy(entry, deposit, vault_key=vault_key))
+            lambda: self.market.buy(entry, deposit, wallet_key=wallet_key))
 
     def marketStopSync(self, provider_pubkey: str, stream_name: str):
         """Stop buying: requestClose, then the unsubscribe."""
@@ -1736,10 +1736,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """Save an incoming channel open announcement to the DB (receiver side).
 
         Only saves if the receiver_pubkey in the announcement matches our own
-        wallet pubkey. Silently ignores announcements intended for others.
+        alias pubkey. Silently ignores announcements intended for others.
         """
         co = inbound.channel_open
-        if co.receiver_pubkey != self.wallet.pubkey:
+        if co.receiver_pubkey != self.alias.pubkey:
             return
         existing = await asyncio.to_thread(
             self.networkDB.get_channel, co.p2sh_address)
@@ -1827,7 +1827,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Only the receiver should process inbound commitments.
         # The sender also knows about the channel (it opened it) and sees the
         # same commitment events on the relay — skip if we're the sender.
-        if channel.get('receiver_pubkey') != self.wallet.pubkey:
+        if channel.get('receiver_pubkey') != self.alias.pubkey:
             return
         # Fix I: require stream_name to prevent cross-stream over-granting
         if not commitment.stream_name:
@@ -1954,9 +1954,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             The broadcast txid
         """
         from satorilib.satori_nostr.models import ChannelCommitment, ChannelSettlement
-        await self._channelEnsureWallet()
+        await self._channelEnsureAlias()
         # Refresh UTXOs so PATH B can see our EVR for the mining fee
-        await asyncio.to_thread(self.wallet.getUnspents)
+        await asyncio.to_thread(self.alias.getUnspents)
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
@@ -2031,14 +2031,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if deficit <= 0:
             # ── PATH A: fee already embedded ────────────────────────────────
             our_sig = await asyncio.to_thread(
-                self.wallet.paymentChannelMultisigTransactionMiddle,
+                self.alias.paymentChannelMultisigTransactionMiddle,
                 tx, redeem_script, 0, SIGHASH_ALL)
             await asyncio.to_thread(
-                self.wallet._compileClaimOnP2SHMultiSigEnd,
+                self.alias._compileClaimOnP2SHMultiSigEnd,
                 tx, redeem_script, _make_redeem_params(our_sig), 1, None)
             tx_hex = tx.serialize().hex()
             txid = _check_broadcast(
-                await asyncio.to_thread(self.wallet.broadcast, tx_hex))
+                await asyncio.to_thread(self.alias.broadcast, tx_hex))
             logging.info(
                 f'Channel: PATH A claimed {p2sh_address} '
                 f'({commitment.pay_amount_sats} sats) — txid={txid}',
@@ -2051,7 +2051,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # fall back to the largest available.
             evr_utxo = None
             for u in sorted(
-                (self.wallet.unspentCurrency or []),
+                (self.alias.unspentCurrency or []),
                 key=lambda x: x.get('value', 0)
             ):
                 if u.get('value', 0) >= required_fee_b:
@@ -2059,7 +2059,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     break
             if evr_utxo is None:
                 for u in sorted(
-                    (self.wallet.unspentCurrency or []),
+                    (self.alias.unspentCurrency or []),
                     key=lambda x: -x.get('value', 0)
                 ):
                     if u.get('value', 0) > 0:
@@ -2082,24 +2082,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 if evr_change >= 546:
                     tx.vout.append(CMutableTxOut(
                         evr_change,
-                        CEvrmoreAddress(self.wallet.address).to_scriptPubKey()))
+                        CEvrmoreAddress(self.alias.address).to_scriptPubKey()))
                 # Receiver signs P2SH vin[0] with SIGHASH_ALL
                 our_sig = await asyncio.to_thread(
-                    self.wallet.paymentChannelMultisigTransactionMiddle,
+                    self.alias.paymentChannelMultisigTransactionMiddle,
                     tx, redeem_script, 0, SIGHASH_ALL)
                 # Standard P2PKH scriptPubKey for the EVR input
                 evr_script = CScript([
                     OP_DUP, OP_HASH160,
-                    Hash160(bytes.fromhex(self.wallet.pubkey)),
+                    Hash160(bytes.fromhex(self.alias.pubkey)),
                     OP_EQUALVERIFY, OP_CHECKSIG])
                 # Compile: sets P2SH scriptSig (vin[0]) and signs EVR (vin[1])
                 await asyncio.to_thread(
-                    self.wallet._compileClaimOnP2SHMultiSigEnd,
+                    self.alias._compileClaimOnP2SHMultiSigEnd,
                     tx, redeem_script, _make_redeem_params(our_sig), 1,
                     [evr_script])
                 tx_hex = tx.serialize().hex()
                 txid = _check_broadcast(
-                    await asyncio.to_thread(self.wallet.broadcast, tx_hex))
+                    await asyncio.to_thread(self.alias.broadcast, tx_hex))
                 logging.info(
                     f'Channel: PATH B claimed {p2sh_address} '
                     f'({commitment.pay_amount_sats} sats, EVR fee {required_fee_b}) '
@@ -2215,7 +2215,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'for {p2sh}', color='cyan')
             try:
                 txid = await asyncio.to_thread(
-                    self.wallet.broadcast, cached['signed_hex'])
+                    self.alias.broadcast, cached['signed_hex'])
                 self._mundoCache.pop(p2sh, None)
                 return txid
             except Exception as e:
@@ -2243,7 +2243,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self._mundoCache[p2sh] = {
                     **cached, 'signed_hex': signed_hex}
                 txid = await asyncio.to_thread(
-                    self.wallet.broadcast, signed_hex)
+                    self.alias.broadcast, signed_hex)
                 self._mundoCache.pop(p2sh, None)
                 return txid
             except Exception as e:
@@ -2256,7 +2256,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Step 1: find receiver's SATORI UTXO
         satori_utxo = None
         for u in sorted(
-            [u for u in (self.wallet.unspentAssets or [])
+            [u for u in (self.alias.unspentAssets or [])
              if u.get('name', u.get('asset')) == 'SATORI'
              and u.get('value', 0) > 0],
             key=lambda x: x.get('value', 0)
@@ -2316,10 +2316,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         satori_change = satori_value - mundo_satori_fee
         if satori_change > 0:
             change_script = CScript([
-                *CEvrmoreAddress(self.wallet.address).to_scriptPubKey(),
+                *CEvrmoreAddress(self.alias.address).to_scriptPubKey(),
                 OP_EVR_ASSET,
                 bytes.fromhex(
-                    AssetTransaction.satoriHex(self.wallet.symbol) +
+                    AssetTransaction.satoriHex(self.alias.symbol) +
                     TxUtils.padHexStringTo8Bytes(
                         TxUtils.intToLittleEndianHex(satori_change))),
                 OP_DROP])
@@ -2330,7 +2330,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             *CEvrmoreAddress(mundo_satori_fee_addr).to_scriptPubKey(),
             OP_EVR_ASSET,
             bytes.fromhex(
-                AssetTransaction.satoriHex(self.wallet.symbol) +
+                AssetTransaction.satoriHex(self.alias.symbol) +
                 TxUtils.padHexStringTo8Bytes(
                     TxUtils.intToLittleEndianHex(mundo_satori_fee))),
             OP_DROP])
@@ -2348,7 +2348,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # This locks all outputs but still allows Mundo to add its EVR input.
         mundo_sighash = SIGHASH_ALL | SIGHASH_ANYONECANPAY  # 0x81
         our_sig = await asyncio.to_thread(
-            self.wallet.paymentChannelMultisigTransactionMiddle,
+            self.alias.paymentChannelMultisigTransactionMiddle,
             new_tx, redeem_script, 0, mundo_sighash)
         redeemParams = funcpartial(
             unlock.paymentChannel,
@@ -2359,13 +2359,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Sign receiver's SATORI input with 0x81
         # _compileInputs returns (txins, txinScripts); we need the script
         _, satori_scripts = await asyncio.to_thread(
-            self.wallet._compileInputs,
+            self.alias._compileInputs,
             [],              # gatheredCurrencyUnspents (positional)
             [satori_utxo],  # gatheredSatoriUnspents (positional)
         )
         satori_script = satori_scripts[0]
         await asyncio.to_thread(
-            self.wallet._signInput,
+            self.alias._signInput,
             new_tx, satori_vin_idx, satori_txin, satori_script, mundo_sighash)
 
         # Cache the signed incomplete tx (tier B on retry)
@@ -2394,7 +2394,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             **self._mundoCache.get(p2sh, {}), 'signed_hex': signed_hex}
 
         # Step 6: broadcast the fully-signed tx and return txid
-        txid = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
+        txid = await asyncio.to_thread(self.alias.broadcast, signed_hex)
         self._mundoCache.pop(p2sh, None)
         return txid
 
@@ -2451,7 +2451,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         on-chain amount. Falls back to the requested amount on any error.
         """
         try:
-            raw = self.wallet.electrumx.api.sendRequest(
+            raw = self.alias.electrumx.api.sendRequest(
                 method='blockchain.transaction.get',
                 params=[txid, True])
             if not isinstance(raw, dict):
@@ -2495,7 +2495,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         try:
             scripthash = EvrmoreWallet.p2shScripthash(p2sh)
             unspents = await asyncio.to_thread(
-                self.wallet.electrumx.api.getUnspentAssets,
+                self.alias.electrumx.api.getUnspentAssets,
                 scripthash, 'SATORI')
             unspents = unspents or []
             found = any(
@@ -2605,25 +2605,25 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return created_at + int(blocks) * 60
         return 0
 
-    async def _channelEnsureWallet(self) -> None:
-        """Ensure the wallet has a live Electrumx connection (Fix E).
+    async def _channelEnsureAlias(self) -> None:
+        """Ensure the alias has a live Electrumx connection (Fix E).
 
-        Channel operations (open, refund, claim, pay) need the wallet online.
+        Channel operations (open, refund, claim, pay) need the alias online.
         On startup the connection may not be ready yet; this retries once after
-        a short delay. Raises RuntimeError if the wallet is still unreachable
+        a short delay. Raises RuntimeError if the alias is still unreachable
         so the caller gets a clear error instead of a swallowed warning.
         """
         if self.walletManager.isConnected():
             return
         if await asyncio.to_thread(self.walletManager.connect):
             return
-        # Retry once after a short wait — the wallet often recovers quickly
+        # Retry once after a short wait — the connection often recovers quickly
         await asyncio.sleep(3)
         if await asyncio.to_thread(self.walletManager.connect):
-            logging.info('Channel: wallet connected on retry', color='green')
+            logging.info('Channel: alias connected on retry', color='green')
             return
         raise RuntimeError(
-            'Wallet is not connected — channel operation aborted. '
+            'The alias is not connected — channel operation aborted. '
             'The Electrumx connection will be retried on the next cycle.')
 
     async def openChannel(
@@ -2642,7 +2642,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         connected relays so the receiver can register the channel automatically.
 
         Args:
-            receiver_pubkey: Receiver's Satori wallet public key (hex)
+            receiver_pubkey: Receiver's alias public key (hex)
             amount_sats: Amount to lock in the channel in satoshis
             minutes: CSV timeout in minutes (mutually exclusive with blocks)
             blocks: CSV timeout in blocks (mutually exclusive with minutes)
@@ -2651,11 +2651,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Returns:
             The P2SH address of the new channel
         """
-        await self._channelEnsureWallet()
-        await asyncio.to_thread(self.wallet.getUnspents)
+        await self._channelEnsureAlias()
+        await asyncio.to_thread(self.alias.getUnspents)
         amount_satori = amount_sats / 1e8
         txid, script_payload = await asyncio.to_thread(
-            self.wallet.producePaymentChannel,
+            self.alias.producePaymentChannel,
             receiver_pubkey,
             None,       # sender defaults to our own pubkey
             blocks,
@@ -2682,7 +2682,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         await asyncio.to_thread(
             self.networkDB.save_channel,
             p2sh_address,
-            self.wallet.pubkey,
+            self.alias.pubkey,
             receiver_pubkey,
             script_payload['redeem_script_hex'],
             script_payload['funding_txid'],
@@ -2705,7 +2705,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             from satorilib.satori_nostr.models import ChannelOpen
             channel_open = ChannelOpen(
                 p2sh_address=p2sh_address,
-                sender_pubkey=self.wallet.pubkey,
+                sender_pubkey=self.alias.pubkey,
                 receiver_pubkey=receiver_pubkey,
                 redeem_script=script_payload['redeem_script_hex'],
                 funding_txid=script_payload['funding_txid'],
@@ -2773,24 +2773,24 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         locked_sats = channel['locked_sats']
         cumulative_sats = (
             locked_sats - channel['remainder_sats'] + pay_amount_sats)
-        # The channel stores the receiver's 33-byte EVR wallet pubkey, but the
+        # The channel stores the receiver's 33-byte alias pubkey, but the
         # partial tx output needs a P2PKH address string.
         receiver_address = EvrmoreWallet.generateAddress(
             channel['receiver_pubkey'])
         # Build partial tx with ONLY the P2SH input and SATORI outputs.
         # No EVR inputs are included — the receiver resolves the fee via
         # 3-path logic so the sender doesn't need EVR to send micropayments.
-        if self.wallet.divisibility == 0:
-            await asyncio.to_thread(self.wallet.getReadyToSend)
+        if self.alias.divisibility == 0:
+            await asyncio.to_thread(self.alias.getReadyToSend)
         def _build_partial_tx():
             sat_sats = TxUtils.roundSatsDownToDivisibility(
                 sats=cumulative_sats,
-                divisibility=self.wallet.divisibility)
-            change_out = self.wallet._compileSatoriChangeOutput(
+                divisibility=self.alias.divisibility)
+            change_out = self.alias._compileSatoriChangeOutput(
                 satoriSats=sat_sats,
                 gatheredSatoriSats=locked_sats,
                 changeAddress=channel['p2sh_address'])
-            return self.wallet._compileClaimOnP2SHMultiSigStart(
+            return self.alias._compileClaimOnP2SHMultiSigStart(
                 toAddress=receiver_address,
                 satoriSats=sat_sats,
                 feeOverride=None,
@@ -2800,7 +2800,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 extraVouts=[change_out] if change_out else [])
         tx = await asyncio.to_thread(_build_partial_tx)
         sig = await asyncio.to_thread(
-            self.wallet.paymentChannelMultisigTransactionMiddle,
+            self.alias.paymentChannelMultisigTransactionMiddle,
             tx,
             redeem_script,
             0,    # vinIndex
@@ -2809,7 +2809,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         remainder = channel['remainder_sats'] - pay_amount_sats
         commitment = ChannelCommitment(
             p2sh_address=p2sh_address,
-            sender_pubkey=self.wallet.pubkey,
+            sender_pubkey=self.alias.pubkey,
             receiver_pubkey=channel['receiver_pubkey'],
             partial_tx_hex=tx.serialize().hex(),
             sender_sigs=[sig.hex()],
@@ -2820,7 +2820,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             stream_name=stream_name,
         )
         # The Nostr `p` tag must be a 32-byte x-only Nostr pubkey — that is a
-        # different value from the 33-byte EVR wallet pubkey stored in
+        # different value from the 33-byte alias pubkey stored in
         # channel['receiver_pubkey'], so we thread the persisted nostr pubkey
         # from the channel row into the library call.
         receiver_nostr_pubkey = channel.get('receiver_nostr_pubkey') or ''
@@ -2866,7 +2866,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         from satorilib.wallet.concepts.transaction import TransactionFailure
         from satorilib.wallet.utils.transaction import TxUtils
 
-        await asyncio.to_thread(self.wallet.getUnspents)
+        await asyncio.to_thread(self.alias.getUnspents)
         channel = await asyncio.to_thread(
             self.networkDB.get_channel, p2sh_address)
         if not channel:
@@ -2888,7 +2888,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         sat_sats = TxUtils.roundSatsDownToDivisibility(
             sats=channel['locked_sats'],
-            divisibility=self.wallet.divisibility)
+            divisibility=self.alias.divisibility)
 
         def _build_standard_reclaim():
             """PATH A: gather EVR, build csv reclaim tx, sign, broadcast."""
@@ -2897,16 +2897,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             # (2 inputs: P2SH + EVR, 2 outputs: SATORI + EVR change)
             fee = TxUtils.estimatedFee(inputCount=2, outputCount=2)
             # raises TransactionFailure if not enough EVR
-            gathered_utxos, gathered_sats = self.wallet._gatherCurrencyUnspents(
+            gathered_utxos, gathered_sats = self.alias._gatherCurrencyUnspents(
                 feeOverride=fee)
-            txins_evr, txin_scripts_evr = self.wallet._compileInputs(
+            txins_evr, txin_scripts_evr = self.alias._compileInputs(
                 gatheredCurrencyUnspents=gathered_utxos)
-            evr_change_out = self.wallet._compileCurrencyChangeOutput(
+            evr_change_out = self.alias._compileCurrencyChangeOutput(
                 gatheredCurrencySats=gathered_sats,
                 fee=fee)
             # Build bare tx: P2SH vin + EVR vins, SATORI output + EVR change
-            tx = self.wallet._compileClaimOnP2SHMultiSigStart(
-                toAddress=self.wallet.address,
+            tx = self.alias._compileClaimOnP2SHMultiSigStart(
+                toAddress=self.alias.address,
                 satoriSats=sat_sats,
                 fundingTxIds=[channel['funding_txid']],
                 fundingVouts=[channel['funding_vout']],
@@ -2916,15 +2916,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             tx.nVersion = 2
             tx.vin[0].nSequence = csv_value
             # Sign P2SH vin[0] with SIGHASH_ALL (single-sig CSV path)
-            sig = self.wallet._compileClaimOnP2SHMultiSigMiddle(
+            sig = self.alias._compileClaimOnP2SHMultiSigMiddle(
                 tx, redeem_script, 0, SIGHASH_ALL)
             # redeemParams() must return just the unlock prefix (no sig arg)
             def redeem_params_csv():
                 return CScript([sig, OP_FALSE])
             # Set P2SH scriptSig and sign EVR vins
-            self.wallet._compileClaimOnP2SHMultiSigEnd(
+            self.alias._compileClaimOnP2SHMultiSigEnd(
                 tx, redeem_script, redeem_params_csv, 1, txin_scripts_evr)
-            return self.wallet.broadcast(self.wallet._txToHex(tx))
+            return self.alias.broadcast(self.alias._txToHex(tx))
 
         def _check_broadcast(result):
             from satorilib.wallet.concepts.transaction import TransactionFailure
@@ -2961,8 +2961,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         logging.info(
             f'Channel: reclaimed {p2sh_address} — txid={txid}',
             color='yellow')
-        # Refresh UTXOs so wallet balance reflects the reclaimed funds
-        await asyncio.to_thread(self.wallet.getUnspents)
+        # Refresh UTXOs so the alias's balance reflects the reclaimed funds
+        await asyncio.to_thread(self.alias.getUnspents)
         return txid
 
     async def _reclaimChannelViaMundo(
@@ -2998,7 +2998,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{channel["p2sh_address"]}', color='cyan')
             try:
                 result = await asyncio.to_thread(
-                    self.wallet.broadcast, cached['signed_hex'])
+                    self.alias.broadcast, cached['signed_hex'])
                 if isinstance(result, dict) and result.get('code') is not None:
                     raise TransactionFailure(
                         f'broadcast rejected: {result.get("message", result)}')
@@ -3029,7 +3029,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self._mundoCache[cache_key] = {
                     **cached, 'signed_hex': signed_hex}
                 result = await asyncio.to_thread(
-                    self.wallet.broadcast, signed_hex)
+                    self.alias.broadcast, signed_hex)
                 if isinstance(result, dict) and result.get('code') is not None:
                     raise TransactionFailure(
                         f'broadcast rejected: {result.get("message", result)}')
@@ -3045,7 +3045,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Step 1: find sender's SATORI UTXO
         satori_utxo = None
         for u in sorted(
-            [u for u in (self.wallet.unspentAssets or [])
+            [u for u in (self.alias.unspentAssets or [])
              if u.get('name', u.get('asset')) == 'SATORI'
              and u.get('value', 0) > 0],
             key=lambda x: x.get('value', 0)
@@ -3099,21 +3099,21 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 *CEvrmoreAddress(address).to_scriptPubKey(),
                 OP_EVR_ASSET,
                 bytes.fromhex(
-                    AssetTransaction.satoriHex(self.wallet.symbol) +
+                    AssetTransaction.satoriHex(self.alias.symbol) +
                     TxUtils.padHexStringTo8Bytes(
                         TxUtils.intToLittleEndianHex(amount_sats))),
                 OP_DROP])
 
         vouts = [
             # SATORI back to sender
-            CMutableTxOut(0, _satori_asset_script(self.wallet.address, sat_sats)),
+            CMutableTxOut(0, _satori_asset_script(self.alias.address, sat_sats)),
             # SATORI fee to Mundo
             CMutableTxOut(0, _satori_asset_script(mundo_satori_fee_addr, mundo_satori_fee)),
         ]
         satori_change = satori_value - mundo_satori_fee
         if satori_change > 0:
             vouts.append(CMutableTxOut(
-                0, _satori_asset_script(self.wallet.address, satori_change)))
+                0, _satori_asset_script(self.alias.address, satori_change)))
         if mundo_evr_change_addr and mundo_evr_change_amt > 0:
             vouts.append(CMutableTxOut(
                 mundo_evr_change_amt,
@@ -3128,18 +3128,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # Step 5: sign P2SH vin[0] with 0x81 (CSV single-sig branch)
         mundo_sighash = SIGHASH_ALL | SIGHASH_ANYONECANPAY  # 0x81
         p2sh_sig = await asyncio.to_thread(
-            self.wallet.paymentChannelMultisigTransactionMiddle,
+            self.alias.paymentChannelMultisigTransactionMiddle,
             new_tx, redeem_script, 0, mundo_sighash)
         new_tx.vin[0].scriptSig = CScript([p2sh_sig, OP_FALSE]) + redeem_script
 
         # Step 6: sign SATORI vin[1] with 0x81
         _, satori_scripts = await asyncio.to_thread(
-            self.wallet._compileInputs,
+            self.alias._compileInputs,
             [],              # gatheredCurrencyUnspents
             [satori_utxo],  # gatheredSatoriUnspents
         )
         await asyncio.to_thread(
-            self.wallet._signInput,
+            self.alias._signInput,
             new_tx, satori_vin_idx, satori_txin,
             satori_scripts[0], mundo_sighash)
 
@@ -3169,7 +3169,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             **self._mundoCache.get(cache_key, {}), 'signed_hex': signed_hex}
 
         # Step 8: broadcast the fully-signed tx
-        result = await asyncio.to_thread(self.wallet.broadcast, signed_hex)
+        result = await asyncio.to_thread(self.alias.broadcast, signed_hex)
         if isinstance(result, dict) and result.get('code') is not None:
             raise TransactionFailure(
                 f'broadcast rejected: {result.get("message", result)}')
@@ -3195,12 +3195,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     source['source_stream_name'] = pub['source_stream_name']
                     source['source_provider_pubkey'] = pub.get(
                         'source_provider_pubkey', '')
-                # Include our Satori wallet pubkey so subscribers can auto-open
+                # Include our alias pubkey so subscribers can auto-open
                 # payment channels without any manual configuration.
                 meta_dict = source or {}
-                if hasattr(self, 'wallet') and self.wallet and self.wallet.pubkey:
-                    meta_dict['wallet_pubkey'] = self.wallet.pubkey
-                # Priced: where to pay (the Satori contract, SATORI, the vault)
+                if hasattr(self, 'alias') and self.alias and self.alias.pubkey:
+                    meta_dict['alias_pubkey'] = self.alias.pubkey
+                # Priced: where to pay (the Satori contract, SATORI, the wallet)
                 listing = (self.market.listing(pub['stream_name'])
                            if self.market is not None else None)
                 if listing:
@@ -3915,8 +3915,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         seq_num=p.seq_num,
                         predicted_value=str(p.predicted_value),
                         received_at=p.timestamp,
-                        predictor_wallet_pubkey=getattr(
-                            p, 'predictor_wallet_pubkey', None),
+                        predictor_alias_pubkey=getattr(
+                            p, 'predictor_alias_pubkey', None),
                     )
                     logging.info(
                         f'Bounty: received prediction from '
@@ -3947,11 +3947,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
     ) -> None:
         """Submit a prediction to a bounty host on all connected relays (predictor side).
 
-        The predictor's own wallet pubkey is attached so the host can open a
+        The predictor's alias pubkey is attached so the host can open a
         payment channel back without needing a separate directory lookup.
         """
-        wallet_pubkey = getattr(
-            getattr(self, 'wallet', None), 'pubkey', None) or ''
+        alias_pubkey = getattr(
+            getattr(self, 'alias', None), 'pubkey', None) or ''
         for client in self._networkClients.values():
             try:
                 await client.submit_prediction(
@@ -3960,7 +3960,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     host_pubkey=host_pubkey,
                     seq_num=seq_num,
                     predicted_value=predicted_value,
-                    predictor_wallet_pubkey=wallet_pubkey,
+                    predictor_alias_pubkey=alias_pubkey,
                 )
             except Exception as e:
                 logging.warning(f'Bounty: submit prediction failed: {e}')
@@ -4258,50 +4258,50 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         return 'main' if self.env in ['prod', 'local', 'testprod'] else 'test'
 
     @property
-    def vault(self) -> EvrmoreWallet:
-        return self.walletManager.vault
-
-    @property
     def wallet(self) -> EvrmoreWallet:
         return self.walletManager.wallet
 
     @property
+    def alias(self) -> EvrmoreWallet:
+        return self.walletManager.alias
+
+    @property
     def holdingBalance(self) -> float:
-        if self.wallet.balance.amount > 0:
+        if self.alias.balance.amount > 0:
             self._holdingBalance = round(
-                self.wallet.balance.amount
-                + (self.vault.balance.amount if self.vault is not None else 0),
+                self.alias.balance.amount
+                + (self.wallet.balance.amount if self.wallet is not None else 0),
                 8)
         else:
             self._holdingBalance = self.getBalance()
         return self._holdingBalance
 
-    def refreshBalance(self, threaded: bool = True, forWallet: bool = True, forVault: bool = True):
+    def refreshBalance(self, threaded: bool = True, forAlias: bool = True, forWallet: bool = True):
         self.walletManager.connect()
+        if forAlias and isinstance(self.alias, EvrmoreWallet):
+            if threaded:
+                threading.Thread(target=self.alias.get).start()
+            else:
+                self.alias.get()
         if forWallet and isinstance(self.wallet, EvrmoreWallet):
             if threaded:
                 threading.Thread(target=self.wallet.get).start()
             else:
                 self.wallet.get()
-        if forVault and isinstance(self.vault, EvrmoreWallet):
-            if threaded:
-                threading.Thread(target=self.vault.get).start()
-            else:
-                self.vault.get()
         return self.holdingBalance
 
-    def refreshUnspents(self, threaded: bool = True, forWallet: bool = True, forVault: bool = True):
+    def refreshUnspents(self, threaded: bool = True, forAlias: bool = True, forWallet: bool = True):
         self.walletManager.connect()
+        if forAlias and isinstance(self.alias, EvrmoreWallet):
+            if threaded:
+                threading.Thread(target=self.alias.getReadyToSend).start()
+            else:
+                self.alias.getReadyToSend()
         if forWallet and isinstance(self.wallet, EvrmoreWallet):
             if threaded:
                 threading.Thread(target=self.wallet.getReadyToSend).start()
             else:
                 self.wallet.getReadyToSend()
-        if forVault and isinstance(self.vault, EvrmoreWallet):
-            if threaded:
-                threading.Thread(target=self.vault.getReadyToSend).start()
-            else:
-                self.vault.getReadyToSend()
         return self._holdingBalance
 
     @property
@@ -4312,64 +4312,64 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     @property
     def ethaddressforward(self) -> str:
-        eth_address = self.vault.ethAddress
+        eth_address = self.wallet.ethAddress
         if eth_address:
             return eth_address
         else:
             return ""
 
-    def getVaultInfoFromFile(self) -> dict:
-        """Read vault info (address and pubkey) from vault.yaml without decrypting.
+    def getWalletInfoFromFile(self) -> dict:
+        """Read the wallet's address and pubkey from its file without decrypting.
 
-        The address and pubkey are stored unencrypted in vault.yaml, so we can read them
-        even when the vault is locked.
+        The address and pubkey are stored unencrypted in the wallet's file, so we can
+        read them even when the wallet is locked.
 
         Returns:
             dict: {'address': str, 'pubkey': str} or empty dict if file doesn't exist
         """
         try:
             import yaml
-            vault_path = config.walletPath('vault.yaml')
-            if not os.path.exists(vault_path):
+            wallet_path = config.walletPath()
+            if not os.path.exists(wallet_path):
                 return {}
 
-            with open(vault_path, 'r') as f:
-                vault_data = yaml.safe_load(f)
+            with open(wallet_path, 'r') as f:
+                wallet_data = yaml.safe_load(f)
 
             result = {}
-            if vault_data:
+            if wallet_data:
                 # Address is under evr: section
-                if 'evr' in vault_data and 'address' in vault_data['evr']:
-                    result['address'] = vault_data['evr']['address']
+                if 'evr' in wallet_data and 'address' in wallet_data['evr']:
+                    result['address'] = wallet_data['evr']['address']
                 # publicKey is at top level
-                if 'publicKey' in vault_data:
-                    result['pubkey'] = vault_data['publicKey']
+                if 'publicKey' in wallet_data:
+                    result['pubkey'] = wallet_data['publicKey']
 
             return result
         except Exception as e:
-            logging.warning(f"Could not read vault info from file: {e}")
+            logging.warning(f"Could not read wallet info from file: {e}")
             return {}
 
     def setupWalletManager(self):
-        # Never auto-decrypt the global vault - it should remain encrypted
+        # Never auto-decrypt the global wallet - it should remain encrypted
         self.walletManager = WalletManager.create(useConfigPassword=False)
 
     def shutdownWallets(self):
         self.walletManager._electrumx = None
+        self.walletManager._alias = None
         self.walletManager._wallet = None
-        self.walletManager._vault = None
 
-    def closeVault(self):
-        self.walletManager.closeVault()
+    def closeWallet(self):
+        self.walletManager.closeWallet()
 
-    def openVault(self, password: Union[str, None] = None, create: bool = False):
-        return self.walletManager.openVault(password=password, create=create)
+    def openWallet(self, password: Union[str, None] = None, create: bool = False):
+        return self.walletManager.openWallet(password=password, create=create)
 
-    def getWallet(self, **kwargs):
-        return self.walletManager.wallet
+    def getAlias(self, **kwargs):
+        return self.walletManager.alias
 
-    def getVault(self, password: Union[str, None] = None, create: bool = False) -> Union[EvrmoreWallet, None]:
-        return self.walletManager.openVault(password=password, create=create)
+    def getWallet(self, password: Union[str, None] = None, create: bool = False) -> Union[EvrmoreWallet, None]:
+        return self.walletManager.openWallet(password=password, create=create)
 
     def electrumxCheck(self):
         return self.walletManager.isConnected()
@@ -4517,7 +4517,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                                         streamUuid=stream_uuid,
                                         predictionStreamUuid=pub_id.uuid,
                                         server=self.server,
-                                        wallet=self.wallet,
+                                        alias=self.alias,
                                         subscriptionStream=subscriptionStream,
                                         publicationStream=publicationStream,
                                         pauseAll=self.aiengine.pause,
@@ -4655,7 +4655,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     def createServerConn(self):
         # logging.debug(self.urlServer, color="teal")
-        self.server = SatoriServerClient(self.wallet)
+        self.server = SatoriServerClient(self.alias)
 
     def authWithCentral(self):
         """Register peer with central-lite server."""
@@ -4664,22 +4664,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         while True:
             attempt += 1
             try:
-                # Get vault info from vault.yaml (available even when encrypted)
-                vault_info = self.getVaultInfoFromFile()
-
-                # Build vaultInfo dict for registration
-                vaultInfo = None
-                if vault_info.get('address') or vault_info.get('pubkey'):
-                    vaultInfo = {
-                        'vaultaddress': vault_info.get('address'),
-                        'vaultpubkey': vault_info.get('pubkey')
-                    }
-
-                # Register peer with central server
-                self.server.checkin(
-                    vaultInfo=vaultInfo,
+                # Register the alias, with the wallet's link once there is
+                # one (made when the wallet is unlocked, kept beside the keys)
+                answer = self.server.checkin(
+                    walletLink=readWalletLink(),
                     nostrPubkey=self.nostrPubkey,
                     version=VERSION)
+                self.linkedWalletAddress = answer.get('walletAddress')
 
                 logging.info("authenticated with central-lite", color="green")
                 break
@@ -4823,7 +4814,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     subscriptions=self.subscriptions or [],
                     publications=self.publications or [],
                     server=self.server,
-                    wallet=self.wallet)
+                    alias=self.alias)
                 logging.info("AI Engine created", color="green")
             except Exception as e:
                 logging.error(f"Failed to create AI Engine: {e}")
@@ -4928,12 +4919,12 @@ def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601)
     """Start the Flask web UI in a background thread."""
     try:
         from web.app import create_app
-        from web.routes import set_vault, set_startup
+        from web.routes import set_wallet_manager, set_startup
 
         app = create_app()
 
-        # Connect vault and startup to web routes
-        set_vault(startupDag.walletManager)
+        # Connect wallet and startup to web routes
+        set_wallet_manager(startupDag.walletManager)
         set_startup(startupDag)  # Set startup immediately - initialization is complete
 
         def run_flask():

@@ -1,7 +1,7 @@
 """
 Shared pytest fixtures for neuron tests.
 
-Uses REAL wallet implementations - NO mocking.
+Uses REAL key implementations - NO mocking.
 """
 import os
 import sys
@@ -39,23 +39,17 @@ def server_available(test_server_url):
 
 
 @pytest.fixture
-def test_wallet(tmp_path):
+def test_alias(tmp_path):
     """
-    Create a REAL test wallet for authentication.
+    A REAL alias (the neuron's automated signing key) for authentication.
 
-    Uses EvrmoreIdentity to create a real wallet that can sign messages.
-    The wallet is created in a temporary directory and cleaned up after tests.
-
-    Returns:
-        EvrmoreIdentity: Real wallet with all authentication capabilities
+    An unencrypted EvrmoreIdentity in a temporary directory that can sign
+    messages.
     """
     from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 
-    # Create wallet in temp directory (auto-generates entropy if file doesn't exist)
-    wallet_path = str(tmp_path / "test_wallet.yaml")
-    wallet = EvrmoreIdentity(walletPath=wallet_path)
-
-    return wallet
+    # auto-generates entropy since the file doesn't exist
+    return EvrmoreIdentity(walletPath=str(tmp_path / "alias.yaml"))
 
 
 @pytest.fixture
@@ -68,21 +62,21 @@ def challenge_token(test_server_url, server_available):
 
 
 @pytest.fixture
-def client_instance(test_wallet, test_server_url):
+def client_instance(test_alias, test_server_url):
     """
     Create a REAL SatoriServerClient instance for testing.
 
     Args:
-        test_wallet: Real EvrmoreIdentity wallet fixture
+        test_alias: Real EvrmoreIdentity alias fixture
         test_server_url: Server URL fixture
 
     Returns:
-        SatoriServerClient configured with real wallet and server URL
+        SatoriServerClient configured with a real alias and server URL
     """
     from satorilib.server.server import SatoriServerClient
 
     client = SatoriServerClient(
-        wallet=test_wallet,
+        alias=test_alias,
         url=test_server_url
     )
 
@@ -90,17 +84,17 @@ def client_instance(test_wallet, test_server_url):
 
 
 @pytest.fixture
-def authenticated_headers(test_wallet, challenge_token):
+def authenticated_headers(test_alias, challenge_token):
     """
     Create real authenticated headers for API requests.
 
-    Uses the real wallet to sign a challenge and create valid auth headers.
+    Uses the real alias to sign a challenge and create valid auth headers.
     """
     # Sign the challenge EIP-191 (personal_sign), the way satorilib signs for central
     return {
-        'wallet-pubkey': test_wallet.pubkey,
+        'alias-pubkey': test_alias.pubkey,
         'message': challenge_token,
-        'signature': test_wallet.ethSign(challenge_token)
+        'signature': test_alias.ethSign(challenge_token)
     }
 
 

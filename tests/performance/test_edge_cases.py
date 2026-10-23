@@ -236,9 +236,9 @@ def test_observation_endpoint_with_no_data(server_url, server_available):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_prediction_with_missing_optional_fields(server_url, server_available, test_wallet, challenge_token):
+def test_prediction_with_missing_optional_fields(server_url, server_available, test_alias, challenge_token):
     """Test prediction submission with minimal required fields only."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     # Minimal payload - only required field
     minimal_payload = json.dumps({
@@ -349,18 +349,18 @@ def test_rapid_sequential_requests_same_endpoint(server_url, server_available):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_challenge_token_expiry_handling(server_url, server_available, test_wallet):
+def test_challenge_token_expiry_handling(server_url, server_available, test_alias):
     """Test that old/reused challenge tokens are handled appropriately."""
     # Get a challenge token
     response = requests.get(f"{server_url}/api/v1/auth/challenge")
     old_challenge = response.json()["challenge"]
 
     # Use it once
-    headers1 = test_wallet.authPayload(asDict=True, challenge=old_challenge)
+    headers1 = test_alias.authPayload(asDict=True, challenge=old_challenge)
     response1 = requests.get(f"{server_url}/api/v1/balance/get", headers=headers1)
 
     # Try to reuse the same challenge (might be rejected depending on implementation)
-    headers2 = test_wallet.authPayload(asDict=True, challenge=old_challenge)
+    headers2 = test_alias.authPayload(asDict=True, challenge=old_challenge)
     response2 = requests.get(f"{server_url}/api/v1/balance/get", headers=headers2)
 
     # Both should get auth response (401 with mock wallet)

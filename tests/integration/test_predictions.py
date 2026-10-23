@@ -79,9 +79,9 @@ def test_prediction_endpoint_requires_auth(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.predictions
-def test_prediction_endpoint_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_prediction_endpoint_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test prediction submission with invalid signature."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.post(
         f"{server_url}/api/v1/prediction/post",
@@ -159,9 +159,9 @@ def test_client_setTopicTime_records_timestamp(client_instance):
 
 @pytest.mark.integration
 @pytest.mark.predictions
-def test_prediction_payload_structure(server_url, server_available, challenge_token, test_wallet):
+def test_prediction_payload_structure(server_url, server_available, challenge_token, test_alias):
     """Test that prediction payload is correctly structured."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     payload = {
         "value": "98765.43",

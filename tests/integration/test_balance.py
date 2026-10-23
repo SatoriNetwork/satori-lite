@@ -19,9 +19,9 @@ def test_get_balance_requires_auth(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.balance
-def test_get_balance_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_get_balance_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test GET balance with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.get(
         f"{server_url}/api/v1/balance/get",
@@ -34,9 +34,9 @@ def test_get_balance_with_invalid_auth(server_url, server_available, challenge_t
 
 @pytest.mark.integration
 @pytest.mark.balance
-def test_balance_endpoint_exists(server_url, server_available, challenge_token, test_wallet):
+def test_balance_endpoint_exists(server_url, server_available, challenge_token, test_alias):
     """Test balance endpoint exists and is configured."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.get(
         f"{server_url}/api/v1/balance/get",

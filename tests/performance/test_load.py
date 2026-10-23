@@ -116,14 +116,14 @@ def test_mixed_concurrent_requests(server_url, server_available):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_multiple_client_instances(test_wallet, test_server_url):
+def test_multiple_client_instances(test_alias, test_server_url):
     """Test multiple client instances can operate concurrently."""
     from satorilib.server.server import SatoriServerClient
 
     num_clients = 8
 
     def client_operation(client_id):
-        client = SatoriServerClient(wallet=test_wallet, url=test_server_url)
+        client = SatoriServerClient(alias=test_alias, url=test_server_url)
 
         # Each client performs multiple operations
         results = []
@@ -231,7 +231,7 @@ def test_sustained_load(server_url, server_available):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_concurrent_authenticated_requests(server_url, server_available, test_wallet):
+def test_concurrent_authenticated_requests(server_url, server_available, test_alias):
     """Test server handles concurrent authenticated requests."""
     num_concurrent = 10
 
@@ -245,7 +245,7 @@ def test_concurrent_authenticated_requests(server_url, server_available, test_wa
             challenge = challenge_response.json()["challenge"]
 
             # Make authenticated call
-            headers = test_wallet.authPayload(asDict=True, challenge=challenge)
+            headers = test_alias.authPayload(asDict=True, challenge=challenge)
             response = requests.get(
                 f"{server_url}/api/v1/balance/get",
                 headers=headers

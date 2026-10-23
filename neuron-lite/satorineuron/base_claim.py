@@ -1,6 +1,6 @@
 """Claim Base reward drops from the neuron itself.
 
-The neuron holds the vault key (it signs predictions), so it can also submit the
+The neuron holds the wallet key (it signs predictions), so it can also submit the
 `claimMerkle` transaction directly — no MetaMask, no dapp. It reads how much has
 already been minted to the user's Base address, and the claim mints the delta up
 to their published lifetime entitlement.
@@ -76,7 +76,7 @@ AIRDROP_ABI = [
 ]
 
 # On-chain prediction rewards: credited on SatoriRewards when a prediction is
-# scored, read through the Lens, minted when the vault calls SatoriHub.claim().
+# scored, read through the Lens, minted when the wallet calls SatoriHub.claim().
 LENS_ABI = [
     {
         "name": "getTotalClaimableRewards",
@@ -141,13 +141,13 @@ class BaseClaimer:
         return int(self.client.w3.eth.get_balance(to_checksum_address(address)))
 
     def token_balance(self, address: str) -> int:
-        """Wei of SATORI at `address`. Staked SATORI stays in the vault (it is
+        """Wei of SATORI at `address`. Staked SATORI stays in the wallet (it is
         only delegated and transfer-locked), so this includes it."""
         return int(self.token.functions.balanceOf(to_checksum_address(address)).call())
 
     def claim(self, private_key: str, lifetime_entitlement: int, proof: List[str]) -> str:
-        """Submit claimMerkle(lifetimeEntitlement, proof) signed by the vault
-        (or identity) key. Mints the delta over what's already been claimed to
+        """Submit claimMerkle(lifetimeEntitlement, proof) signed by the wallet
+        (or alias) key. Mints the delta over what's already been claimed to
         msg.sender."""
         return self.client.send(
             self.contract.functions.claimMerkle(int(lifetime_entitlement), list(proof)),
@@ -165,7 +165,7 @@ class BaseClaimer:
         }
 
     def claim_airdrop(self, private_key: str) -> str:
-        """Submit claimAirdrop() signed by the vault key. Mints the vested,
+        """Submit claimAirdrop() signed by the wallet key. Mints the vested,
         unclaimed airdrop to msg.sender. No proof needed."""
         return self.client.send(
             self.airdrop.functions.claimAirdrop(), private_key=private_key)
@@ -173,13 +173,13 @@ class BaseClaimer:
     # ---- On-chain prediction rewards ---------------------------------------
     def prediction_rewards(self, address: str) -> dict:
         """{claimable, complete} for `address`: claimable is wei credited from
-        scored predictions plus the vault's pending delegator share. complete is
+        scored predictions plus the wallet's pending delegator share. complete is
         False when the Lens hit its round budget, so the amount is a lower bound."""
         total, complete = self.lens.functions.getTotalClaimableRewards(
             to_checksum_address(address)).call()
         return {"claimable": int(total), "complete": bool(complete)}
 
     def claim_prediction_rewards(self, private_key: str) -> str:
-        """Submit SatoriHub.claim() signed by the vault key. Mints the vault's
+        """Submit SatoriHub.claim() signed by the wallet key. Mints the wallet's
         prediction rewards to itself."""
         return self.client.send(self.hub.functions.claim(), private_key=private_key)

@@ -1,7 +1,7 @@
 """Submit predictions on-chain to Base — the neuron's on-chain prediction path.
 
 Separate from the central path (which posts to the server) and from the relay
-path (which publishes {stream}_pred to Nostr). This one signs, with the vault
+path (which publishes {stream}_pred to Nostr). This one signs, with the wallet
 key, a single batched `predictMultipleWithPayloads` on the engine — at most once
 per UTC day (the contract enforces one batch per round, globally), gated by a
 user toggle because it spends gas.
@@ -60,10 +60,10 @@ GAMES_ABI = [
     },
 ]
 
-# Delegation: the vault delegates its prediction power to the identity wallet
-# (on the hub) so the neuron can predict with the always-available identity key
-# while rewards still accrue to the vault. The identity's predictor fee is set
-# to 0 (on rewards) so it takes no cut of the vault's delegated rewards.
+# Delegation: the wallet delegates its prediction power to the alias
+# (on the hub) so the neuron can predict with the always-available alias key
+# while rewards still accrue to the wallet. The alias's predictor fee is set
+# to 0 (on rewards) so it takes no cut of the wallet's delegated rewards.
 HUB_ABI = [
     {
         "name": "delegatePredictionPower",
@@ -175,9 +175,9 @@ def submit_batch(predictor, private_key: str, requests, named_ok: bool) -> Optio
 
 
 def evm_address_from_pubkey(pubkey_hex: str) -> str:
-    """Base address of a secp256k1 public key. The vault's Evrmore pubkey is
-    stored unencrypted in vault.yaml, and it is the same key as its Base wallet,
-    so this gives the vault's Base address without unlocking it."""
+    """Base address of a secp256k1 public key. The wallet's Evrmore pubkey is
+    stored unencrypted in its file, and it is the same key on Base, so this
+    gives the wallet's Base address without unlocking it."""
     from eth_keys import keys
     raw = bytes.fromhex(pubkey_hex.removeprefix("0x"))
     if len(raw) == 33:
@@ -185,22 +185,22 @@ def evm_address_from_pubkey(pubkey_hex: str) -> str:
     return keys.PublicKey(raw[-64:]).to_checksum_address()
 
 
-def no_power_reason(predictor, identity: str, vault: Optional[str] = None) -> str:
-    """Why the identity has no prediction power: the vault is not staked, is
+def no_power_reason(predictor, alias: str, wallet: Optional[str] = None) -> str:
+    """Why the alias has no prediction power: the wallet is not staked, is
     staked to someone else, or is staked but holds no SATORI on Base."""
-    generic = "no prediction power (vault not staked, or it holds no SATORI on Base)"
-    if not vault:
+    generic = "no prediction power (wallet not staked, or it holds no SATORI on Base)"
+    if not wallet:
         return generic
     try:
-        delegate = predictor.current_delegate(vault)
+        delegate = predictor.current_delegate(wallet)
     except Exception:
         return generic
     if int(delegate, 16) == 0:
-        return f"vault {vault} is not staked; turn on predict base on-chain to stake it"
-    if delegate.lower() != identity.lower():
-        return (f"vault {vault} is staked to {delegate}, not this neuron; "
+        return f"wallet {wallet} is not staked; turn on predict base on-chain to stake it"
+    if delegate.lower() != alias.lower():
+        return (f"wallet {wallet} is staked to {delegate}, not this neuron; "
                 "turn predict base on-chain off and on to restake")
-    return f"vault {vault} is staked but holds no SATORI on Base; send SATORI to the vault"
+    return f"wallet {wallet} is staked but holds no SATORI on Base; send SATORI to the wallet"
 
 
 def build_requests(directions: dict, predictor) -> List[Tuple[int, int]]:
@@ -260,7 +260,7 @@ class BasePredictor:
 
     def predict(self, private_key: str, requests: List[Tuple[int, int]]) -> str:
         """Submit ONE batch. `requests` = [(gameId, direction 1|2), ...]. Signs
-        with the vault key. Returns the 0x tx hash. Raises on send/revert."""
+        with the wallet key. Returns the 0x tx hash. Raises on send/revert."""
         if not requests:
             raise ValueError("no predictions to submit")
         payloads = [(int(game_id), bytes([int(direction)])) for game_id, direction in requests]
@@ -270,7 +270,7 @@ class BasePredictor:
 
     # ---- Delegation setup (one-time) ---------------------------------------
     def incoming_delegated_power(self, address: str) -> int:
-        """Prediction power delegated TO `address` by others (the vault's power,
+        """Prediction power delegated TO `address` by others (the wallet's power,
         once set up). 0 means no delegation yet — predicting would earn nothing."""
         _delegate, power = self.rewards.functions.predictionDelegateInfo(
             to_checksum_address(address)).call()
@@ -299,47 +299,47 @@ class BasePredictor:
             self.hub.functions.delegatePredictionPower(to_checksum_address(delegate_address)),
             private_key=private_key)
 
-    def ensure_delegation(self, vault_key: str, vault_address: str,
-                          identity_key: str, identity_address: str) -> dict:
-        """Idempotent one-time setup: the identity's cut → 0% (identity signs),
-        THEN the vault delegates its prediction power to the identity (vault
+    def ensure_delegation(self, wallet_key: str, wallet_address: str,
+                          alias_key: str, alias_address: str) -> dict:
+        """Idempotent one-time setup: the alias's cut → 0% (alias signs),
+        THEN the wallet delegates its prediction power to the alias (wallet
         signs). Reads on-chain state first so we never spend gas re-doing a step
         that's already in place. Signing keys are only needed here (setup)."""
         result = {}
-        # 1. identity predictor fee -> 0 (before delegation)
-        if self.effective_predictor_fee(identity_address) != 0:
-            result["fee_tx"] = self.set_predictor_fee_zero(identity_key)
+        # 1. alias predictor fee -> 0 (before delegation)
+        if self.effective_predictor_fee(alias_address) != 0:
+            result["fee_tx"] = self.set_predictor_fee_zero(alias_key)
         else:
             result["fee"] = "already 0"
-        # 2. vault delegates to identity
-        if self.current_delegate(vault_address).lower() != identity_address.lower():
-            result["delegate_tx"] = self.delegate_to(vault_key, identity_address)
+        # 2. wallet delegates to alias
+        if self.current_delegate(wallet_address).lower() != alias_address.lower():
+            result["delegate_tx"] = self.delegate_to(wallet_key, alias_address)
         else:
             result["delegate"] = "already delegated"
         return result
 
-    def undelegate(self, vault_key: str) -> str:
-        """Undelegate (delegate to address(0)). Frees the vault's prediction
+    def undelegate(self, wallet_key: str) -> str:
+        """Undelegate (delegate to address(0)). Frees the wallet's prediction
         power and switches the token lock from indefinite to next-round (~24h)."""
-        return self.delegate_to(vault_key, ZERO_ADDRESS)
+        return self.delegate_to(wallet_key, ZERO_ADDRESS)
 
-    def ensure_undelegated(self, vault_key: str, vault_address: str) -> dict:
-        """Idempotent: undelegate the vault if it's currently delegated."""
-        if int(self.current_delegate(vault_address), 16) == 0:
+    def ensure_undelegated(self, wallet_key: str, wallet_address: str) -> dict:
+        """Idempotent: undelegate the wallet if it's currently delegated."""
+        if int(self.current_delegate(wallet_address), 16) == 0:
             return {"delegate": "already undelegated"}
-        return {"undelegate_tx": self.undelegate(vault_key)}
+        return {"undelegate_tx": self.undelegate(wallet_key)}
 
     def transfer_locked_until(self, address: str) -> int:
         """Round until which `address`'s tokens are transfer-locked (0 = free)."""
         return int(self.token.functions.transferLockedUntil(
             to_checksum_address(address)).call())
 
-    def stake_status(self, vault_address: str) -> dict:
-        """Current staking state for the vault: delegated?, token locked?, and
+    def stake_status(self, wallet_address: str) -> dict:
+        """Current staking state for the wallet: delegated?, token locked?, and
         (when unstaking) the round/timestamp the tokens unlock."""
-        delegate = self.current_delegate(vault_address)
+        delegate = self.current_delegate(wallet_address)
         staked = int(delegate, 16) != 0
-        lock_round = self.transfer_locked_until(vault_address)
+        lock_round = self.transfer_locked_until(wallet_address)
         current = self.current_round()
         indefinite = lock_round >= _LOCK_INDEFINITE
         locked = lock_round > current

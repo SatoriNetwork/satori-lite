@@ -60,22 +60,22 @@ def challenge_token(server_url, server_available):
 
 
 @pytest.fixture
-def authenticated_headers(test_wallet, challenge_token):
+def authenticated_headers(test_alias, challenge_token):
     """
     Create authenticated request headers for testing.
 
     Args:
-        test_wallet: Test wallet fixture
+        test_alias: Test alias fixture
         challenge_token: Fresh challenge token
 
     Returns:
-        dict: Headers with wallet-pubkey, message, and signature
+        dict: Headers with alias-pubkey, message, and signature
     """
     # Sign the challenge EIP-191 (personal_sign), the way satorilib signs for central
     return {
-        'wallet-pubkey': test_wallet.pubkey,
+        'alias-pubkey': test_alias.pubkey,
         'message': challenge_token,
-        'signature': test_wallet.ethSign(challenge_token)
+        'signature': test_alias.ethSign(challenge_token)
     }
 
 

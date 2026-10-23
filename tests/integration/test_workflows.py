@@ -10,7 +10,7 @@ import time
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_complete_authentication_flow(server_url, server_available, test_wallet):
+def test_complete_authentication_flow(server_url, server_available, test_alias):
     """
     Test complete authentication workflow:
     1. Get challenge token
@@ -28,12 +28,12 @@ def test_complete_authentication_flow(server_url, server_available, test_wallet)
     # Step 2: Sign challenge with real wallet, EIP-191 (personal_sign)
     # Create headers with proper HTTP header names
     headers = {
-        'wallet-pubkey': test_wallet.pubkey,
+        'alias-pubkey': test_alias.pubkey,
         'message': challenge,
-        'signature': test_wallet.ethSign(challenge)
+        'signature': test_alias.ethSign(challenge)
     }
 
-    assert "wallet-pubkey" in headers
+    assert "alias-pubkey" in headers
     assert "message" in headers
     assert "signature" in headers
     assert headers["message"] == challenge
@@ -236,7 +236,7 @@ def test_error_recovery_invalid_endpoint(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_error_recovery_malformed_json(server_url, server_available, challenge_token, test_wallet):
+def test_error_recovery_malformed_json(server_url, server_available, challenge_token, test_alias):
     """
     Test error handling with malformed JSON payload:
     1. Send malformed JSON to endpoint
@@ -245,9 +245,9 @@ def test_error_recovery_malformed_json(server_url, server_available, challenge_t
     """
     # Sign challenge with real wallet, EIP-191 (personal_sign)
     headers = {
-        'wallet-pubkey': test_wallet.pubkey,
+        'alias-pubkey': test_alias.pubkey,
         'message': challenge_token,
-        'signature': test_wallet.ethSign(challenge_token)
+        'signature': test_alias.ethSign(challenge_token)
     }
 
     # Send malformed JSON (missing required fields)

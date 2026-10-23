@@ -11,9 +11,9 @@ import json
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_prediction_endpoint_accepts_valid_payload(server_url, server_available, challenge_token, test_wallet):
+def test_prediction_endpoint_accepts_valid_payload(server_url, server_available, challenge_token, test_alias):
     """Test that prediction endpoint accepts properly formatted predictions."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     prediction_data = {
         "value": "99999.99",
@@ -76,9 +76,9 @@ def test_observation_response_structure_validation(server_url, server_available)
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_prediction_response_structure(server_url, server_available, challenge_token, test_wallet):
+def test_prediction_response_structure(server_url, server_available, challenge_token, test_alias):
     """Test that prediction endpoint returns expected structure on success."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     prediction_data = {
         "value": "12345.67",
@@ -147,9 +147,9 @@ def test_concurrent_requests_data_consistency(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_prediction_payload_validation(server_url, server_available, challenge_token, test_wallet):
+def test_prediction_payload_validation(server_url, server_available, challenge_token, test_alias):
     """Test that server validates prediction payload fields."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     # Test with missing 'value' field
     invalid_payload = json.dumps({

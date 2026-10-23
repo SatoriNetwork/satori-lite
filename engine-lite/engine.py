@@ -59,6 +59,12 @@ VALID_ADAPTER_CHOICES = ['auto'] + [
 ]
 
 
+def _aliasPath() -> str:
+    """The alias's file (the neuron's automated signing key)."""
+    from satorineuron import config as _neuronConfig
+    return _neuronConfig.aliasPath()
+
+
 def _getPreferredAdapterSetting() -> str:
     """Read engine.preferred_adapter from neuron config; 'auto' if absent."""
     try:
@@ -118,7 +124,7 @@ class Engine:
         subscriptions: list,
         publications: list,
         server: SatoriServerClient,
-        wallet: any,
+        alias: any,
     ) -> 'Engine':
         """
         Factory method for Neuron to spawn Engine with stream assignments.
@@ -127,11 +133,11 @@ class Engine:
             subscriptions: List of Stream objects to subscribe to
             publications: List of Stream objects for predictions
             server: SatoriServerClient instance from Neuron
-            wallet: Wallet instance from Neuron for signing
+            alias: the Neuron's alias (its automated signing key)
         """
         engine = cls()
         engine.server = server
-        engine.wallet = wallet
+        engine.alias = alias
         engine.subscriptionStreams = subscriptions
         engine.publicationStreams = publications
         # Build subscription/publication dicts from Stream objects
@@ -148,13 +154,13 @@ class Engine:
         self.subscriptionStreams: list = []
         self.publicationStreams: list = []
         self.server: Union[SatoriServerClient, None] = None
-        self.wallet: any = None
+        self.alias: any = None
         self.dataServerIp: str = ''
         self.dataServerPort: Union[int, None] = None
         self.dataClient: Union[DataClient, None] = None
         self.paused: bool = False
         self.threads: list[threading.Thread] = []
-        self.identity: EvrmoreIdentity = EvrmoreIdentity('/Satori/Neuron/wallet/wallet.yaml')
+        self.identity: EvrmoreIdentity = EvrmoreIdentity(_aliasPath())
         self.transferProtocol: Union[str, None] = None
         # SQLite storage manager for local data persistence
         self.storage: EngineStorageManager = EngineStorageManager.getInstance()
@@ -375,7 +381,7 @@ class Engine:
                     streamUuid=subUuid,
                     predictionStreamUuid=pubUuid,
                     server=self.server,
-                    wallet=self.wallet,
+                    alias=self.alias,
                     subscriptionStream=sub,
                     publicationStream=matchingPub,
                     pauseAll=self.pause,
@@ -513,7 +519,7 @@ class StreamModel:
         streamUuid: str,
         predictionStreamUuid: str,
         server: SatoriServerClient,
-        wallet: any,
+        alias: any,
         subscriptionStream: Stream,
         publicationStream: Stream,
         pauseAll: callable,
@@ -549,7 +555,7 @@ class StreamModel:
         streamModel.subscriptionStream = subscriptionStream
         streamModel.publicationStream = publicationStream
         streamModel.server = server
-        streamModel.wallet = wallet
+        streamModel.alias = alias
         streamModel.rng = np.random.default_rng(37)
         streamModel.publisherHost = None
         streamModel.transferProtocol = 'central'

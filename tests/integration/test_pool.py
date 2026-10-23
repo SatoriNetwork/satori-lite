@@ -53,9 +53,9 @@ def test_toggle_open_requires_auth(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_add_worker_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_add_worker_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test POST worker with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.post(
         f"{server_url}/api/v1/pool/worker",
@@ -69,9 +69,9 @@ def test_add_worker_with_invalid_auth(server_url, server_available, challenge_to
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_remove_worker_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_remove_worker_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test DELETE worker with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.delete(
         f"{server_url}/api/v1/pool/worker/{WORKER_ADDRESS}",
@@ -84,9 +84,9 @@ def test_remove_worker_with_invalid_auth(server_url, server_available, challenge
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_toggle_open_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_toggle_open_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test POST toggle-open with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.post(
         f"{server_url}/api/v1/pool/toggle-open",
@@ -99,9 +99,9 @@ def test_toggle_open_with_invalid_auth(server_url, server_available, challenge_t
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_add_worker_payload_structure(server_url, server_available, challenge_token, test_wallet):
+def test_add_worker_payload_structure(server_url, server_available, challenge_token, test_alias):
     """Test add worker payload is correctly structured."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     payload = {"worker_address": WORKER_ADDRESS}
 
@@ -119,9 +119,9 @@ def test_add_worker_payload_structure(server_url, server_available, challenge_to
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_remove_worker_url_parameter(server_url, server_available, challenge_token, test_wallet):
+def test_remove_worker_url_parameter(server_url, server_available, challenge_token, test_alias):
     """Test remove worker uses URL path parameter correctly."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     worker_address = WORKER_ADDRESS
 
@@ -148,9 +148,9 @@ def test_get_workers_requires_auth(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_get_workers_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_get_workers_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test GET workers with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.get(
         f"{server_url}/api/v1/pool/workers",
@@ -163,9 +163,9 @@ def test_get_workers_with_invalid_auth(server_url, server_available, challenge_t
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_get_workers_endpoint_exists(server_url, server_available, challenge_token, test_wallet):
+def test_get_workers_endpoint_exists(server_url, server_available, challenge_token, test_alias):
     """Test GET /api/v1/pool/workers endpoint exists."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.get(
         f"{server_url}/api/v1/pool/workers",
@@ -178,9 +178,9 @@ def test_get_workers_endpoint_exists(server_url, server_available, challenge_tok
 
 @pytest.mark.integration
 @pytest.mark.pool
-def test_pool_endpoints_exist(server_url, server_available, challenge_token, test_wallet):
+def test_pool_endpoints_exist(server_url, server_available, challenge_token, test_alias):
     """Test all pool endpoints exist and are configured."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     # Test POST /api/v1/pool/worker
     response1 = requests.post(

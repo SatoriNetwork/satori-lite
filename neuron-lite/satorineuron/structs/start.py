@@ -77,8 +77,8 @@ class StartupDagStruct(object):
         self.urlPubsubs: [str] = None
         self.paused: bool = None
         self.pauseThread: Union[threading.Thread, None] = None
-        self._evrmoreWallet: EvrmoreWallet = None
-        self._evrmoreVault: Union[EvrmoreWallet, None] = None
+        self._evrmoreAlias: EvrmoreWallet = None
+        self._evrmoreWallet: Union[EvrmoreWallet, None] = None
         self.details: dict = None
         self.key: str = None
         self.oracleKey: str = None
@@ -104,26 +104,26 @@ class StartupDagStruct(object):
 
     @property
     def network(self) -> str:
-        ''' get wallet '''
-
-    @property
-    def vault(self) -> EvrmoreWallet:
-        ''' get wallet '''
+        ''' get the network '''
 
     @property
     def wallet(self) -> EvrmoreWallet:
-        ''' get wallet '''
+        ''' get the wallet '''
 
     @property
-    def evrmoreWallet(self) -> EvrmoreWallet:
-        ''' get wallet '''
+    def alias(self) -> EvrmoreWallet:
+        ''' get the alias '''
 
-    def evrmoreVault(
+    @property
+    def evrmoreAlias(self) -> EvrmoreWallet:
+        ''' get the alias '''
+
+    def evrmoreWallet(
         self,
         password: Union[str, None] = None,
         create: bool = False,
     ) -> Union[EvrmoreWallet, None]:
-        ''' get the evrmore vault '''
+        ''' get the evrmore wallet '''
 
     def start(self):
         ''' start the satori engine. '''
@@ -132,17 +132,17 @@ class StartupDagStruct(object):
         ''' creates relay validation engine '''
 
     def networkIsTest(self, network: str = None) -> bool:
-        ''' get the ravencoin vault '''
+        ''' is the network a test network '''
 
-    def getWallet(self, network: str = None) -> EvrmoreWallet:
-        ''' get wallet '''
+    def getAlias(self, network: str = None) -> EvrmoreWallet:
+        ''' get the alias '''
 
-    def getVault(
+    def getWallet(
         self,
         password: Union[str, None] = None,
         create: bool = False,
     ) -> EvrmoreWallet:
-        ''' get the vault '''
+        ''' get the wallet '''
 
     def checkin(self):
         ''' checks in with the Satori Server '''

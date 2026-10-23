@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 from typing import Optional
+from satorilib.satori_nostr.models import announcedAliasPubkey
 
 SQLITE_BUSY_TIMEOUT_MS = 30000
 SQLITE_READ_RETRIES = 3
@@ -34,6 +35,20 @@ def setMaxTotalStreams(value) -> None:
             _max_total_streams_override = v
     except (TypeError, ValueError):
         pass
+
+
+def _ensureAliasPubkeyColumn(conn, table: str, role: str) -> None:
+    """Give `table` its <role>_alias_pubkey column. A database from before the
+    rename holds the same keys as <role>_wallet_pubkey: that column is renamed
+    in place; one with neither gets the column added."""
+    columns = {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}
+    current, older = f'{role}_alias_pubkey', f'{role}_wallet_pubkey'
+    if current in columns:
+        return
+    if older in columns:
+        conn.execute(f'ALTER TABLE {table} RENAME COLUMN {older} TO {current}')
+    else:
+        conn.execute(f'ALTER TABLE {table} ADD COLUMN {current} TEXT')
 
 
 class NetworkDB:
@@ -79,7 +94,7 @@ class NetworkDB:
                 stream_name          TEXT NOT NULL,
                 relay_url            TEXT NOT NULL,
                 provider_pubkey      TEXT NOT NULL,
-                provider_wallet_pubkey TEXT,
+                provider_alias_pubkey TEXT,
                 name                 TEXT,
                 description          TEXT,
                 cadence_seconds      INTEGER,
@@ -188,14 +203,7 @@ class NetworkDB:
         except sqlite3.OperationalError:
             conn.execute(
                 "ALTER TABLE subscriptions ADD COLUMN stale_since INTEGER")
-        # Migration: add provider_wallet_pubkey if missing (existing DBs)
-        try:
-            conn.execute(
-                "SELECT provider_wallet_pubkey FROM subscriptions LIMIT 1")
-        except sqlite3.OperationalError:
-            conn.execute(
-                "ALTER TABLE subscriptions "
-                "ADD COLUMN provider_wallet_pubkey TEXT")
+        _ensureAliasPubkeyColumn(conn, 'subscriptions', 'provider')
         # Migration: add last_seq_num if missing (existing DBs)
         try:
             conn.execute("SELECT last_seq_num FROM publications LIMIT 1")
@@ -265,7 +273,7 @@ class NetworkDB:
                 "ALTER TABLE channels ADD COLUMN sender_nostr_pubkey TEXT")
         # Migration: add receiver_nostr_pubkey if missing (existing DBs).
         # The sender needs this to tag commitment events with the receiver's
-        # 32-byte Nostr pubkey (separate from the 33-byte EVR wallet pubkey
+        # 32-byte Nostr pubkey (separate from the 33-byte alias pubkey
         # stored in receiver_pubkey).
         try:
             conn.execute("SELECT receiver_nostr_pubkey FROM channels LIMIT 1")
@@ -312,7 +320,7 @@ class NetworkDB:
                 stream_name             TEXT NOT NULL,
                 stream_provider_pubkey  TEXT NOT NULL,
                 predictor_pubkey        TEXT NOT NULL,
-                predictor_wallet_pubkey TEXT,
+                predictor_alias_pubkey TEXT,
                 host_pubkey             TEXT NOT NULL,
                 seq_num                 INTEGER NOT NULL,
                 predicted_value         TEXT NOT NULL,
@@ -320,14 +328,7 @@ class NetworkDB:
                 UNIQUE(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
             )
         """)
-        # Migration: add predictor_wallet_pubkey if missing (existing DBs)
-        try:
-            conn.execute(
-                "SELECT predictor_wallet_pubkey FROM bounty_predictions LIMIT 1")
-        except sqlite3.OperationalError:
-            conn.execute(
-                "ALTER TABLE bounty_predictions "
-                "ADD COLUMN predictor_wallet_pubkey TEXT")
+        _ensureAliasPubkeyColumn(conn, 'bounty_predictions', 'predictor')
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_comp_pred_seq
             ON bounty_predictions(stream_name, stream_provider_pubkey, seq_num)
@@ -453,18 +454,18 @@ class NetworkDB:
         """Subscribe to a stream. Returns row id."""
         conn = self._get_conn()
         tags = ','.join(stream.get('tags', []))
-        wallet_pubkey = (stream.get('metadata') or {}).get('wallet_pubkey')
+        alias_pubkey = announcedAliasPubkey(stream.get('metadata'))
         conn.execute("""
             INSERT INTO subscriptions
-                (stream_name, relay_url, provider_pubkey, provider_wallet_pubkey,
+                (stream_name, relay_url, provider_pubkey, provider_alias_pubkey,
                  name, description, cadence_seconds, price_per_obs, encrypted,
                  tags, active, subscribed_at, stale_since)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL)
             ON CONFLICT(stream_name, provider_pubkey) DO UPDATE SET
                 active = 1,
                 relay_url = excluded.relay_url,
-                provider_wallet_pubkey = COALESCE(excluded.provider_wallet_pubkey,
-                                                   provider_wallet_pubkey),
+                provider_alias_pubkey = COALESCE(excluded.provider_alias_pubkey,
+                                                   provider_alias_pubkey),
                 name = excluded.name,
                 description = excluded.description,
                 cadence_seconds = excluded.cadence_seconds,
@@ -478,7 +479,7 @@ class NetworkDB:
             stream['stream_name'],
             relay_url,
             stream['nostr_pubkey'],
-            wallet_pubkey,
+            alias_pubkey,
             stream.get('name', ''),
             stream.get('description', ''),
             stream.get('cadence_seconds'),
@@ -1280,30 +1281,30 @@ class NetworkDB:
         seq_num: int,
         predicted_value: str,
         received_at: int,
-        predictor_wallet_pubkey: Optional[str] = None,
+        predictor_alias_pubkey: Optional[str] = None,
     ) -> None:
         """Save a received prediction, replacing any earlier one for this predictor+seq.
 
-        predictor_wallet_pubkey is recorded so the host can open a payment
+        predictor_alias_pubkey is recorded so the host can open a payment
         channel to pay the predictor without needing a separate lookup.
         """
         conn = self._get_conn()
         conn.execute("""
             INSERT INTO bounty_predictions (
                 stream_name, stream_provider_pubkey, predictor_pubkey,
-                predictor_wallet_pubkey, host_pubkey, seq_num,
+                predictor_alias_pubkey, host_pubkey, seq_num,
                 predicted_value, received_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
             DO UPDATE SET
                 predicted_value         = excluded.predicted_value,
-                predictor_wallet_pubkey = COALESCE(
-                    excluded.predictor_wallet_pubkey,
-                    bounty_predictions.predictor_wallet_pubkey),
+                predictor_alias_pubkey = COALESCE(
+                    excluded.predictor_alias_pubkey,
+                    bounty_predictions.predictor_alias_pubkey),
                 received_at             = excluded.received_at
             WHERE excluded.received_at > bounty_predictions.received_at
         """, (stream_name, stream_provider_pubkey, predictor_pubkey,
-              predictor_wallet_pubkey, host_pubkey, seq_num,
+              predictor_alias_pubkey, host_pubkey, seq_num,
               predicted_value, received_at))
         conn.commit()
 

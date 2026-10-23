@@ -51,9 +51,9 @@ def test_get_lender_status_requires_auth(server_url, server_available):
 
 @pytest.mark.integration
 @pytest.mark.lending
-def test_create_lending_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_create_lending_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test POST lending with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.post(
         f"{server_url}/api/v1/lender/lend",
@@ -67,9 +67,9 @@ def test_create_lending_with_invalid_auth(server_url, server_available, challeng
 
 @pytest.mark.integration
 @pytest.mark.lending
-def test_delete_lending_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_delete_lending_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test DELETE lending with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.delete(
         f"{server_url}/api/v1/lender/lend",
@@ -82,9 +82,9 @@ def test_delete_lending_with_invalid_auth(server_url, server_available, challeng
 
 @pytest.mark.integration
 @pytest.mark.lending
-def test_get_lender_status_with_invalid_auth(server_url, server_available, challenge_token, test_wallet):
+def test_get_lender_status_with_invalid_auth(server_url, server_available, challenge_token, test_alias):
     """Test GET lender status with invalid authentication."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     response = requests.get(
         f"{server_url}/api/v1/lender/status",
@@ -97,9 +97,9 @@ def test_get_lender_status_with_invalid_auth(server_url, server_available, chall
 
 @pytest.mark.integration
 @pytest.mark.lending
-def test_lending_payload_structure(server_url, server_available, challenge_token, test_wallet):
+def test_lending_payload_structure(server_url, server_available, challenge_token, test_alias):
     """Test lending payload is correctly structured."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     payload = {"pool_address": POOL_ADDRESS}
 
@@ -117,9 +117,9 @@ def test_lending_payload_structure(server_url, server_available, challenge_token
 
 @pytest.mark.integration
 @pytest.mark.lending
-def test_lending_endpoints_exist(server_url, server_available, challenge_token, test_wallet):
+def test_lending_endpoints_exist(server_url, server_available, challenge_token, test_alias):
     """Test all lending endpoints exist and are configured."""
-    headers = test_wallet.authPayload(asDict=True, challenge=challenge_token)
+    headers = test_alias.authPayload(asDict=True, challenge=challenge_token)
 
     # Test POST /api/v1/lender/lend
     response1 = requests.post(

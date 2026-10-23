@@ -87,7 +87,7 @@ def test_authenticated_call_with_real_wallet(test_server_url, server_available, 
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_real_wallet_signature_is_valid(test_server_url, server_available, test_wallet):
+def test_real_wallet_signature_is_valid(test_server_url, server_available, test_alias):
     """Test that a real wallet produces a valid signature that the server accepts."""
     # Get a fresh challenge
     challenge_response = requests.get(f"{test_server_url}/api/v1/auth/challenge")
@@ -96,9 +96,9 @@ def test_real_wallet_signature_is_valid(test_server_url, server_available, test_
 
     # Sign with real wallet, EIP-191 (personal_sign)
     headers = {
-        "wallet-pubkey": test_wallet.pubkey,
+        "alias-pubkey": test_alias.pubkey,
         "message": challenge,
-        "signature": test_wallet.ethSign(challenge)
+        "signature": test_alias.ethSign(challenge)
     }
 
     # Try to access an authenticated endpoint
@@ -127,7 +127,7 @@ def test_missing_auth_headers_rejected(test_server_url, server_available):
 def test_invalid_pubkey_format_rejected(test_server_url, server_available, challenge_token):
     """Test that invalid public key format is rejected."""
     headers = {
-        "wallet-pubkey": "invalid_pubkey",  # Invalid format
+        "alias-pubkey": "invalid_pubkey",  # Invalid format
         "message": challenge_token,
         "signature": "fake_signature"
     }
@@ -144,10 +144,10 @@ def test_invalid_pubkey_format_rejected(test_server_url, server_available, chall
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_invalid_signature_rejected(test_server_url, server_available, test_wallet, challenge_token):
+def test_invalid_signature_rejected(test_server_url, server_available, test_alias, challenge_token):
     """Test that invalid signatures are rejected."""
     headers = {
-        "wallet-pubkey": test_wallet.pubkey,  # Valid pubkey
+        "alias-pubkey": test_alias.pubkey,  # Valid pubkey
         "message": challenge_token,
         "signature": "invalid_signature_not_base64"  # Invalid signature
     }
@@ -163,15 +163,15 @@ def test_invalid_signature_rejected(test_server_url, server_available, test_wall
 
 @pytest.mark.integration
 @pytest.mark.auth
-def test_wrong_message_signature_rejected(test_server_url, server_available, test_wallet, challenge_token):
+def test_wrong_message_signature_rejected(test_server_url, server_available, test_alias, challenge_token):
     """Test that signature for wrong message is rejected."""
     # Sign a DIFFERENT message than the challenge
     wrong_message = "wrong_message"
 
     headers = {
-        "wallet-pubkey": test_wallet.pubkey,
+        "alias-pubkey": test_alias.pubkey,
         "message": challenge_token,  # This is the challenge
-        "signature": test_wallet.ethSign(wrong_message)  # But signature is for different message
+        "signature": test_alias.ethSign(wrong_message)  # But signature is for different message
     }
 
     response = requests.get(

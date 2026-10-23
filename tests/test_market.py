@@ -30,7 +30,7 @@ CHAIN = 84532
 TOKEN = '0x4dee947383d5C9c8E421F55Fe3518a29324aE469'
 S_NOSTR, B_NOSTR, X_NOSTR = '5' * 64, '6' * 64, '7' * 64  # the pubkeys (x-only hex) as the markets see them
 S_ID, B_ID, X_ID = '0x' + '11' * 32, '0x' + '22' * 32, '0x' + '33' * 32
-S_VAULT, B_VAULT = '0x' + '44' * 32, '0x' + '55' * 32
+S_WALLET, B_WALLET = '0x' + '44' * 32, '0x' + '55' * 32
 addr = lambda key: Account.from_key(key).address
 STREAM = 'walk_pred'
 SAT = mk.SAT
@@ -43,13 +43,13 @@ class FakeChannels:
     def __init__(self, clock):
         self.map, self.calls, self.refuse, self.clock, self.n = {}, [], None, clock, 0
 
-    def open_channel(self, vault_key, identity_address, payee, deposit, salt=None):
+    def open_channel(self, wallet_key, alias_address, payee, deposit, salt=None):
         self.calls.append('open')
         if self.refuse:
             raise self.refuse
         self.n += 1
         cid = '0x' + f'{self.n:064x}'
-        self.map[cid] = {'id': cid, 'payer': addr(vault_key), 'payee': payee, 'token': TOKEN, 'signer': identity_address,
+        self.map[cid] = {'id': cid, 'payer': addr(wallet_key), 'payee': payee, 'token': TOKEN, 'signer': alias_address,
                          'deposit': deposit, 'settled': 0, 'close_requested_at': None, 'closed': False, 'grace_ends_at': None}
         return {'id': cid, 'hash': f'0xopen{self.n}', 'permit': True}
 
@@ -57,7 +57,7 @@ class FakeChannels:
         c = self.map.get(cid)
         return dict(c) if c else None
 
-    def settle_many(self, identity_key, entries):
+    def settle_many(self, alias_key, entries):
         self.calls.append(('settle_many', len(entries)))
         settled = []
         for e in entries:
@@ -70,13 +70,13 @@ class FakeChannels:
             settled.append({'id': e['id'], 'cumulative': e['cumulative'], 'paid': 0, 'settled': target})
         return {'hash': '0xsettle', 'settled': settled, 'skipped': []}
 
-    def request_close(self, identity_key, cid):
+    def request_close(self, alias_key, cid):
         self.calls.append('request_close')
         c = self.map[cid]
         c['close_requested_at'] = c['close_requested_at'] or self.clock[0]
         c['grace_ends_at'] = c['close_requested_at'] + CLOSE_GRACE_S
 
-    def withdraw(self, identity_key, cid):
+    def withdraw(self, alias_key, cid):
         c = self.map[cid]
         if self.clock[0] < c['grace_ends_at']:
             raise ChannelError("The 7-day grace period after the close request hasn't ended yet.", reason='CloseNotReady')
@@ -127,7 +127,7 @@ class World:
         self.clock = [1_792_100_000]
         self.chain = FakeChannels(self.clock)
         self.prices = {}
-        self.vault_open = True
+        self.wallet_open = True
         self.sdb, self.bdb = MemoryDb(), MemoryDb()
         self.srelay, self.brelay = Relay(S_NOSTR), Relay(B_NOSTR)
         self.seller, self.buyer = self.make('s'), self.make('b')
@@ -136,7 +136,7 @@ class World:
         s = who == 's'
         return mk.Market(
             db=db or (self.sdb if s else self.bdb), nostr_pubkey=S_NOSTR if s else B_NOSTR,
-            identity_key=lambda: S_ID if s else B_ID, vault_address=lambda: addr(S_VAULT if s else B_VAULT),
+            alias_key=lambda: S_ID if s else B_ID, wallet_address=lambda: addr(S_WALLET if s else B_WALLET),
             chain=lambda: self.chain, send=self.srelay if s else self.brelay, chain_id=CHAIN, contract=ADDRESS,
             token=TOKEN, prices=lambda: dict(self.prices) if s else {}, now=lambda: self.clock[0])
 
@@ -185,7 +185,7 @@ class World:
 
     async def bought(self, deposit=5 * PRICE):
         self.prices[STREAM] = 1000
-        v = await self.buyer.buy(self.entry(), deposit, vault_key=B_VAULT)
+        v = await self.buyer.buy(self.entry(), deposit, wallet_key=B_WALLET)
         await self.subscription_to_seller()
         return v
 
@@ -201,7 +201,7 @@ def w():
 # ── pieces ─────────────────────────────────────────────────────────────
 
 def test_a_listing_is_lites_price_per_obs_on_this_chains_satori_contract():
-    m = {'chain': CHAIN, 'contract': ADDRESS, 'token': TOKEN, 'payee': addr(S_VAULT)}
+    m = {'chain': CHAIN, 'contract': ADDRESS, 'token': TOKEN, 'payee': addr(S_WALLET)}
     of = lambda e: mk.listing_of(e, CHAIN, ADDRESS, TOKEN)
     assert of({'price_per_obs': 1000, 'metadata': {'market': m}}) == {**m, 'price': 1000 * SAT}
     for bad in [{'chain': 8453}, {'contract': '0x' + '1' * 40}, {'token': '0x' + '2' * 40}, {'payee': 'nope'}]:
@@ -223,21 +223,21 @@ def test_deliverable_the_first_free_then_while_the_voucher_covers_every_one_deli
 
 # ── selling and buying ─────────────────────────────────────────────────
 
-def test_the_listing_the_vault_paid_satori_the_satori_contract_free_again_none(w):
+def test_the_listing_the_wallet_paid_satori_the_satori_contract_free_again_none(w):
     w.prices[STREAM] = 1000
     assert w.seller.listing(STREAM) == {'price_per_obs': 1000, 'market': {
-        'chain': CHAIN, 'contract': ADDRESS, 'token': TOKEN, 'payee': addr(S_VAULT)}}
+        'chain': CHAIN, 'contract': ADDRESS, 'token': TOKEN, 'payee': addr(S_WALLET)}}
     assert w.seller.status()['selling'] == [{'stream': STREAM, 'price': '0.00001', 'buyers': []}]
     w.prices[STREAM] = 0
     assert w.seller.listing(STREAM) is None
 
 
-def test_buy_the_vault_opens_a_channel_the_34602_names_it_with_the_binding_the_seller_accepts_it_from_the_chain(w):
+def test_buy_the_wallet_opens_a_channel_the_34602_names_it_with_the_binding_the_seller_accepts_it_from_the_chain(w):
     v = run(w.bought())
     assert {k: v[k] for k in ('pubkey', 'stream', 'price', 'deposit', 'paid', 'status')} == {
         'pubkey': S_NOSTR, 'stream': STREAM, 'price': '0.00001', 'deposit': '0.00005', 'paid': '0', 'status': 'open'}
     ch = w.chain.map[v['channel']]
-    assert (ch['payer'], ch['payee'], ch['signer'], ch['deposit']) == (addr(B_VAULT), addr(S_VAULT), addr(B_ID), 5 * PRICE)
+    assert (ch['payer'], ch['payee'], ch['signer'], ch['deposit']) == (addr(B_WALLET), addr(S_WALLET), addr(B_ID), 5 * PRICE)
     _, provider, stream, pc = w.last(w.brelay, 'subscription')
     assert (provider, stream) == (S_NOSTR, STREAM)
     assert {k: pc[k] for k in ('chain', 'contract', 'id')} == {'chain': CHAIN, 'contract': ADDRESS, 'id': v['channel']}
@@ -246,7 +246,7 @@ def test_buy_the_vault_opens_a_channel_the_34602_names_it_with_the_binding_the_s
                                                           'paid': '0', 'settled': '0', 'deposit': '0.00005', 'closing': False}]
     assert w.buyer.payment_channel(S_NOSTR, STREAM) == pc  # the same, for Lite's re-subscribe
     # again while it is open: the same channel, nothing opened
-    assert run(w.buyer.buy(w.entry(), 5 * PRICE, vault_key=B_VAULT))['channel'] == v['channel']
+    assert run(w.buyer.buy(w.entry(), 5 * PRICE, wallet_key=B_WALLET))['channel'] == v['channel']
     assert w.chain.calls.count('open') == 1
 
 
@@ -291,7 +291,7 @@ def test_a_relay_that_took_no_delivery_not_owed_so_the_next_one_still_goes(w):
 
 def test_forgeries_refused(w):
     w.prices[STREAM] = 1000
-    v = run(w.buyer.buy(w.entry(), 5 * PRICE, vault_key=B_VAULT))
+    v = run(w.buyer.buy(w.entry(), 5 * PRICE, wallet_key=B_WALLET))
     sub = w.last(w.brelay, 'subscription')
     pc = sub[3]
     run(w.subscription_to_seller(sub, author=X_NOSTR))  # the buyer's channel claimed by another Nostr key
@@ -299,7 +299,7 @@ def test_forgeries_refused(w):
                                   {**pc, 'binding': sign_binding(X_ID, v['channel'], X_NOSTR)}), author=X_NOSTR))
     assert w.seller.status()['selling'][0]['buyers'] == []
     # a channel paying someone else
-    other = w.chain.open_channel(B_VAULT, addr(B_ID), addr(X_ID), 5 * PRICE)
+    other = w.chain.open_channel(B_WALLET, addr(B_ID), addr(X_ID), 5 * PRICE)
     run(w.subscription_to_seller(('subscription', S_NOSTR, STREAM,
                                   {**pc, 'id': other['id'], 'binding': sign_binding(B_ID, other['id'], B_NOSTR)})))
     # another chain or contract
@@ -360,7 +360,7 @@ def test_the_pass_settles_at_most_once_a_day_a_close_request_stops_deliveries_se
     assert settles() == 2  # nothing due: no transaction
 
 
-def test_stop_the_identity_asks_to_close_lites_unsubscribe_the_refund_after_the_grace_period_in_the_pass(w):
+def test_stop_the_alias_asks_to_close_lites_unsubscribe_the_refund_after_the_grace_period_in_the_pass(w):
     v = run(w.bought())
     run(w.observe(1))
     run(w.observe(2))
@@ -384,14 +384,14 @@ def test_stop_the_identity_asks_to_close_lites_unsubscribe_the_refund_after_the_
     w.clock[0] += CLOSE_GRACE_S
     run(w.buyer.pass_())
     assert 'withdraw' in w.chain.calls
-    assert w.buyer.status()['bought'] == []  # refunded to the vault
+    assert w.buyer.status()['bought'] == []  # refunded to the wallet
 
 
 def test_buy_again_after_a_stop_a_new_channel_the_seller_closes_the_old_one_and_serves_the_new(w):
     v1 = run(w.bought())
     run(w.observe(1))
     run(w.buyer.stop(S_NOSTR, STREAM))
-    v2 = run(w.buyer.buy(w.entry(), 5 * PRICE, vault_key=B_VAULT))
+    v2 = run(w.buyer.buy(w.entry(), 5 * PRICE, wallet_key=B_WALLET))
     assert v2['channel'] != v1['channel']
     run(w.subscription_to_seller())
     assert [(b['channel'], b['closing']) for b in w.seller.status()['selling'][0]['buyers']] == [
@@ -404,22 +404,22 @@ def test_buy_again_after_a_stop_a_new_channel_the_seller_closes_the_old_one_and_
 
 def test_what_cant_buy_in_plain_words_nothing_kept(w):
     w.prices[STREAM] = 1000
-    with pytest.raises(mk.MarketError, match='Unlock the vault first'):
-        run(w.buyer.buy(w.entry(), 5 * PRICE, vault_key=None))
+    with pytest.raises(mk.MarketError, match='Unlock the wallet first'):
+        run(w.buyer.buy(w.entry(), 5 * PRICE, wallet_key=None))
     with pytest.raises(mk.MarketError, match='not for sale on the Satori contract'):
-        run(w.buyer.buy(w.entry(None), 5 * PRICE, vault_key=B_VAULT))
+        run(w.buyer.buy(w.entry(None), 5 * PRICE, wallet_key=B_WALLET))
     with pytest.raises(mk.MarketError, match='at least one observation'):
-        run(w.buyer.buy(w.entry(), PRICE - 1, vault_key=B_VAULT))
-    w.chain.refuse = ChannelError("Your vault is staked with this neuron, so it can't send SATORI: "
-                                  "a channel needs SATORI the vault can send.", reason='Locked')
-    with pytest.raises(mk.MarketError, match="Your vault is staked with this neuron, so it can't send SATORI"):
-        run(w.buyer.buy(w.entry(), 5 * PRICE, vault_key=B_VAULT))
+        run(w.buyer.buy(w.entry(), PRICE - 1, wallet_key=B_WALLET))
+    w.chain.refuse = ChannelError("Your wallet is staked with this neuron, so it can't send SATORI: "
+                                  "a channel needs SATORI the wallet can send.", reason='Locked')
+    with pytest.raises(mk.MarketError, match="Your wallet is staked with this neuron, so it can't send SATORI"):
+        run(w.buyer.buy(w.entry(), 5 * PRICE, wallet_key=B_WALLET))
     assert w.buyer.status()['bought'] == []
     assert [x for x in w.brelay.sent if x[0] == 'subscription'] == []
     # the default deposit: 100 observations
     w.chain.refuse = None
     assert mk.DEPOSIT_OBS == 100
-    assert run(w.buyer.buy(w.entry(), vault_key=B_VAULT))['deposit'] == '0.001'  # 100 × 1000 satoshis
+    assert run(w.buyer.buy(w.entry(), wallet_key=B_WALLET))['deposit'] == '0.001'  # 100 × 1000 satoshis
 
 
 def test_kept_a_reload_has_the_buyers_and_what_each_paid_and_what_we_buy(w):
