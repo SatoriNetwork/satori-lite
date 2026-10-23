@@ -192,7 +192,7 @@ Download lenders.json, read the `owed_amount` for each pool staker, and send it 
 
 **Addresses:**
 - **Wallet Address** - Your wallet's address, where your funds are (a Base address, 0x...)
-- **Alias Address** - The address of the key the neuron signs with on its own (it needs a little ETH for gas)
+- **Alias** - The app's own signing address; the daily batch's gas is paid from it (Settings, Staking)
 - **Reward Address** - Where your prediction rewards are sent
 
 **Balance Types:**
