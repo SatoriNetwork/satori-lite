@@ -129,8 +129,6 @@ start_satori_lite() {
         -e SATORI_UI_PORT=24601 \
         -v "$SCRIPT_DIR/data:/data" \
         -e SATORI_API_URL=http://satori-api:8000 \
-        -e WALLET_PATH=/data/wallet.yaml \
-        -e VAULT_PATH=/data/vault.yaml \
         -e SECRET_KEY=local-dev-secret-key \
         satori-lite
 
@@ -182,7 +180,7 @@ print_final_status() {
     echo -e "  ${BLUE}API Server:${NC} http://localhost:8000"
     echo ""
     echo -e "  ${YELLOW}IMPORTANT:${NC}"
-    echo -e "  - First login will CREATE a new wallet/vault"
+    echo -e "  - First login will CREATE a new wallet"
     echo -e "  - Choose a password you will remember"
     echo -e "  - Wallet data is persisted in: $SCRIPT_DIR/data/"
     echo ""

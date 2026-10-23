@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS streams (
     server_stream_id INTEGER,
     uuid TEXT UNIQUE NOT NULL,              -- Server-provided UUID
     name TEXT,                               -- e.g., "btc", "eth", "safetrade_btc"
-    author TEXT,                             -- Wallet pubkey of publisher
+    author TEXT,                             -- Alias pubkey of publisher
     secondary TEXT,
     target TEXT,
     meta TEXT,
@@ -545,7 +545,7 @@ from satorilib.server import SatoriServerClient
 from engine-lite.storage.manager import EngineStorageManager
 
 # Initialize
-server = SatoriServerClient(wallet)
+server = SatoriServerClient(alias)
 storage = EngineStorageManager.getInstance()
 
 # Fetch observations

@@ -32,7 +32,7 @@ The neuron is organized as three cooperating components:
   scheduling, scoring, and the operator interfaces (CLI and web UI).
 - **engine-lite** — the forecasting engine responsible for feature
   engineering, model training, evaluation, and prediction publication.
-- **lib-lite / satorilib** — shared primitives for wallets, identity, stream
+- **lib-lite / satorilib** — shared primitives for keys and signing, stream
   data structures, server communication, persistence, and transport.
 
 ## Repository Layout
@@ -62,11 +62,12 @@ deployments.
 ### Neuron (`neuron-lite`)
 
 - Startup orchestration via a directed acyclic graph of initialization steps.
-- Wallet creation, unlocking, and vault management for Evrmore identities.
+- The two keys: the alias (made at startup) and the wallet (made at wallet
+  setup, unlocked with its password), and the wallet's link to the alias.
 - Local stream relay management and publication scheduling.
 - Scoring and reward tracking against the central server.
 - A Flask-based web interface served on port `24601`.
-- An interactive terminal CLI for wallet, vault, and node operations.
+- An interactive terminal CLI for wallet and node operations.
 
 ### Engine (`engine-lite`)
 
@@ -76,27 +77,9 @@ deployments.
 
 ### Shared Library (`satorilib`)
 
-- **Wallet**: Evrmore wallet, identity derivation, and signing primitives.
+- **Keys**: Evrmore key classes, key derivation, and signing primitives.
 - **Server**: Authenticated client for the Satori central server (checkin,
   balances, stream and subscription management).
-
-### Central login (EIP-191)
-
-Since v3.2.14 the neuron signs every central-auth message with a standard
-Ethereum signature, EIP-191 (`personal_sign`), by its identity key (or by the
-vault where a call authenticates as the vault). That covers the JWT login
-(satorilib's `SatoriServerClient` and the web UI's `get_auth_headers`) and the
-legacy header auth (`authPayload`). The headers are unchanged: `wallet-pubkey`
-(compressed secp256k1 hex), `message` and `signature`, where `signature` is
-`0x` + r‖s‖v hex. Central recovers the signer and compares it with the Ethereum
-address of `wallet-pubkey`. The neuron no longer sends Evrmore signatures to
-central.
-
-The neuron image must be built with satorilib `base-upgrade` (commit `5028913`
-or later, which adds `wallet.ethSign`). It needs a central that accepts EIP-191
-login: central's `base-upgrade` branch (commit `d5984b2` or later). An older
-central rejects these signatures, so the two deploy together: central first,
-or at the same time, never the neuron first.
 - **Concepts**: Canonical data structures for streams, observations, and
   related domain objects.
 - **Transports**: Nostr-based datastream pub/sub
@@ -104,6 +87,61 @@ or at the same time, never the neuron first.
   experimental transports.
 - **Persistence**: SQLite helpers, on-disk caching, and file utilities.
 - **Asynchronous**: Thread and task helpers used across the neuron.
+
+### The alias and the wallet
+
+The neuron holds two keys:
+
+- the **alias**: its automated signing key. It is made at startup with no
+  input and kept unencrypted, so the neuron works with nobody present. It
+  acts for the wallet with the Satori Network (register, login, predictions)
+  and signs the neuron's Base predictions and payment-channel vouchers.
+- the **wallet**: the person's own key, which holds the funds (the SATORI,
+  the stake, the claims). It is made at wallet setup and encrypted with the
+  person's password.
+
+Key files, in the keys folder (`/Satori/Neuron/wallet` in the image): a new
+install writes `alias.yaml` (the alias) and `wallet.yaml` (the wallet). An
+install from before the rename keeps `wallet.yaml` (the alias) and
+`vault.yaml` (the wallet), and the neuron never moves or renames them. The
+two layouts are told apart only by `alias.yaml`: present, the new layout;
+absent with `wallet.yaml` present, the older one (`config.keyFiles()`).
+Download and import of the wallet zip carry both files of the layout in use,
+named by that layout.
+
+### The Satori Network: register, login and the link
+
+When the wallet is unlocked (at wallet setup, and at login when no link is
+stored yet), it signs a **link** to its alias: an EIP-191 (`personal_sign`)
+signature by the wallet of exactly
+
+```
+Satori: link this alias to my wallet
+alias: 0x<the alias's address, EIP-55>
+wallet: 0x<the wallet's address, EIP-55>
+issued: <unix seconds>
+```
+
+The link (the message and its signature; nothing secret) is kept in
+`wallet-link.yaml` beside the keys and sent with every register.
+
+- **Register** (`POST /api/v1/peer/register`) sends `alias-pubkey`,
+  `nostr-pubkey`, `neuron-version` and, once a wallet exists, its link as
+  `wallet-link` (base64 of the message's UTF-8) and `wallet-signature`.
+  Before a wallet exists the alias registers alone. The answer's
+  `wallet_address` is the linked wallet's Base address (or null), and
+  `wallet_link_error` says why a link was not accepted.
+- **Login** (`POST /api/v1/auth/login`, satorilib's `SatoriServerClient` and
+  the web UI's `get_auth_headers`) and the legacy header auth (`authPayload`)
+  send `alias-pubkey` (compressed secp256k1 hex), `message` and `signature`,
+  where `signature` is EIP-191 by the alias: `0x` + r‖s‖v hex. Central
+  recovers the signer and compares it with the Ethereum address of
+  `alias-pubkey`.
+
+The neuron image must be built with satorilib `base-upgrade` (with
+`satorilib.wallet.link`), and it needs a central that accepts this form of
+register and login: central's `base-upgrade` branch. The two deploy
+together: central first, or at the same time, never the neuron first.
 
 ## Installation
 
@@ -152,7 +190,7 @@ The process performs wallet initialization, registers with the central
 server, starts the embedded relay, launches the engine, and serves the
 operator web interface at `http://localhost:24601`.
 
-The interactive CLI can be used for wallet inspection, vault management, and
+The interactive CLI can be used for wallet inspection and management, and
 operational commands:
 
 ```bash

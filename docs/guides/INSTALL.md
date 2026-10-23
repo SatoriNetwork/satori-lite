@@ -54,7 +54,7 @@ Once in the CLI, you can use:
 | Command | Description |
 |---------|-------------|
 | `/status` | Show neuron status |
-| `/balance` | Show wallet balance |
+| `/balance` | Show the wallet's or the alias's balance |
 | `/streams` | Show stream assignments |
 | `/neuron-logs` | Show recent logs |
 | `/pause` | Pause the engine |

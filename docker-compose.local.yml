@@ -17,8 +17,6 @@ services:
     container_name: satori-lite
     environment:
       SATORI_CENTRAL_URL: http://satori-api:8000
-      WALLET_PATH: /data/wallet.yaml
-      VAULT_PATH: /data/vault.yaml
       SECRET_KEY: local-dev-secret-key-change-in-production
       WEB_PORT: 24601
       SATORI_RELAY_PUBLIC_PORT: 7777
@@ -43,8 +41,6 @@ services:
     container_name: satori-dev
     environment:
       SATORI_CENTRAL_URL: http://satori-api:8000
-      WALLET_PATH: /data/wallet.yaml
-      VAULT_PATH: /data/vault.yaml
       SECRET_KEY: local-dev-secret-key-change-in-production
       WEB_PORT: 24601
       MUNDO_URL: https://mundo.satorinet.org

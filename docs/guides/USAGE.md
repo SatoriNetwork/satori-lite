@@ -26,7 +26,7 @@
 ## Data Storage
 Data persists in `./<instance>/` with subdirectories:
 - `config/` - Configuration files
-- `wallet/` - Wallet data
+- `wallet/` - The keys: the alias, the wallet, the Nostr key, and the wallet's link
 - `models/` - AI models
 - `data/` - Engine data
 

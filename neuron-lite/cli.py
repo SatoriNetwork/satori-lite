@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Satori Neuron CLI - Interactive command-line interface for wallet and vault management.
-Provides commands to check balances and manage vault.
+Satori Neuron CLI - Interactive command-line interface for the wallet and the alias.
+Provides commands to check balances and manage the wallet.
 """
 
 import sys
@@ -176,34 +176,33 @@ class NeuronCLI:
         self.env = env
         self.runMode = runMode
         self.wallet_manager = None
-        self._vault_password = None  # Store password in memory for session
+        self._wallet_password = None  # Store password in memory for session
 
-    def check_vault_file_exists(self) -> bool:
-        """Check if vault.yaml file exists (like web UI does)."""
+    def check_wallet_file_exists(self) -> bool:
+        """Check if the wallet's file exists (like web UI does)."""
         try:
             from satorineuron import config
-            vault_path = config.walletPath('vault.yaml')
-            return os.path.exists(vault_path)
+            return os.path.exists(config.walletPath())
         except Exception:
             return False
 
-    def check_vault_password_exists(self) -> bool:
-        """Check if vault password exists in config."""
+    def check_wallet_password_exists(self) -> bool:
+        """Check if wallet password exists in config."""
         from satorineuron import config
-        vault_password = config.get().get('vault password')
-        return vault_password is not None and len(str(vault_password)) > 0
+        wallet_password = config.walletPassword()
+        return wallet_password is not None and len(str(wallet_password)) > 0
 
-    def prompt_mandatory_vault_password(self) -> bool:
-        """Prompt user to create a vault password. Returns True if successful."""
-        # Check if vault password already exists (could be set via web UI or another CLI instance)
-        if self.check_vault_password_exists():
+    def prompt_mandatory_wallet_password(self) -> bool:
+        """Prompt user to create a wallet password. Returns True if successful."""
+        # Check if wallet password already exists (could be set via web UI or another CLI instance)
+        if self.check_wallet_password_exists():
             console_print()
             console_print("=" * 60)
-            console_print("  VAULT PASSWORD ALREADY EXISTS")
+            console_print("  WALLET PASSWORD ALREADY EXISTS")
             console_print("=" * 60)
             console_print()
-            console_print("A vault password has already been created.")
-            console_print("You can use it to unlock your vault.")
+            console_print("A wallet password has already been created.")
+            console_print("You can use it to unlock your wallet.")
             console_print()
             console_print("If you set it in another interface (web UI), use that password.")
             console_print("=" * 60)
@@ -212,21 +211,21 @@ class NeuronCLI:
 
         console_print()
         console_print("=" * 60)
-        console_print("  VAULT PASSWORD SETUP REQUIRED")
+        console_print("  WALLET PASSWORD SETUP REQUIRED")
         console_print("=" * 60)
         console_print()
-        console_print("A vault password is required to secure your wallet.")
+        console_print("A wallet password is required to secure your wallet.")
         console_print("This password encrypts your private keys and funds.")
         console_print()
         console_print("IMPORTANT: Save this password in a secure location!")
-        console_print("If you lose this password, you will lose access to your vault.")
-        console_print("There is no way to recover a lost vault password.")
+        console_print("If you lose this password, you will lose access to your wallet.")
+        console_print("There is no way to recover a lost wallet password.")
         console_print()
         console_print("=" * 60)
         console_print()
 
         while True:
-            password1 = console_password_input("Enter new vault password (min 4 characters): ")
+            password1 = console_password_input("Enter new wallet password (min 4 characters): ")
 
             if len(password1) < 4:
                 console_print("Password must be at least 4 characters. Please try again.")
@@ -241,77 +240,77 @@ class NeuronCLI:
                 continue
 
             # Double-check if password was created elsewhere (race condition protection)
-            if self.check_vault_password_exists():
+            if self.check_wallet_password_exists():
                 console_print()
-                console_print("Vault password was already created by another process.")
-                console_print("Please use the existing password to unlock your vault.")
+                console_print("Wallet password was already created by another process.")
+                console_print("Please use the existing password to unlock your wallet.")
                 console_print()
                 return True
 
             # Save password to config
             from satorineuron import config
-            config.add(data={'vault password': password1})
-            self._vault_password_set = True
+            config.add(data={'wallet password': password1})
+            self._wallet_password_set = True
 
             console_print()
-            console_print("Vault password saved successfully!")
+            console_print("Wallet password saved successfully!")
             console_print()
             console_print("REMINDER: Please save your password securely!")
-            console_print("         You will need it to access your vault.")
+            console_print("         You will need it to access your wallet.")
             console_print()
             return True
 
-    def prompt_vault_setup_or_unlock(self) -> bool:
+    def prompt_wallet_setup_or_unlock(self) -> bool:
         """
-        Prompt user to either create new vault or unlock existing vault.
+        Prompt user to either create new wallet or unlock existing wallet.
         Returns True if successful, False otherwise.
         This matches the web UI behavior - passwords are NOT saved to config.
         """
         from satorineuron import config
 
         # Check if config password exists (backward compatibility)
-        config_password = config.get().get('vault password')
+        config_password = config.walletPassword()
 
-        if not self.check_vault_file_exists():
-            # No vault file - need to create new vault
+        if not self.check_wallet_file_exists():
+            # No wallet file - need to create new wallet
             console_print()
             console_print("=" * 60)
-            console_print("  VAULT SETUP")
+            console_print("  WALLET SETUP")
             console_print("=" * 60)
             console_print()
-            console_print("No vault found. Let's create a new one.")
+            console_print("No wallet found. Let's create a new one.")
             console_print()
-            console_print("Create a secure password to protect your vault.")
+            console_print("Create a secure password to protect your wallet.")
             console_print("This password encrypts your private keys and funds.")
             console_print()
             console_print("IMPORTANT: Save this password in a secure location!")
-            console_print("If you lose this password, you will lose access to your vault.")
-            console_print("There is no way to recover a lost vault password.")
+            console_print("If you lose this password, you will lose access to your wallet.")
+            console_print("There is no way to recover a lost wallet password.")
             console_print()
             console_print("=" * 60)
             console_print()
 
-            return self.setup_new_vault()
+            return self.setup_new_wallet()
         else:
-            # Vault file exists - need to unlock it
+            # Wallet file exists - need to unlock it
             console_print()
             console_print("=" * 60)
-            console_print("  VAULT UNLOCK")
+            console_print("  WALLET UNLOCK")
             console_print("=" * 60)
             console_print()
 
             # Try config password first (backward compatibility, like web UI)
             if config_password:
-                console_print("Attempting to unlock vault with config password...")
-                if self.unlock_existing_vault(config_password):
-                    console_print("Vault unlocked successfully!")
+                console_print("Attempting to unlock wallet with config password...")
+                if self.unlock_existing_wallet(config_password):
+                    console_print("Wallet unlocked successfully!")
                     console_print()
                     return True
                 else:
                     console_print("Config password failed. Please enter your password manually.")
                     console_print()
 
-            console_print("Please enter your vault password to unlock.")
+            console_print("Please enter your wallet password to unlock.")
             console_print("(Press Ctrl+C to exit)")
             console_print()
             console_print("=" * 60)
@@ -319,24 +318,24 @@ class NeuronCLI:
 
             # Prompt for password (unlimited attempts, like web UI)
             while True:
-                password = console_password_input("Enter vault password: ")
+                password = console_password_input("Enter wallet password: ")
 
-                if self.unlock_existing_vault(password):
+                if self.unlock_existing_wallet(password):
                     console_print()
-                    console_print("Vault unlocked successfully!")
+                    console_print("Wallet unlocked successfully!")
                     console_print()
                     return True
                 else:
                     console_print("Invalid password. Please try again.")
                     console_print()
 
-    def setup_new_vault(self) -> bool:
+    def setup_new_wallet(self) -> bool:
         """
-        Create a new vault with password (DO NOT save password to config).
+        Create a new wallet with password (DO NOT save password to config).
         Matches web UI behavior.
         """
         while True:
-            password1 = console_password_input("Enter new vault password (min 4 characters): ")
+            password1 = console_password_input("Enter new wallet password (min 4 characters): ")
 
             if len(password1) < 4:
                 console_print("Password must be at least 4 characters. Please try again.")
@@ -350,35 +349,35 @@ class NeuronCLI:
                 console_print()
                 continue
 
-            # Try to create the vault using WalletManager
+            # Try to create the wallet using WalletManager
             try:
                 from satorineuron.init.wallet import WalletManager
 
                 # Create wallet manager without using config password
                 wallet_manager = WalletManager.create(useConfigPassword=False)
-                vault = wallet_manager.openVault(password=password1, create=True)
+                wallet = wallet_manager.openWallet(password=password1, create=True)
 
-                if vault and vault.isDecrypted:
-                    self._vault_password = password1  # Store in memory for session
+                if wallet and wallet.isDecrypted:
+                    self._wallet_password = password1  # Store in memory for session
                     console_print()
-                    console_print("Vault created successfully!")
+                    console_print("Wallet created successfully!")
                     console_print()
                     console_print("REMINDER: Please save your password securely!")
-                    console_print("         You will need it to access your vault.")
+                    console_print("         You will need it to access your wallet.")
                     console_print()
                     return True
                 else:
-                    console_print("Error creating vault. Please try again.")
+                    console_print("Error creating wallet. Please try again.")
                     console_print()
                     return False
             except Exception as e:
-                console_print(f"Error creating vault: {e}")
+                console_print(f"Error creating wallet: {e}")
                 console_print()
                 return False
 
-    def unlock_existing_vault(self, password: str) -> bool:
+    def unlock_existing_wallet(self, password: str) -> bool:
         """
-        Unlock existing vault with password.
+        Unlock existing wallet with password.
         Returns True if successful, False otherwise.
         """
         try:
@@ -386,10 +385,10 @@ class NeuronCLI:
 
             # Create wallet manager without using config password
             wallet_manager = WalletManager.create(useConfigPassword=False)
-            vault = wallet_manager.openVault(password=password, create=False)
+            wallet = wallet_manager.openWallet(password=password, create=False)
 
-            if vault and vault.isDecrypted:
-                self._vault_password = password  # Store in memory for session
+            if wallet and wallet.isDecrypted:
+                self._wallet_password = password  # Store in memory for session
                 return True
             else:
                 return False
@@ -494,6 +493,64 @@ class NeuronCLI:
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
+    def get_alias_balance_electrumx(self) -> str:
+        """Fetch alias balance from ElectrumX servers."""
+        if not self.wallet_manager:
+            return "Wallet manager not initialized."
+
+        console_print("Fetching alias balance...")
+        console_print()
+
+        try:
+            # Ensure ElectrumX connection with retry
+            if hasattr(self.wallet_manager, 'connect'):
+                for _ in range(3):
+                    if self.wallet_manager.connect():
+                        break
+                    time.sleep(1)
+
+            # Get alias
+            alias = self.wallet_manager.alias
+            if not alias:
+                return "Alias not available."
+
+            # Fetch balances from ElectrumX (retry if connection not ready)
+            if hasattr(alias, 'getBalances'):
+                for _ in range(3):
+                    if alias.electrumx and alias.electrumx.connected():
+                        alias.getBalances()
+                        break
+                    time.sleep(1)
+                else:
+                    # Final attempt even if connection check failed
+                    alias.getBalances()
+
+            # Format and return balance information
+            lines = ["Alias Balance:"]
+            lines.append("-" * 40)
+
+            # SATORIEVR balance
+            if hasattr(alias, 'balance') and alias.balance:
+                satori_amount = alias.balance.amount
+                lines.append(f"  SATORIEVR: {satori_amount:.8f}")
+            else:
+                lines.append("  SATORIEVR: 0.00000000")
+
+            # EVR balance
+            if hasattr(alias, 'currency') and alias.currency:
+                evr_amount = alias.currency.amount
+                lines.append(f"  EVR:       {evr_amount:.8f}")
+            else:
+                lines.append("  EVR:       0.00000000")
+
+            lines.append("")
+            lines.append("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Error fetching alias balance: {e}"
+
     def get_wallet_balance_electrumx(self) -> str:
         """Fetch wallet balance from ElectrumX servers."""
         if not self.wallet_manager:
@@ -510,10 +567,18 @@ class NeuronCLI:
                         break
                     time.sleep(1)
 
-            # Get wallet
-            wallet = self.wallet_manager.wallet
+            # Re-open wallet with stored password to ensure it's decrypted
+            if self._wallet_password:
+                wallet = self.wallet_manager.openWallet(password=self._wallet_password)
+            else:
+                wallet = self.wallet_manager.wallet
+
             if not wallet:
-                return "Wallet not available."
+                return "Wallet not available.\nPlease create or unlock your wallet first."
+
+            # Check if wallet is decrypted
+            if hasattr(wallet, 'isDecrypted') and not wallet.isDecrypted:
+                return "Wallet is locked.\nPlease unlock your wallet first."
 
             # Fetch balances from ElectrumX (retry if connection not ready)
             if hasattr(wallet, 'getBalances'):
@@ -552,71 +617,113 @@ class NeuronCLI:
         except Exception as e:
             return f"Error fetching wallet balance: {e}"
 
-    def get_vault_balance_electrumx(self) -> str:
-        """Fetch vault balance from ElectrumX servers."""
+    def send_transaction_alias(self) -> str:
+        """Send SATORI transaction from alias."""
         if not self.wallet_manager:
             return "Wallet manager not initialized."
 
-        console_print("Fetching vault balance...")
-        console_print()
-
         try:
-            # Ensure ElectrumX connection with retry
+            # Ensure ElectrumX connection
             if hasattr(self.wallet_manager, 'connect'):
                 for _ in range(3):
                     if self.wallet_manager.connect():
                         break
                     time.sleep(1)
 
-            # Re-open vault with stored password to ensure it's decrypted
-            if self._vault_password:
-                vault = self.wallet_manager.openVault(password=self._vault_password)
-            else:
-                vault = self.wallet_manager.vault
+            # Get alias
+            alias = self.wallet_manager.alias
+            if not alias:
+                return "Alias not available."
 
-            if not vault:
-                return "Vault not available.\nPlease create or unlock your vault first."
+            # Fetch current balance
+            console_print("Fetching current balance...")
+            if hasattr(alias, 'getBalances'):
+                alias.getBalances()
 
-            # Check if vault is decrypted
-            if hasattr(vault, 'isDecrypted') and not vault.isDecrypted:
-                return "Vault is locked.\nPlease unlock your vault first."
+            console_print()
+            console_print("Send Transaction from Alias                    [Esc to cancel]")
+            console_print("=" * 60)
+            console_print()
+            console_print("Current Balance:")
+            console_print(f"  SATORIEVR: {alias.balance.amount:.8f}")
+            console_print(f"  EVR:       {alias.currency.amount:.8f}")
+            console_print()
 
-            # Fetch balances from ElectrumX (retry if connection not ready)
-            if hasattr(vault, 'getBalances'):
-                for _ in range(3):
-                    if vault.electrumx and vault.electrumx.connected():
-                        vault.getBalances()
-                        break
-                    time.sleep(1)
-                else:
-                    # Final attempt even if connection check failed
-                    vault.getBalances()
+            # Get recipient address
+            address = console_input("Enter recipient address: ")
+            if address is None:
+                return "Transaction cancelled. Returning to main menu."
+            address = address.strip()
+            if not address:
+                return "Transaction cancelled. Returning to main menu."
 
-            # Format and return balance information
-            lines = ["Vault Balance:"]
-            lines.append("-" * 40)
+            # Validate address
+            from satorilib.wallet.utils.validate import Validate
+            if not Validate.address(address, alias.symbol):
+                return f"Invalid address: {address}\nReturning to main menu."
 
-            # SATORIEVR balance
-            if hasattr(vault, 'balance') and vault.balance:
-                satori_amount = vault.balance.amount
-                lines.append(f"  SATORIEVR: {satori_amount:.8f}")
-            else:
-                lines.append("  SATORIEVR: 0.00000000")
+            # Clear screen and show amount prompt
+            console_write("\033[2J\033[H")
+            console_print()
+            console_print("Send Transaction from Alias                    [Esc to cancel]")
+            console_print("=" * 60)
+            console_print(f"Recipient: {address}")
+            console_print()
+            console_print("Current Balance:")
+            console_print(f"  SATORIEVR: {alias.balance.amount:.8f}")
+            console_print(f"  EVR:       {alias.currency.amount:.8f}")
+            console_print()
 
-            # EVR balance
-            if hasattr(vault, 'currency') and vault.currency:
-                evr_amount = vault.currency.amount
-                lines.append(f"  EVR:       {evr_amount:.8f}")
-            else:
-                lines.append("  EVR:       0.00000000")
+            # Get amount
+            console_print("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
+            amount_str = console_input("Enter amount of SATORIEVR to send: ")
+            if amount_str is None:
+                return "Transaction cancelled. Returning to main menu."
+            amount_str = amount_str.strip()
+            if not amount_str:
+                return "Transaction cancelled. Returning to main menu."
 
-            lines.append("")
-            lines.append("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
+            try:
+                amount = float(amount_str)
+            except ValueError:
+                return f"Invalid amount: {amount_str}\nReturning to main menu."
 
-            return "\n".join(lines)
+            if amount <= 0:
+                return "Amount must be greater than 0.\nReturning to main menu."
+
+            if amount > alias.balance.amount:
+                return f"Insufficient balance. You have {alias.balance.amount:.8f} SATORIEVR\nReturning to main menu."
+
+            # Show confirmation
+            console_print()
+            console_print("Transaction Confirmation                        [Esc to cancel]")
+            console_print("=" * 60)
+            console_print(f"  From:   Alias")
+            console_print(f"  To:     {address}")
+            console_print(f"  Amount: {amount} SATORIEVR")
+            console_print("=" * 60)
+            console_print()
+
+            confirm = console_input("Type 'yes' to confirm: ")
+            if confirm is None:
+                return "Transaction cancelled. Returning to main menu."
+            confirm = confirm.strip().lower()
+            if confirm not in ['yes', 'y']:
+                return "Transaction cancelled. Returning to main menu."
+
+            # Prepare for transaction
+            console_print()
+            console_print("Preparing transaction...")
+            alias.getReadyToSend(balance=True, save=True)
+
+            # Send transaction
+            console_print("Sending transaction...")
+            txid = alias.satoriTransaction(amount=amount, address=address)
+
+            return f"\nTransaction successful!\nTransaction ID: {txid}"
 
         except Exception as e:
-            return f"Error fetching vault balance: {e}"
+            return f"Error sending transaction: {e}"
 
     def send_transaction_wallet(self) -> str:
         """Send SATORI transaction from wallet."""
@@ -632,9 +739,16 @@ class NeuronCLI:
                     time.sleep(1)
 
             # Get wallet
-            wallet = self.wallet_manager.wallet
+            if self._wallet_password:
+                wallet = self.wallet_manager.openWallet(password=self._wallet_password)
+            else:
+                wallet = self.wallet_manager.wallet
+
             if not wallet:
-                return "Wallet not available."
+                return "Wallet not available.\nPlease create or unlock your wallet first."
+
+            if hasattr(wallet, 'isDecrypted') and not wallet.isDecrypted:
+                return "Wallet is locked.\nPlease unlock your wallet first."
 
             # Fetch current balance
             console_print("Fetching current balance...")
@@ -642,7 +756,7 @@ class NeuronCLI:
                 wallet.getBalances()
 
             console_print()
-            console_print("Send Transaction from Wallet                    [Esc to cancel]")
+            console_print("Send Transaction from Wallet                     [Esc to cancel]")
             console_print("=" * 60)
             console_print()
             console_print("Current Balance:")
@@ -666,7 +780,7 @@ class NeuronCLI:
             # Clear screen and show amount prompt
             console_write("\033[2J\033[H")
             console_print()
-            console_print("Send Transaction from Wallet                    [Esc to cancel]")
+            console_print("Send Transaction from Wallet                     [Esc to cancel]")
             console_print("=" * 60)
             console_print(f"Recipient: {address}")
             console_print()
@@ -726,121 +840,6 @@ class NeuronCLI:
         except Exception as e:
             return f"Error sending transaction: {e}"
 
-    def send_transaction_vault(self) -> str:
-        """Send SATORI transaction from vault."""
-        if not self.wallet_manager:
-            return "Wallet manager not initialized."
-
-        try:
-            # Ensure ElectrumX connection
-            if hasattr(self.wallet_manager, 'connect'):
-                for _ in range(3):
-                    if self.wallet_manager.connect():
-                        break
-                    time.sleep(1)
-
-            # Get vault
-            if self._vault_password:
-                vault = self.wallet_manager.openVault(password=self._vault_password)
-            else:
-                vault = self.wallet_manager.vault
-
-            if not vault:
-                return "Vault not available.\nPlease create or unlock your vault first."
-
-            if hasattr(vault, 'isDecrypted') and not vault.isDecrypted:
-                return "Vault is locked.\nPlease unlock your vault first."
-
-            # Fetch current balance
-            console_print("Fetching current balance...")
-            if hasattr(vault, 'getBalances'):
-                vault.getBalances()
-
-            console_print()
-            console_print("Send Transaction from Vault                     [Esc to cancel]")
-            console_print("=" * 60)
-            console_print()
-            console_print("Current Balance:")
-            console_print(f"  SATORIEVR: {vault.balance.amount:.8f}")
-            console_print(f"  EVR:       {vault.currency.amount:.8f}")
-            console_print()
-
-            # Get recipient address
-            address = console_input("Enter recipient address: ")
-            if address is None:
-                return "Transaction cancelled. Returning to main menu."
-            address = address.strip()
-            if not address:
-                return "Transaction cancelled. Returning to main menu."
-
-            # Validate address
-            from satorilib.wallet.utils.validate import Validate
-            if not Validate.address(address, vault.symbol):
-                return f"Invalid address: {address}\nReturning to main menu."
-
-            # Clear screen and show amount prompt
-            console_write("\033[2J\033[H")
-            console_print()
-            console_print("Send Transaction from Vault                     [Esc to cancel]")
-            console_print("=" * 60)
-            console_print(f"Recipient: {address}")
-            console_print()
-            console_print("Current Balance:")
-            console_print(f"  SATORIEVR: {vault.balance.amount:.8f}")
-            console_print(f"  EVR:       {vault.currency.amount:.8f}")
-            console_print()
-
-            # Get amount
-            console_print("Note: SATORIEVR is the official Satori token (migrated from SATORI).")
-            amount_str = console_input("Enter amount of SATORIEVR to send: ")
-            if amount_str is None:
-                return "Transaction cancelled. Returning to main menu."
-            amount_str = amount_str.strip()
-            if not amount_str:
-                return "Transaction cancelled. Returning to main menu."
-
-            try:
-                amount = float(amount_str)
-            except ValueError:
-                return f"Invalid amount: {amount_str}\nReturning to main menu."
-
-            if amount <= 0:
-                return "Amount must be greater than 0.\nReturning to main menu."
-
-            if amount > vault.balance.amount:
-                return f"Insufficient balance. You have {vault.balance.amount:.8f} SATORIEVR\nReturning to main menu."
-
-            # Show confirmation
-            console_print()
-            console_print("Transaction Confirmation                        [Esc to cancel]")
-            console_print("=" * 60)
-            console_print(f"  From:   Vault")
-            console_print(f"  To:     {address}")
-            console_print(f"  Amount: {amount} SATORIEVR")
-            console_print("=" * 60)
-            console_print()
-
-            confirm = console_input("Type 'yes' to confirm: ")
-            if confirm is None:
-                return "Transaction cancelled. Returning to main menu."
-            confirm = confirm.strip().lower()
-            if confirm not in ['yes', 'y']:
-                return "Transaction cancelled. Returning to main menu."
-
-            # Prepare for transaction
-            console_print()
-            console_print("Preparing transaction...")
-            vault.getReadyToSend(balance=True, save=True)
-
-            # Send transaction
-            console_print("Sending transaction...")
-            txid = vault.satoriTransaction(amount=amount, address=address)
-
-            return f"\nTransaction successful!\nTransaction ID: {txid}"
-
-        except Exception as e:
-            return f"Error sending transaction: {e}"
-
     def handle_command(self, user_input: str) -> str | None:
         """Process user commands and return response."""
         user_input = user_input.strip()
@@ -848,9 +847,9 @@ class NeuronCLI:
         if user_input == "/help":
             return """Satori Neuron CLI - Available Commands
 
-Wallet & Vault:
-  /balance       - Show wallet or vault balance (interactive menu)
-  /vault-status  - Show vault status
+Wallet & Alias:
+  /balance       - Show the wallet's or the alias's balance (interactive menu)
+  /wallet-status - Show wallet status
 
 System:
   /clear         - Clear the screen
@@ -864,8 +863,8 @@ System:
 
             # Interactive menu for balance
             options = [
+                {'label': 'Alias Balance', 'action': 'alias'},
                 {'label': 'Wallet Balance', 'action': 'wallet'},
-                {'label': 'Vault Balance', 'action': 'vault'},
                 {'label': 'Back to Main Menu', 'action': 'back'}
             ]
 
@@ -878,22 +877,22 @@ System:
             action = options[selected]['action']
             if action == 'back':
                 return None
+            elif action == 'alias':
+                return self.get_alias_balance_electrumx()
             elif action == 'wallet':
                 return self.get_wallet_balance_electrumx()
-            elif action == 'vault':
-                return self.get_vault_balance_electrumx()
 
-        elif user_input == "/vault-status":
+        elif user_input == "/wallet-status":
             if not self.wallet_manager:
                 return "Wallet manager not initialized."
 
-            vault = self.wallet_manager.vault
-            if vault is None:
-                return "Vault: Not created"
+            wallet = self.wallet_manager.wallet
+            if wallet is None:
+                return "Wallet: Not created"
 
             status_lines = [
-                f"Vault Address: {vault.address}",
-                f"Decrypted: {vault.isDecrypted if hasattr(vault, 'isDecrypted') else 'Unknown'}",
+                f"Wallet Address: {wallet.address}",
+                f"Decrypted: {wallet.isDecrypted if hasattr(wallet, 'isDecrypted') else 'Unknown'}",
             ]
             return "\n".join(status_lines)
 
@@ -942,7 +941,7 @@ System:
         options = [
             {'label': 'Check Balance', 'action': 'balance'},
             {'label': 'Send Transaction', 'action': 'send'},
-            {'label': 'Vault Status', 'action': 'vault-status'},
+            {'label': 'Wallet Status', 'action': 'wallet-status'},
             {'label': 'Clear Screen', 'action': 'clear'},
             {'label': 'Exit', 'action': 'exit'}
         ]
@@ -977,31 +976,31 @@ System:
         from satorineuron import VERSION
         console_print()
         console_print("    Satori Neuron CLI")
-        console_print(f"    Wallet & Vault Manager - {VERSION}")
+        console_print(f"    Wallet Manager - {VERSION}")
         console_print()
 
-        # Prompt for vault setup or unlock (matches web UI behavior)
+        # Prompt for wallet setup or unlock (matches web UI behavior)
         try:
-            if not self.prompt_vault_setup_or_unlock():
-                console_print("Vault access required. Exiting.")
+            if not self.prompt_wallet_setup_or_unlock():
+                console_print("Wallet access required. Exiting.")
                 return
         except (KeyboardInterrupt, EOFError):
             console_print()
             console_print("Exiting...")
             return
 
-        # Initialize wallet manager after vault is unlocked
+        # Initialize wallet manager after wallet is unlocked
         try:
             from satorineuron.init.wallet import WalletManager
             self.wallet_manager = WalletManager.create(useConfigPassword=False)
 
-            # Unlock vault with stored password
-            if self._vault_password:
-                vault = self.wallet_manager.openVault(password=self._vault_password)
-                if vault and hasattr(vault, 'isDecrypted') and vault.isDecrypted:
-                    console_print()  # Just add blank line after vault unlock
+            # Unlock wallet with stored password
+            if self._wallet_password:
+                wallet = self.wallet_manager.openWallet(password=self._wallet_password)
+                if wallet and hasattr(wallet, 'isDecrypted') and wallet.isDecrypted:
+                    console_print()  # Just add blank line after wallet unlock
                 else:
-                    console_print("Warning: Could not unlock vault in wallet manager.")
+                    console_print("Warning: Could not unlock wallet in wallet manager.")
                     console_print()
         except Exception as e:
             console_print(f"Error initializing wallet manager: {e}")
@@ -1024,10 +1023,10 @@ System:
                 if action == 'balance':
                     response = self.handle_command("/balance")
                 elif action == 'send':
-                    # Show submenu for wallet vs vault
+                    # Show submenu for alias vs wallet
                     send_options = [
+                        {'label': 'From Alias', 'action': 'alias'},
                         {'label': 'From Wallet', 'action': 'wallet'},
-                        {'label': 'From Vault', 'action': 'vault'},
                         {'label': 'Back to Main Menu', 'action': 'back'}
                     ]
                     send_selected = self.interactive_menu("Send Transaction", send_options)
@@ -1038,14 +1037,14 @@ System:
                     send_action = send_options[send_selected]['action']
                     if send_action == 'back':
                         continue
+                    elif send_action == 'alias':
+                        response = self.send_transaction_alias()
                     elif send_action == 'wallet':
                         response = self.send_transaction_wallet()
-                    elif send_action == 'vault':
-                        response = self.send_transaction_vault()
                     else:
                         response = "Unknown send action"
-                elif action == 'vault-status':
-                    response = self.handle_command("/vault-status")
+                elif action == 'wallet-status':
+                    response = self.handle_command("/wallet-status")
                 elif action == 'clear':
                     response = self.handle_command("/clear")
                     continue  # Don't print response for clear

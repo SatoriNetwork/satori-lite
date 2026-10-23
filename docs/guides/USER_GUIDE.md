@@ -169,7 +169,9 @@ Download lenders.json, read the `owed_amount` for each pool staker, and send it 
 1. **Wallet**
    - View balance, address, QR code
    - Send SATORI tokens
-   - Manage vault (password-protected wallet for storing funds)
+   - Your wallet holds your funds and is protected by your password; the
+     alias (the key the neuron signs with on its own) is shown here too, for
+     its gas and its private key
 
 2. **Prediction Settings**
    - Set reward address (important for pool workers!)
@@ -189,8 +191,8 @@ Download lenders.json, read the `owed_amount` for each pool staker, and send it 
 ## Key Concepts
 
 **Addresses:**
-- **Wallet Address** - Your identity address (a Base address, 0x...)
-- **Vault Address** - Separate address for storing funds (optional)
+- **Wallet Address** - Your wallet's address, where your funds are (a Base address, 0x...)
+- **Alias Address** - The address of the key the neuron signs with on its own (it needs a little ETH for gas)
 - **Reward Address** - Where your prediction rewards are sent
 
 **Balance Types:**
@@ -200,7 +202,7 @@ Download lenders.json, read the `owed_amount` for each pool staker, and send it 
 
 **Worker Reward Address Requirement:**
 - Workers MUST set reward_address to match their pool's address
-- Matching priority: pool's reward_address → vault_address → wallet_address
+- Matching priority: pool's reward_address → its wallet's address → its alias's address
 - Without match: no boost from pool
 - This ensures fair exchange: boost for rewards
 
@@ -241,7 +243,7 @@ GET https://central.satorinet.io/api/v1/audit/workers/latest
 GET https://central.satorinet.io/api/v1/audit/stakers/latest
 ```
 
-**Authenticated endpoints:** (require wallet signature)
+**Authenticated endpoints:** (require the alias's signature)
 ```
 GET /api/v1/pool/workers - List your pool's workers
 GET /api/v1/pool/lenders - List your pool's pool stakers

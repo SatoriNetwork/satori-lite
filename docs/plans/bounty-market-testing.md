@@ -116,7 +116,7 @@ POST /api/network/predict
    - Check `GET /api/bounty/leaderboard` — Bob should have `total_sats > 0`
 3. **Verify:** Alice opens a payment channel to Bob (or reuses existing one)
    - Check `/api/channels` on Alice — should show a sender channel to Bob's
-     wallet pubkey
+     alias pubkey
 4. **Verify:** Payment recorded in `bounty_payments` table:
    - `GET /api/bounty/stats?stream_name=e2e-paid-ticker&provider_pubkey=<alice>&host_pubkey=<alice>`
    - Should show `scored_observations >= 1`, `total_paid_sats >= 200`

@@ -316,7 +316,7 @@ print(f"Stream Name: {stream.name}")
 from satorilib.server import SatoriServerClient
 from satoriengine.veda.storage import EngineStorageManager
 
-server = SatoriServerClient(wallet=wallet)
+server = SatoriServerClient(alias=alias)
 storage = EngineStorageManager.getInstance()
 
 # Fetch observation (will store stream metadata)
