@@ -33,7 +33,7 @@ DEFAULTS = {
     "registry": "0xcE4278b73dFE00772B485697FD1E97Bb0669c87f",
     "hub": "0x97D53d240e3dcfC6569d7B4001b03062681f4818",
     # SatoriRewardsLens: read-only views, e.g. claimable prediction rewards.
-    "lens": "0xBadE17EA7759D4fc19c1468Fc135e3292591A412",
+    "lens": "0x5404db175634ef5e83B23B6f9BD1836b040A47Dd",
     # Nostr pubkey of the bridge that mirrors registry streams.
     "streamProvider": "cb45de2a76a5df79ea8aff0c867e96e527f803eb389420419e441a4946129838",
 }
