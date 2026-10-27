@@ -82,6 +82,160 @@
     }
     .dash-meta-pill .material-icons { font-size: 14px; opacity: 0.7; }
 
+    /* ── Card buttons: quiet outline, the accent fills in on hover ── */
+    #dashboardLayoutRow {
+        --btn-accent: #9a9aff;
+        --btn-accent-border: rgba(120, 120, 255, 0.5);
+        --btn-accent-fill: rgba(90, 90, 255, 0.14);
+    }
+    [data-theme="light"] #dashboardLayoutRow {
+        --btn-accent: #3434e0;
+        --btn-accent-border: rgba(74, 74, 255, 0.45);
+        --btn-accent-fill: rgba(74, 74, 255, 0.08);
+    }
+    #dashboardLayoutRow .card-body .btn {
+        transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    #dashboardLayoutRow .card-body .btn-sm { padding: 0.32rem 0.8rem; font-size: 0.8rem; }
+    #dashboardLayoutRow .card-body .btn-primary {
+        background: transparent;
+        border: 1px solid var(--btn-accent-border);
+        color: var(--btn-accent);
+        font-weight: 600;
+    }
+    #dashboardLayoutRow .card-body .btn-primary:hover,
+    #dashboardLayoutRow .card-body .btn-primary:active {
+        background: var(--btn-accent-fill);
+        border-color: var(--btn-accent);
+        color: var(--btn-accent);
+        filter: none;
+        transform: none;
+        box-shadow: none;
+    }
+    #dashboardLayoutRow .card-body .btn-outline-secondary {
+        background: transparent;
+        border-color: var(--border-color);
+        color: var(--text-secondary);
+    }
+    #dashboardLayoutRow .card-body .btn-outline-secondary:hover {
+        background: var(--bg-card-header);
+        border-color: var(--text-muted);
+        color: var(--text-primary);
+    }
+    #dashboardLayoutRow .card-body .btn:disabled,
+    #dashboardLayoutRow .card-body .btn.disabled {
+        background: transparent;
+        border-color: var(--border-color);
+        color: var(--text-muted);
+        opacity: 0.6;
+    }
+    #dashboardLayoutRow .card-body .btn:focus-visible {
+        outline: 2px solid var(--btn-accent);
+        outline-offset: 2px;
+        box-shadow: none;
+    }
+    #dashboardLayoutRow .card-body .btn-sm:has(> .material-icons:only-child) { padding: 0.32rem 0.45rem; line-height: 1; }
+
+    /* ── Claim card: one row per claim, amounts in a column ── */
+    .claim-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: center;
+        column-gap: 1rem;
+        padding: 0.85rem 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .claim-row:first-child { padding-top: 0.15rem; }
+    .claim-name { font-weight: 600; font-size: 0.92rem; color: var(--text-primary); }
+    .claim-note { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+    .claim-amount {
+        text-align: right;
+        white-space: nowrap;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+    }
+    .claim-amount strong {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--text-primary);
+        margin-right: 0.3rem;
+    }
+    .claim-row.is-empty .claim-amount strong { color: var(--text-muted); }
+    .claim-btn { min-width: 5.5rem; }
+    .claim-btn .material-icons { font-size: 16px; vertical-align: -3px; }
+    .claim-status { grid-column: 1 / -1; margin-top: 0.5rem; }
+    .claim-foot { font-size: 0.75rem; color: var(--text-muted); margin: 0.85rem 0 0; }
+    @media (max-width: 575.98px) {
+        .claim-row { grid-template-columns: 1fr auto; row-gap: 0.5rem; }
+        .claim-what { grid-column: 1 / -1; }
+        .claim-amount { text-align: left; }
+    }
+
+    /* ── SATORI on Base card: the balance leads ── */
+    .base-satori {
+        font-size: 2.4rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        line-height: 1;
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+    }
+    .base-unit {
+        font-size: 0.95rem;
+        font-weight: 600;
+        letter-spacing: 0;
+        color: var(--text-secondary);
+        margin-left: 0.4rem;
+    }
+    .base-satori.is-na { font-size: 1rem; font-weight: 500; color: var(--text-muted); }
+    .base-satori.is-na .base-unit { display: none; }
+    .base-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.4rem; }
+    .base-gas {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        margin-top: 1.1rem;
+        padding: 0.6rem 0.75rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-card-header);
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+    }
+    .base-gas .material-icons { font-size: 18px; opacity: 0.7; }
+    .base-gas.is-low { color: #f59e0b; border-color: rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.08); }
+    [data-theme="light"] .base-gas.is-low { color: #a35a06; }
+    .base-addr { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.75rem; }
+    .base-addr code { flex: 1; min-width: 0; font-size: 0.82rem; color: var(--text-primary); background: none; padding: 0; }
+    .base-mm { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border-color); }
+    .base-mm-title { font-weight: 600; font-size: 0.88rem; color: var(--text-primary); margin-bottom: 0.4rem; }
+    .base-steps { list-style: none; counter-reset: step; padding: 0; margin: 0; }
+    .base-steps > li {
+        counter-increment: step;
+        display: grid;
+        grid-template-columns: 1.4rem 1fr auto;
+        align-items: center;
+        column-gap: 0.65rem;
+        row-gap: 0.6rem;
+        padding: 0.45rem 0;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+    .base-steps > li::before {
+        content: counter(step);
+        width: 1.4rem; height: 1.4rem;
+        display: grid; place-items: center;
+        border: 1px solid var(--border-color);
+        border-radius: 50%;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .base-step-extra { grid-column: 2 / -1; }
+
     /* ── Card-header rhythm (matches stake/local-predictions/marketplace) ── */
     #dashboardLayoutRow .card-header {
         padding: 0.9rem 1.15rem !important;
@@ -2145,16 +2299,16 @@
             </div>
         </div>
 
-        <!-- Claim SATORI Rewards Card -->
+        <!-- Claim Card: rewards, airdrop and prediction rewards in one list -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="claim" draggable="true">
             <div class="card h-100 d-flex flex-column">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">redeem</i>
-                        Claim SATORI Rewards
+                        Claim SATORI
                     </h5>
                     <div class="card-header-actions">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadClaimable(true)" title="Refresh">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshClaims()" title="Refresh">
                             <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
                         </button>
                         <span class="text-muted drag-handle" title="Drag to reorder">
@@ -2163,173 +2317,99 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <div class="text-center mb-3">
-                        <div class="text-muted" style="font-size: 12px;">Claimable now</div>
-                        <div><strong id="claimClaimable" style="font-size: 1.8rem;">–</strong> <span class="text-muted">SATORI</span></div>
-                        <div class="text-muted" style="font-size: 11px;">
-                            earned <span id="claimTotal">–</span> · already claimed <span id="claimClaimed">–</span>
+                    <div class="claim-row">
+                        <div class="claim-what">
+                            <div class="claim-name">Rewards</div>
+                            <div class="claim-note">Earned <span id="claimTotal">…</span>, claimed <span id="claimClaimed">…</span></div>
                         </div>
+                        <div class="claim-amount"><strong id="claimClaimable">…</strong>SATORI</div>
+                        <button class="btn btn-primary btn-sm claim-btn" id="claimBtn" onclick="doClaim()">Claim</button>
+                        <div id="claimStatus" class="claim-status small" style="display:none;"></div>
                     </div>
-                    <button class="btn btn-primary w-100" id="claimBtn" onclick="doClaim()">
-                        <i class="material-icons align-middle me-1">redeem</i>
-                        Claim
-                    </button>
-                    <div id="claimStatus" class="small mt-3" style="display:none;"></div>
-                    <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
-                        The neuron claims for you with your wallet key (needs a little ETH
-                        on Base for gas).
-                    </p>
+                    <div class="claim-row">
+                        <div class="claim-what">
+                            <div class="claim-name">Airdrop</div>
+                            <div class="claim-note">Vests over time. Allocated <span id="airdropAllocation">…</span>, claimed <span id="airdropClaimed">…</span></div>
+                        </div>
+                        <div class="claim-amount"><strong id="airdropClaimable">…</strong>SATORI</div>
+                        <button class="btn btn-primary btn-sm claim-btn" id="airdropBtn" onclick="doClaimAirdrop()">Claim</button>
+                        <div id="airdropStatus" class="claim-status small" style="display:none;"></div>
+                    </div>
+                    <div class="claim-row">
+                        <div class="claim-what">
+                            <div class="claim-name">Prediction rewards</div>
+                            <div class="claim-note">Each prediction is scored about a day after it is made.</div>
+                            <div class="claim-note" id="predRewardsPartial" style="display:none;">At least this much. Claiming collects the rest.</div>
+                        </div>
+                        <div class="claim-amount"><strong id="predRewardsClaimable">…</strong>SATORI</div>
+                        <button class="btn btn-primary btn-sm claim-btn" id="predRewardsBtn" onclick="doClaimPredictionRewards()">Claim</button>
+                        <div id="predRewardsStatus" class="claim-status small" style="display:none;"></div>
+                    </div>
+                    <p class="claim-foot">Claims are sent from your wallet and need a little Base ETH for gas.</p>
                 </div>
             </div>
         </div>
 
-        <!-- Claim Airdrop Card -->
-        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="airdrop" draggable="true">
-            <div class="card h-100 d-flex flex-column">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">card_giftcard</i>
-                        Claim Airdrop
-                    </h5>
-                    <div class="card-header-actions">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAirdrop(true)" title="Refresh">
-                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                        </button>
-                        <span class="text-muted drag-handle" title="Drag to reorder">
-                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
-                        </span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="text-center mb-3">
-                        <div class="text-muted" style="font-size: 12px;">Vested &amp; claimable now</div>
-                        <div><strong id="airdropClaimable" style="font-size: 1.8rem;">–</strong> <span class="text-muted">SATORI</span></div>
-                        <div class="text-muted" style="font-size: 11px;">
-                            allocated <span id="airdropAllocation">–</span> · already claimed <span id="airdropClaimed">–</span>
-                        </div>
-                    </div>
-                    <button class="btn btn-primary w-100" id="airdropBtn" onclick="doClaimAirdrop()">
-                        <i class="material-icons align-middle me-1">card_giftcard</i>
-                        Claim Airdrop
-                    </button>
-                    <div id="airdropStatus" class="small mt-3" style="display:none;"></div>
-                    <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
-                        Your airdrop vests over time; you can claim the vested portion whenever.
-                        The neuron claims for you with your wallet key (needs a little ETH for gas).
-                    </p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Prediction Rewards Card (on-chain, Base) -->
-        <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="predictionRewards" draggable="true">
-            <div class="card h-100 d-flex flex-column">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">emoji_events</i>
-                        Prediction Rewards
-                    </h5>
-                    <div class="card-header-actions">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadPredictionRewards(true)" title="Refresh">
-                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                        </button>
-                        <span class="text-muted drag-handle" title="Drag to reorder">
-                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
-                        </span>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="text-center mb-3">
-                        <div class="text-muted" style="font-size: 12px;">Claimable now</div>
-                        <div><strong id="predRewardsClaimable" style="font-size: 1.8rem;">–</strong> <span class="text-muted">SATORI</span></div>
-                        <div class="text-muted" id="predRewardsPartial" style="font-size: 11px; display:none;">
-                            at least this much; claim to collect the rest
-                        </div>
-                    </div>
-                    <button class="btn btn-primary w-100" id="predRewardsBtn" onclick="doClaimPredictionRewards()">
-                        <i class="material-icons align-middle me-1">emoji_events</i>
-                        Claim Prediction Rewards
-                    </button>
-                    <div id="predRewardsStatus" class="small mt-3" style="display:none;"></div>
-                    <p class="text-muted mt-3 mb-0" style="font-size: 11px;">
-                        Earned by this neuron's on-chain predictions. A prediction is scored about a day
-                        after it is made. The neuron claims for you with your wallet key (needs a little ETH for gas).
-                    </p>
-                </div>
-            </div>
-        </div>
-
-        <!-- MetaMask / Base Card -->
+        <!-- SATORI on Base Card: balance, gas, address, MetaMask steps -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="base" draggable="true">
             <div class="card h-100 d-flex flex-column">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">account_balance</i>
-                        SATORI on Base &amp; MetaMask
+                        SATORI on Base
                     </h5>
-                    <span class="text-muted drag-handle" title="Drag to reorder">
-                        <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
-                    </span>
+                    <div class="card-header-actions">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="loadBaseBalances()" title="Refresh">
+                            <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
+                        </button>
+                        <span class="text-muted drag-handle" title="Drag to reorder">
+                            <i class="material-icons align-middle" style="font-size: 16px;">drag_indicator</i>
+                        </span>
+                    </div>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted mb-3" style="font-size: 12px;">
-                        Satori rewards are moving to the SATORI token on Base. Your wallet's key
-                        <em>is</em> its Base key. Your balances are below, and you can also
-                        import the key into MetaMask. Your neuron keeps working exactly as before.
-                    </p>
-                    <div class="mb-3">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <label class="form-label mb-0">Balances on Base</label>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="loadBaseBalances()" title="Refresh">
-                                <i class="material-icons align-middle" style="font-size: 16px;">refresh</i>
-                            </button>
-                        </div>
-                        <table class="table table-sm mb-1" style="font-size: 0.8rem;">
-                            <thead><tr><th></th><th class="text-end">SATORI</th><th class="text-end">ETH</th></tr></thead>
-                            <tbody>
-                                <tr>
-                                    <td><a id="baseWalletLink" href="#" target="_blank" rel="noopener">Wallet</a></td>
-                                    <td class="text-end font-monospace" id="baseWalletSatori">--</td>
-                                    <td class="text-end font-monospace" id="baseWalletEth">--</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div class="form-text text-muted" style="font-size:0.72rem;">Wallet SATORI includes staked SATORI.</div>
+                    <div class="base-satori" id="baseSatoriLine"><span id="baseWalletSatori">…</span><span class="base-unit">SATORI</span></div>
+                    <div class="base-sub">In your wallet, including staked SATORI</div>
+
+                    <div class="base-gas" id="baseGas">
+                        <i class="material-icons">local_gas_station</i>
+                        <span id="baseGasText">Checking ETH for gas…</span>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Your Base Address</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control font-monospace" id="baseAddress" readonly placeholder="Loading..." style="font-size:0.8rem;">
-                            <button class="btn btn-outline-secondary" onclick="copyToClipboard('baseAddress')" title="Copy">
-                                <i class="material-icons align-middle">content_copy</i>
-                            </button>
-                        </div>
-                        <div class="form-text text-muted" style="font-size:0.72rem;">Derived from your wallet key &mdash; this is where your Base rewards land.</div>
+
+                    <div class="base-addr">
+                        <code id="baseAddressShort">…</code>
+                        <input type="hidden" id="baseAddress">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="copyToClipboard('baseAddress')" title="Copy address">
+                            <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                        </button>
+                        <a class="btn btn-sm btn-outline-secondary" id="baseWalletLink" href="#" target="_blank" rel="noopener" title="View on the block explorer">
+                            <i class="material-icons align-middle" style="font-size: 16px;">open_in_new</i>
+                        </a>
                     </div>
-                    <button class="btn btn-primary w-100 mb-3" onclick="addSatoriToMetaMask()" id="addToMetaMaskBtn">
-                        <i class="material-icons align-middle me-1">add_circle_outline</i>
-                        Add SATORI token to MetaMask
-                    </button>
-                    <div id="metaMaskStatus" class="small mb-3" style="display:none;"></div>
-                    <div class="text-center">
-                        <p id="showBaseKeyBtn" class="text-danger mb-2" style="cursor: pointer;" onclick="toggleBaseKey()">
-                            <i class="material-icons align-middle" style="font-size: 18px;">visibility</i>
-                            Show private key for MetaMask import
-                        </p>
-                        <div id="baseKeySection" style="display: none;">
-                            <p class="text-muted mb-2" style="cursor: pointer;" onclick="toggleBaseKey()">
-                                <i class="material-icons align-middle" style="font-size: 18px;">visibility_off</i>
-                                Hide private key
-                            </p>
-                            <div class="alert alert-warning" style="word-break: break-all;">
-                                <small><strong>Base private key (hex):</strong> import this into MetaMask &mdash; never share it.</small><br>
-                                <code id="basePrivateKey">Loading...</code>
-                            </div>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="copyBaseKey()">
-                                <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
-                                Copy private key
-                            </button>
-                        </div>
+
+                    <div class="base-mm">
+                        <div class="base-mm-title">See it in MetaMask</div>
+                        <ol class="base-steps">
+                            <li>
+                                <span>Import your wallet key</span>
+                                <button class="btn btn-sm btn-outline-secondary" id="showBaseKeyBtn" onclick="toggleBaseKey()">Show key</button>
+                                <div class="base-step-extra" id="baseKeySection" style="display: none;">
+                                    <div class="alert alert-warning mb-2" style="word-break: break-all;">
+                                        <small>In MetaMask choose Import account and paste this key. Anyone with it controls your wallet, so never share it.</small><br>
+                                        <code id="basePrivateKey"></code>
+                                    </div>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="copyBaseKey()">
+                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
+                                        Copy key
+                                    </button>
+                                </div>
+                            </li>
+                            <li>
+                                <span>Add the SATORI token</span>
+                                <button class="btn btn-sm btn-primary" id="addToMetaMaskBtn" onclick="addSatoriToMetaMask()">Add to MetaMask</button>
+                                <div class="base-step-extra small" id="metaMaskStatus" style="display:none;"></div>
+                            </li>
+                        </ol>
                     </div>
                 </div>
             </div>
@@ -3589,31 +3669,34 @@
         const result = await apiCall('/wallet/base');
         const addrEl = document.getElementById('baseAddress');
         if (!addrEl) return;
+        const shortEl = document.getElementById('baseAddressShort');
         if (result && result.base_address) {
-            addrEl.value = result.base_address;
+            const a = result.base_address;
+            addrEl.value = a;
+            shortEl.textContent = a.slice(0, 6) + '…' + a.slice(-4);
+            shortEl.title = a;
             baseTokenInfo = result.token || null;
             _baseKeyLoaded = result.private_key || null;
         } else {
-            addrEl.value = 'Unavailable';
+            addrEl.value = 'Not available';
+            shortEl.textContent = 'Not available';
         }
     }
 
     function toggleBaseKey() {
         const section = document.getElementById('baseKeySection');
         const btn = document.getElementById('showBaseKeyBtn');
-        if (section.style.display === 'none' || !section.style.display) {
-            document.getElementById('basePrivateKey').textContent = _baseKeyLoaded || 'Unavailable';
-            section.style.display = 'block';
-            btn.style.display = 'none';
-        } else {
-            section.style.display = 'none';
-            btn.style.display = 'block';
+        const opening = section.style.display === 'none' || !section.style.display;
+        if (opening) {
+            document.getElementById('basePrivateKey').textContent = _baseKeyLoaded || 'Not available';
         }
+        section.style.display = opening ? 'block' : 'none';
+        btn.textContent = opening ? 'Hide key' : 'Show key';
     }
 
     function copyBaseKey() {
         const value = document.getElementById('basePrivateKey').textContent;
-        if (value && value !== 'Loading...' && value !== 'Unavailable') {
+        if (value && value !== 'Not available') {
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(value)
                     .then(() => showToast('Private key copied to clipboard'))
@@ -3631,7 +3714,7 @@
         const show = (msg, ok) => {
             status.style.display = 'block';
             status.textContent = msg;
-            status.className = 'small mb-3 ' + (ok ? 'text-success' : 'text-danger');
+            status.className = 'base-step-extra small ' + (ok ? 'text-success' : 'text-danger');
         };
         if (!window.ethereum) {
             show('MetaMask not detected. Install the MetaMask browser extension, then reload this page.', false);
@@ -3675,30 +3758,51 @@
     function _fmtSatori(n) {
         return (typeof n === 'number')
             ? n.toLocaleString(undefined, { maximumFractionDigits: 8 })
-            : (n == null ? '–' : n);
+            : (n == null ? '…' : n);
     }
 
     async function loadBaseBalances() {
-        const ids = { wallet: 'baseWallet' };
-        for (const p of Object.values(ids)) {
-            document.getElementById(p + 'Satori').textContent = '…';
-            document.getElementById(p + 'Eth').textContent = '…';
-        }
+        const line = document.getElementById('baseSatoriLine');
+        const satori = document.getElementById('baseWalletSatori');
+        const gas = document.getElementById('baseGas');
+        const gasText = document.getElementById('baseGasText');
+        line.classList.remove('is-na');
+        satori.textContent = '…';
+        gas.classList.remove('is-low');
+        gasText.textContent = 'Checking ETH for gas…';
         const result = await apiCall('/wallet/base/balances');
         const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
             ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
-        for (const [whose, p] of Object.entries(ids)) {
-            const b = result && result[whose];
-            const ok = b && !b.error;
-            document.getElementById(p + 'Satori').textContent = ok ? _fmtSatori(b.satori) : '--';
-            document.getElementById(p + 'Eth').textContent = ok
-                ? b.eth.toLocaleString(undefined, { maximumFractionDigits: 6 }) : '--';
-            const link = document.getElementById(p + 'Link');
-            if (b && b.address) {
-                link.href = explorer + '/address/' + b.address;
-                link.title = b.address;
-            }
+        const b = result && result.wallet;
+        if (b && b.address) {
+            document.getElementById('baseWalletLink').href = explorer + '/address/' + b.address;
         }
+        if (!b || b.error) {
+            line.classList.add('is-na');
+            satori.textContent = 'Balance not available right now';
+            gasText.textContent = 'ETH for gas not available right now';
+            return;
+        }
+        satori.textContent = _fmtSatori(b.satori);
+        if (b.eth > 0) {
+            gasText.textContent = b.eth.toLocaleString(undefined, { maximumFractionDigits: 6 })
+                + ' ETH for gas';
+        } else {
+            gas.classList.add('is-low');
+            gasText.textContent = 'No ETH for gas yet. Send a little Base ETH to this address '
+                + 'before claiming or predicting.';
+        }
+    }
+
+    function _markClaimRow(el, hasAmount) {
+        const row = el.closest('.claim-row');
+        if (row) row.classList.toggle('is-empty', !hasAmount);
+    }
+
+    function refreshClaims() {
+        loadClaimable(true);
+        loadAirdrop(true);
+        loadPredictionRewards(true);
     }
 
     async function loadClaimable(force) {
@@ -3712,12 +3816,15 @@
                 document.getElementById('claimTotal').textContent = _fmtSatori(r.total);
                 document.getElementById('claimClaimed').textContent = _fmtSatori(r.claimed);
                 if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
+                _markClaimRow(el, parseFloat(r.claimable) > 0);
             } else {
-                el.textContent = '–';
+                el.textContent = 'Not available';
                 if (btn) btn.disabled = true;
+                _markClaimRow(el, false);
             }
         } catch (e) {
-            el.textContent = '–';
+            el.textContent = 'Not available';
+            _markClaimRow(el, false);
         }
     }
 
@@ -3726,7 +3833,7 @@
         const btn = document.getElementById('claimBtn');
         const show = (msg, ok) => {
             status.style.display = 'block';
-            status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
+            status.className = 'claim-status small ' + (ok ? 'text-success' : 'text-danger');
             status.innerHTML = msg;
         };
         const orig = btn.innerHTML;
@@ -3768,12 +3875,15 @@
                 document.getElementById('airdropAllocation').textContent = _fmtSatori(r.allocation);
                 document.getElementById('airdropClaimed').textContent = _fmtSatori(r.claimed);
                 if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
+                _markClaimRow(el, parseFloat(r.claimable) > 0);
             } else {
-                el.textContent = '–';
+                el.textContent = 'Not available';
                 if (btn) btn.disabled = true;
+                _markClaimRow(el, false);
             }
         } catch (e) {
-            el.textContent = '–';
+            el.textContent = 'Not available';
+            _markClaimRow(el, false);
         }
     }
 
@@ -3782,7 +3892,7 @@
         const btn = document.getElementById('airdropBtn');
         const show = (msg, ok) => {
             status.style.display = 'block';
-            status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
+            status.className = 'claim-status small ' + (ok ? 'text-success' : 'text-danger');
             status.innerHTML = msg;
         };
         const orig = btn.innerHTML;
@@ -3820,12 +3930,15 @@
                 el.textContent = _fmtSatori(r.claimable);
                 if (partial) partial.style.display = r.complete ? 'none' : 'block';
                 if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
+                _markClaimRow(el, parseFloat(r.claimable) > 0);
             } else {
-                el.textContent = '–';
+                el.textContent = 'Not available';
                 if (btn) btn.disabled = true;
+                _markClaimRow(el, false);
             }
         } catch (e) {
-            el.textContent = '–';
+            el.textContent = 'Not available';
+            _markClaimRow(el, false);
         }
     }
 
@@ -3834,7 +3947,7 @@
         const btn = document.getElementById('predRewardsBtn');
         const show = (msg, ok) => {
             status.style.display = 'block';
-            status.className = 'small mt-3 ' + (ok ? 'text-success' : 'text-danger');
+            status.className = 'claim-status small ' + (ok ? 'text-success' : 'text-danger');
             status.innerHTML = msg;
         };
         const orig = btn.innerHTML;
