@@ -196,10 +196,10 @@ def no_power_reason(predictor, alias: str, wallet: Optional[str] = None) -> str:
     except Exception:
         return generic
     if int(delegate, 16) == 0:
-        return f"wallet {wallet} is not staked; turn on predict base on-chain to stake it"
+        return f"wallet {wallet} is not staked; stake it on the Stake page"
     if delegate.lower() != alias.lower():
         return (f"wallet {wallet} is staked to {delegate}, not this neuron; "
-                "turn predict base on-chain off and on to restake")
+                "stake it to this neuron on the Stake page")
     return f"wallet {wallet} is staked but holds no SATORI on Base; send SATORI to the wallet"
 
 

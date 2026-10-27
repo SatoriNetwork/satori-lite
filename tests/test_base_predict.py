@@ -156,7 +156,7 @@ def test_reason_not_staked():
 def test_reason_staked_to_someone_else():
     other = "0x9f505692808622fc1F0fbb53324262162C788762"
     msg = bp.no_power_reason(DelegateOf(other), ALIAS, WALLET)
-    assert other in msg and "restake" in msg
+    assert other in msg and "to this neuron on the Stake page" in msg
 
 
 def test_reason_generic_without_wallet_or_on_rpc_error():

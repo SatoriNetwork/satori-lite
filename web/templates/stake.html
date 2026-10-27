@@ -603,6 +603,102 @@
         to   { opacity: 1; transform: translateY(0); }
     }
 
+    /* ── Stake on Base ───────────────────────────────────── */
+    #baseStakeCard [hidden] { display: none !important; }
+    .bst-state {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 0.9rem;
+        padding: 1rem 1.1rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .bst-dot { width: 10px; height: 10px; border-radius: 50%; background: #9ca3af; }
+    .bst-title { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); }
+    .bst-sub { font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+    .bst-sub:empty { display: none; }
+    .bst-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .bst-state[data-state="staked"] {
+        border-color: rgba(34, 197, 94, 0.35);
+        background: color-mix(in oklab, #22c55e 8%, var(--bg-input));
+    }
+    .bst-state[data-state="staked"] .bst-dot { background: #22c55e; box-shadow: 0 0 10px rgba(34, 197, 94, 0.55); }
+    .bst-state[data-state="unstaking"],
+    .bst-state[data-state="elsewhere"] {
+        border-color: rgba(245, 158, 11, 0.35);
+        background: color-mix(in oklab, #f59e0b 7%, var(--bg-input));
+    }
+    .bst-state[data-state="unstaking"] .bst-dot,
+    .bst-state[data-state="elsewhere"] .bst-dot { background: #f59e0b; }
+    .bst-state[data-state="error"] .bst-dot { background: #ef4444; }
+    .bst-state[data-state="loading"] .bst-dot { animation: bst-pulse 1.2s ease-in-out infinite; }
+    @keyframes bst-pulse { 50% { opacity: 0.3; } }
+    @media (prefers-reduced-motion: reduce) {
+        .bst-state[data-state="loading"] .bst-dot { animation: none; }
+    }
+    .bst-confirm {
+        display: flex; flex-wrap: wrap; align-items: center;
+        gap: 0.5rem 0.75rem;
+        margin-top: 0.6rem;
+        padding: 0.7rem 0.9rem;
+        border: 1px solid rgba(220, 53, 69, 0.35);
+        background: rgba(220, 53, 69, 0.06);
+        border-radius: 10px;
+        font-size: 0.82rem;
+        color: var(--text-primary);
+    }
+    .bst-confirm span { flex: 1 1 16rem; }
+    .bst-note { margin-top: 0.6rem; font-size: 0.8rem; color: var(--text-secondary); }
+    .bst-note.is-warn { color: #f59e0b; }
+    [data-theme="light"] .bst-note.is-warn,
+    [data-theme="light"] .bst-gas-eth.is-low { color: #a35a06; }
+    .bst-msg { margin-top: 0.6rem; }
+    .bst-explain { font-size: 0.78rem; color: var(--text-muted); margin: 0.85rem 0 0; max-width: 72ch; }
+    .bst-gas { margin-top: 1.4rem; }
+    .bst-gas-row {
+        display: grid;
+        grid-template-columns: 4.5rem 8.5rem 8rem 1fr auto;
+        grid-template-areas: "who addr eth why copy";
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.55rem 0;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 0.82rem;
+    }
+    .bst-gas-who { grid-area: who; font-weight: 600; color: var(--text-primary); }
+    .bst-gas-addr { grid-area: addr; color: var(--text-secondary); background: none; padding: 0; font-size: 0.8rem; }
+    .bst-gas-eth { grid-area: eth; text-align: right; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+    .bst-gas-eth.is-low { color: #f59e0b; }
+    .bst-gas-why { grid-area: why; font-size: 0.78rem; color: var(--text-muted); }
+    .bst-copy { grid-area: copy; padding: 0.3rem 0.45rem; }
+    .bst-copy .material-icons { font-size: 15px; }
+    .bst-alias-tools { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+    .bst-key-form, .bst-key-out { display: flex; gap: 0.5rem; margin-top: 0.6rem; max-width: 36rem; }
+    .bst-key-form .form-control { padding: 0.35rem 0.65rem; font-size: 0.82rem; }
+    .bst-key-out code {
+        flex: 1; min-width: 0;
+        word-break: break-all;
+        font-size: 0.75rem;
+        padding: 0.45rem 0.6rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+    }
+    @media (max-width: 640px) {
+        .bst-state { grid-template-columns: auto 1fr; }
+        .bst-actions { grid-column: 1 / -1; }
+        .bst-gas-row {
+            grid-template-columns: auto 1fr auto;
+            grid-template-areas: "who addr copy" "eth why why";
+            row-gap: 0.25rem;
+        }
+        .bst-gas-eth { text-align: left; }
+    }
+
     /* ── Responsive tune-up ───────────────────────────────── */
     @media (max-width: 640px) {
         .stk-page { padding: 1.25rem 1rem 3rem; }
@@ -623,14 +719,18 @@
             <span class="stk-hero-eyebrow">Stake &amp; Pools</span>
             <h1 class="stk-hero-h1">Stake <span class="stk-accent">Management</span></h1>
             <p class="stk-hero-sub">
-                Delegate your SATORI stake to a pool, or run your own pool and distribute rewards
-                across a set of worker neurons.
+                Stake your SATORI on Base so this neuron predicts with it, stake to a pool,
+                or run your own pool and share rewards with worker neurons.
             </p>
         </div>
         <div class="stk-hero-meta">
+            <span class="stk-meta-pill" id="stkBasePill">
+                <span class="dot"></span>
+                <span id="stkBasePillLabel">Base stake…</span>
+            </span>
             <span class="stk-meta-pill" id="stkStakingPill">
                 <span class="dot"></span>
-                <span id="stkStakingPillLabel">Not staking</span>
+                <span id="stkStakingPillLabel">No pool stake</span>
             </span>
             <span class="stk-meta-pill" id="stkPoolPill">
                 <span class="dot"></span>
@@ -638,6 +738,74 @@
             </span>
         </div>
     </header>
+
+    <!-- ── Stake on Base (on-chain; the neuron predicts with the stake) ── -->
+    <section class="card mb-4" id="baseStakeCard">
+        <div class="card-header stk-card-head">
+            <h5><i class="material-icons">savings</i>Stake on Base</h5>
+            <div class="stk-head-actions">
+                <button class="stk-btn stk-btn-ghost" onclick="loadBaseStake()" title="Refresh" aria-label="Refresh" type="button">
+                    <i class="material-icons" style="font-size: 16px;">refresh</i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="bst-state" id="bstState" data-state="loading" aria-live="polite">
+                <span class="bst-dot"></span>
+                <div>
+                    <div class="bst-title" id="bstTitle">Checking your stake on Base…</div>
+                    <div class="bst-sub" id="bstSub"></div>
+                </div>
+                <div class="bst-actions" id="bstActions"></div>
+            </div>
+            <div class="bst-confirm" id="bstConfirm" hidden>
+                <span>Your tokens unlock about 24h after you unstake, and this neuron stops predicting on Base.</span>
+                <button class="stk-btn stk-btn-danger stk-btn-sm" type="button" onclick="baseStake(false)">Unstake now</button>
+                <button class="stk-btn stk-btn-sm" type="button" onclick="bstConfirm(false)">Cancel</button>
+            </div>
+            <div class="bst-note" id="bstNote" hidden></div>
+            <div class="bst-msg small" id="bstMsg" hidden></div>
+            <p class="bst-explain">
+                Staking locks your wallet's SATORI on Base and lets this neuron predict with it once a day.
+                Rewards go to your wallet. Unstaking takes about 24h.
+            </p>
+
+            <div class="bst-gas">
+                <label class="stk-section-label">Gas on Base</label>
+                <div class="bst-gas-row">
+                    <div class="bst-gas-who">Wallet</div>
+                    <code class="bst-gas-addr" id="bstWalletAddr">…</code>
+                    <div class="bst-gas-eth" id="bstWalletEth">… ETH</div>
+                    <div class="bst-gas-why">Pays once, to stake or unstake</div>
+                    <button class="stk-btn stk-btn-sm bst-copy" type="button" onclick="bstCopyAddr('wallet', this)" title="Copy wallet address" aria-label="Copy wallet address">
+                        <i class="material-icons">content_copy</i>
+                    </button>
+                </div>
+                <div class="bst-gas-row">
+                    <div class="bst-gas-who">Alias</div>
+                    <code class="bst-gas-addr" id="bstAliasAddr">…</code>
+                    <div class="bst-gas-eth" id="bstAliasEth">… ETH</div>
+                    <div class="bst-gas-why">This neuron's signing address. Pays for the daily prediction</div>
+                    <button class="stk-btn stk-btn-sm bst-copy" type="button" onclick="bstCopyAddr('alias', this)" title="Copy alias address" aria-label="Copy alias address">
+                        <i class="material-icons">content_copy</i>
+                    </button>
+                </div>
+                <div class="bst-alias-tools">
+                    <button class="stk-btn stk-btn-sm" type="button" id="aliasKeyToggle" onclick="toggleAliasKeyForm()">Show alias key</button>
+                    <button class="stk-btn stk-btn-sm" type="button" id="aliasClaimBtn" onclick="claimOnAlias()" hidden></button>
+                </div>
+                <form class="bst-key-form" id="aliasKeyForm" hidden onsubmit="showAliasKey(event)">
+                    <input type="password" class="form-control form-control-sm" id="aliasKeyPassword" placeholder="Wallet password" autocomplete="current-password" aria-label="Wallet password">
+                    <button class="stk-btn stk-btn-sm" type="submit">Show</button>
+                </form>
+                <div class="bst-key-out" id="aliasKeyOut" hidden>
+                    <code id="aliasKey"></code>
+                    <button class="stk-btn stk-btn-sm" type="button" onclick="bstCopyText(document.getElementById('aliasKey').textContent, this)">Copy</button>
+                </div>
+                <div class="small mt-2" id="aliasStatus" hidden></div>
+            </div>
+        </div>
+    </section>
 
     <div class="row g-4" id="stakeLayoutRow">
 
@@ -949,7 +1117,7 @@
             pill.classList.add('is-active');
             label.textContent = 'Staking to pool';
         } else {
-            label.textContent = 'Not staking';
+            label.textContent = 'No pool stake';
         }
     }
     function updatePoolHeroPill() {
@@ -1363,9 +1531,301 @@
     }
 
     // Page load
+    /* ── Stake on Base ─────────────────────────────────── */
+    // On-chain state drives the card, not the saved setting: the wallet is
+    // staked (delegated) to this neuron's alias, to another address, unstaking
+    // (tokens still locked), or free. One action per state.
+    const bst = { predict: null, balances: null };
+    const bstFmt = (n, digits) => Number(n).toLocaleString(undefined, { maximumFractionDigits: digits });
+    const bstShort = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '…';
+
+    async function bstGet(url) {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }
+
+    async function loadBaseStake() {
+        bstConfirm(false);
+        bstSet('loading', 'Checking your stake on Base…', '', []);
+        const [p, b] = await Promise.allSettled([
+            bstGet('/api/settings/base-predict'),
+            bstGet('/api/wallet/base/balances'),
+        ]);
+        bst.predict = p.status === 'fulfilled' ? p.value : null;
+        bst.balances = b.status === 'fulfilled' ? b.value : null;
+        bstRenderGas();
+        bstRenderState();
+        bstLoadAliasClaim();
+    }
+
+    function bstSet(state, title, sub, actions) {
+        document.getElementById('bstState').dataset.state = state;
+        document.getElementById('bstTitle').textContent = title;
+        document.getElementById('bstSub').textContent = sub;
+        const box = document.getElementById('bstActions');
+        box.innerHTML = '';
+        actions.forEach(([label, kind, onClick, disabled]) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'stk-btn ' + (kind === 'danger' ? 'stk-btn-danger' : 'stk-btn-primary');
+            btn.textContent = label;
+            btn.disabled = !!disabled;
+            btn.addEventListener('click', onClick);
+            box.appendChild(btn);
+        });
+        updateBasePill(state);
+    }
+
+    function bstNote(text, warn) {
+        const el = document.getElementById('bstNote');
+        el.hidden = !text;
+        el.className = 'bst-note' + (warn ? ' is-warn' : '');
+        el.innerHTML = text || '';
+    }
+
+    function bstMsg(text, kind) {
+        const el = document.getElementById('bstMsg');
+        el.hidden = !text;
+        el.className = 'bst-msg small text-' + (kind || 'muted');
+        el.textContent = text || '';
+    }
+
+    function bstConfirm(open) {
+        document.getElementById('bstConfirm').hidden = !open;
+        document.getElementById('bstActions').hidden = open;
+    }
+
+    function updateBasePill(state) {
+        const pill = document.getElementById('stkBasePill');
+        const label = document.getElementById('stkBasePillLabel');
+        pill.classList.toggle('is-active', state === 'staked');
+        label.textContent = {
+            loading: 'Base stake…', staked: 'Staked on Base', unstaking: 'Unstaking on Base',
+            elsewhere: 'Staked elsewhere', off: 'Not staked on Base', error: 'Base stake unknown',
+        }[state] || 'Base stake…';
+    }
+
+    function bstRenderState() {
+        const p = bst.predict;
+        const w = bst.balances && bst.balances.wallet;
+        bstNote('');
+        if (!p) {
+            bstSet('error', 'Could not read your stake on Base',
+                'Check that your neuron is running, then refresh.', []);
+            return;
+        }
+        const s = p.stake;
+        if (!s) {
+            if (p.stake_error) {
+                bstSet('error', 'Could not read your stake on Base',
+                    'The Base network did not answer. Refresh in a moment.', []);
+            } else {
+                bstSet('error', 'Unlock your wallet to see your stake',
+                    'Log in with your wallet password, then come back to this page.', []);
+            }
+            return;
+        }
+        const satori = (w && !w.error) ? w.satori : null;
+        const noGas = !!(w && !w.error && !(w.eth > 0));
+        const gasReason = 'Your wallet needs a little Base ETH to pay for this.';
+        const toThis = s.staked && s.to_this_neuron !== false;
+
+        if (toThis) {
+            bstSet('staked', satori === 0 ? 'Staked, with no SATORI to predict with' : 'Staked and predicting',
+                (satori != null ? bstFmt(satori, 8) + ' SATORI staked. ' : '') + 'Tokens stay locked while staked.',
+                [['Unstake', 'danger', () => bstConfirm(true), noGas]]);
+        } else if (s.staked) {
+            bstSet('elsewhere', 'Staked to another address',
+                'Your wallet is staked, but not to this neuron, so this neuron cannot predict with it.',
+                [['Stake to this neuron', 'primary', () => baseStake(true), noGas]]);
+        } else if (s.locked) {
+            const when = s.unlock_ts
+                ? new Date(s.unlock_ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
+                : null;
+            bstSet('unstaking', 'Unstaking',
+                when ? 'Your tokens unlock around ' + when + '.' : 'Your tokens unlock in about 24h.',
+                [['Stake again', 'primary', () => baseStake(true), noGas]]);
+        } else {
+            bstSet('off', 'Not staked', 'Your tokens are free to move. This neuron is not predicting on Base.',
+                [['Stake', 'primary', () => baseStake(true), noGas]]);
+        }
+
+        const alias = bst.balances && bst.balances.alias;
+        if (noGas) {
+            bstNote(gasReason + ' Send some to the wallet address below.', true);
+        } else if (toThis && alias && !alias.error && !(alias.eth > 0)) {
+            bstNote('The alias has no ETH, so the daily prediction cannot be sent. Send a little Base ETH to the alias address below.', true);
+        } else if (satori === 0) {
+            bstNote(toThis
+                ? 'Your wallet holds no SATORI on Base, so this neuron has nothing to predict with. Claim your rewards on the <a href="/dashboard">Dashboard</a>.'
+                : 'Your wallet holds no SATORI on Base yet, so staking gives this neuron nothing to predict with. Claim your rewards on the <a href="/dashboard">Dashboard</a> first.',
+                true);
+        }
+    }
+
+    function bstRenderGas() {
+        const b = bst.balances || {};
+        const p = bst.predict || {};
+        [['wallet', 'bstWalletAddr', 'bstWalletEth', p.wallet_address],
+         ['alias', 'bstAliasAddr', 'bstAliasEth', p.alias_address]].forEach(([who, addrId, ethId, fallback]) => {
+            const e = b[who] || {};
+            const addr = e.address || fallback;
+            const addrEl = document.getElementById(addrId);
+            addrEl.textContent = addr ? bstShort(addr) : 'Not available';
+            addrEl.title = addr || '';
+            const ethEl = document.getElementById(ethId);
+            if (e.error || e.eth == null) {
+                ethEl.textContent = 'Not available';
+                ethEl.classList.remove('is-low');
+            } else {
+                ethEl.textContent = bstFmt(e.eth, 6) + ' ETH';
+                ethEl.classList.toggle('is-low', !(e.eth > 0));
+            }
+        });
+    }
+
+    async function baseStake(enabled) {
+        bstConfirm(false);
+        document.querySelectorAll('#bstActions button').forEach((b) => {
+            b.disabled = true;
+            b.textContent = enabled ? 'Staking…' : 'Unstaking…';
+        });
+        bstMsg(enabled
+            ? 'Signing and sending the staking transactions. This can take a minute.'
+            : 'Signing and sending the unstake transaction.', 'muted');
+        try {
+            const r = await fetch('/api/settings/base-predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: enabled }),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!j.success) {
+                bstMsg(j.error || (enabled ? 'Staking failed.' : 'Unstaking failed.'), 'danger');
+                await loadBaseStake();
+                return;
+            }
+            bstMsg(enabled
+                ? 'Staked. This neuron predicts on Base once a day.'
+                : 'Unstaked. Your tokens unlock in about 24h.', 'success');
+            bst.predict = Object.assign({}, bst.predict, { enabled: j.enabled, stake: j.stake });
+            bstRenderState();
+            bstGet('/api/wallet/base/balances').then((b) => { bst.balances = b; bstRenderGas(); }).catch(() => {});
+        } catch (e) {
+            bstMsg((enabled ? 'Staking' : 'Unstaking') + ' failed: ' + e, 'danger');
+            loadBaseStake();
+        }
+    }
+
+    function bstCopyText(text, btn) {
+        const done = () => {
+            const icon = btn && btn.querySelector('.material-icons');
+            if (icon) {
+                icon.textContent = 'check';
+                setTimeout(() => { icon.textContent = 'content_copy'; }, 1500);
+            } else {
+                showToast('Copied');
+            }
+        };
+        const fallback = () => {
+            // Clipboard API only exists on HTTPS or localhost
+            const t = document.createElement('textarea');
+            t.value = text;
+            t.style.position = 'fixed';
+            t.style.opacity = '0';
+            document.body.appendChild(t);
+            t.select();
+            try { document.execCommand('copy') ? done() : showToast('Copy failed', true); }
+            catch (e) { showToast('Copy failed', true); }
+            t.remove();
+        };
+        if (!text) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(fallback);
+        } else {
+            fallback();
+        }
+    }
+
+    function bstCopyAddr(who, btn) {
+        const id = who === 'wallet' ? 'bstWalletAddr' : 'bstAliasAddr';
+        bstCopyText(document.getElementById(id).title, btn);
+    }
+
+    // The alias: its key (password again) and any SATORI rewards paid to it.
+    function aliasStatus(text, ok) {
+        const el = document.getElementById('aliasStatus');
+        el.hidden = !text;
+        el.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger');
+        el.textContent = text || '';
+    }
+
+    async function bstLoadAliasClaim() {
+        const btn = document.getElementById('aliasClaimBtn');
+        try {
+            const c = (await bstGet('/api/wallet/base/claimable')).alias;
+            if (c && c.claimable > 0) {
+                btn.textContent = 'Claim ' + bstFmt(c.claimable, 8) + ' SATORI paid to the alias';
+                btn.hidden = false;
+                return;
+            }
+        } catch (e) {}
+        btn.hidden = true;
+    }
+
+    function toggleAliasKeyForm() {
+        const form = document.getElementById('aliasKeyForm');
+        const out = document.getElementById('aliasKeyOut');
+        const open = !form.hidden || !out.hidden;
+        form.hidden = open;
+        out.hidden = true;
+        document.getElementById('aliasKey').textContent = '';
+        document.getElementById('aliasKeyToggle').textContent = open ? 'Show alias key' : 'Hide alias key';
+        aliasStatus('');
+        if (!open) document.getElementById('aliasKeyPassword').focus();
+    }
+
+    async function showAliasKey(event) {
+        event.preventDefault();
+        const pw = document.getElementById('aliasKeyPassword');
+        try {
+            const r = await fetch('/api/wallet/alias-private-key', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw.value }) });
+            const j = await r.json();
+            pw.value = '';
+            if (!j.private_key) { aliasStatus(j.error || 'Could not show the key.', false); return; }
+            document.getElementById('aliasKey').textContent = j.private_key;
+            document.getElementById('aliasKeyForm').hidden = true;
+            document.getElementById('aliasKeyOut').hidden = false;
+            aliasStatus('');
+        } catch (e) { aliasStatus('Could not show the key: ' + e, false); }
+    }
+
+    async function claimOnAlias() {
+        const btn = document.getElementById('aliasClaimBtn');
+        btn.disabled = true;
+        try {
+            const r = await fetch('/api/wallet/base/claim', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: 'alias' }) });
+            const j = await r.json();
+            if (j.success) {
+                aliasStatus('Claimed ' + bstFmt(j.claimed, 8) + ' SATORI.', true);
+                bstLoadAliasClaim();
+                bstGet('/api/wallet/base/balances').then((b) => { bst.balances = b; bstRenderGas(); }).catch(() => {});
+            } else {
+                aliasStatus(j.error || 'Claim failed', false);
+            }
+        } catch (e) { aliasStatus('Claim failed: ' + e, false); }
+        btn.disabled = false;
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         applyStakeLayout();
         initStakeDragDrop();
+        loadBaseStake();
 
         const poolInput = document.getElementById('poolAddress');
         if (poolInput) {

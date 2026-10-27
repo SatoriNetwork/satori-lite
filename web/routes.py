@@ -1511,7 +1511,13 @@ def register_routes(app):
                 resp['wallet_address'] = wm.wallet.ethAddress
                 if wm.alias:
                     resp['alias_address'] = wm.alias.ethAddress
-                resp['stake'] = _base_predictor().stake_status(wm.wallet.ethAddress)
+                predictor = _base_predictor()
+                resp['stake'] = predictor.stake_status(wm.wallet.ethAddress)
+                if wm.alias and resp['stake']['staked']:
+                    # staked could mean staked to another address, not this neuron
+                    delegate = predictor.current_delegate(wm.wallet.ethAddress)
+                    resp['stake']['to_this_neuron'] = (
+                        delegate.lower() == wm.alias.ethAddress.lower())
         except Exception as e:
             resp['stake_error'] = str(e)
         return jsonify(resp)
