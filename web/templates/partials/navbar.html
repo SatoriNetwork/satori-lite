@@ -221,6 +221,25 @@
             </ul>
         </div>
 
+        <!-- Notifications from central (always visible) -->
+        <div class="dropdown">
+            <button class="util-btn util-icon-only ntf-bell" type="button" id="ntfBell"
+                    data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                    aria-label="Notifications" title="Notifications">
+                <i class="material-icons" id="ntfBellIcon">notifications_none</i>
+                <span class="ntf-dot" id="ntfDot" hidden></span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-end satori-dropdown ntf-panel" aria-labelledby="ntfBell">
+                <div class="ntf-panel-head">
+                    <span class="ntf-panel-title">Notifications</span>
+                    <button type="button" class="ntf-mark-all" id="ntfMarkAll" hidden>Mark all read</button>
+                </div>
+                <div class="ntf-list" id="ntfList">
+                    <p class="ntf-empty">No notifications. Messages from the Satori network show up here.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Theme toggle (always visible) -->
         <button class="util-btn util-icon-only" onclick="toggleTheme()"
                 title="Toggle dark/light mode">
@@ -229,6 +248,237 @@
     </div>
 
 </nav>
+
+<!-- Notification banner: the first unread (critical first) shows here on every page -->
+<div class="ntf-banner-wrap" id="ntfBannerWrap" aria-live="polite"></div>
+
+<style>
+    .ntf-bell { position: relative; }
+    .ntf-dot {
+        position: absolute; top: 3px; right: 3px;
+        width: 7px; height: 7px; border-radius: 50%;
+        background: var(--ntf-c, #5a5aff);
+        box-shadow: 0 0 0 2px var(--bg-secondary);
+    }
+    .ntf-dot[hidden] { display: none; }
+    [data-ntf-level="info"]     { --ntf-c: #6d6dff; }
+    [data-ntf-level="warning"]  { --ntf-c: #f59e0b; }
+    [data-ntf-level="critical"] { --ntf-c: #ef4444; }
+    [data-theme="light"] [data-ntf-level="info"]    { --ntf-c: #3d3df0; }
+    [data-theme="light"] [data-ntf-level="warning"] { --ntf-c: #b45309; }
+    [data-theme="light"] [data-ntf-level="critical"] { --ntf-c: #c81e1e; }
+
+    /* Panel */
+    .satori-dropdown.ntf-panel { width: 360px; max-width: calc(100vw - 24px); padding: 0.4rem; }
+    .ntf-panel-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 0.45rem 0.6rem 0.55rem;
+    }
+    .ntf-panel-title { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+    .ntf-mark-all {
+        background: none; border: 0; padding: 0;
+        font-size: 0.75rem; color: var(--accent-primary); cursor: pointer;
+    }
+    .ntf-mark-all:hover { text-decoration: underline; }
+    .ntf-mark-all[hidden] { display: none; }
+    .ntf-list { max-height: min(420px, 70vh); overflow-y: auto; }
+    .ntf-list { display: flex; flex-direction: column; gap: 2px; }
+    .ntf-empty { margin: 0; padding: 0.6rem 0.6rem 0.8rem; font-size: 0.8rem; color: var(--text-muted); }
+    .ntf-item {
+        display: grid; grid-template-columns: 1.6rem 1fr; gap: 0.6rem;
+        padding: 0.65rem 0.6rem;
+        border-radius: 10px;
+    }
+    .ntf-item.is-unread { background: color-mix(in oklab, var(--ntf-c) 7%, transparent); }
+    .ntf-icon {
+        width: 1.6rem; height: 1.6rem; border-radius: 50%;
+        display: grid; place-items: center;
+        background: color-mix(in oklab, var(--ntf-c) 16%, transparent);
+        color: var(--ntf-c);
+    }
+    .ntf-icon .material-icons { font-size: 16px; }
+    .ntf-msg { font-size: 0.82rem; line-height: 1.45; color: var(--text-primary); overflow-wrap: anywhere; }
+    .ntf-item:not(.is-unread) .ntf-msg { color: var(--text-secondary); }
+    .ntf-meta { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.3rem; font-size: 0.72rem; color: var(--text-muted); }
+    .ntf-link { color: var(--accent-primary); font-weight: 500; text-decoration: none; }
+    .ntf-link:hover { text-decoration: underline; }
+
+    /* Banner */
+    .ntf-banner-wrap { max-width: 1320px; margin: 0 auto; padding: 0 1.5rem; }
+    .ntf-banner {
+        display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 0.75rem;
+        margin-top: 1rem;
+        padding: 0.6rem 0.6rem 0.6rem 0.75rem;
+        border: 1px solid color-mix(in oklab, var(--ntf-c) 35%, var(--border-color));
+        border-radius: 12px;
+        background: color-mix(in oklab, var(--ntf-c) 8%, var(--bg-card));
+        box-shadow: var(--shadow-sm);
+        animation: ntf-in 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .ntf-banner .ntf-icon { width: 2rem; height: 2rem; }
+    .ntf-banner .ntf-icon .material-icons { font-size: 18px; }
+    .ntf-banner .ntf-msg { font-size: 0.875rem; max-width: 80ch; }
+    .ntf-banner .ntf-link {
+        white-space: nowrap; font-size: 0.82rem;
+        padding: 0.35rem 0.7rem; border-radius: 8px;
+        border: 1px solid color-mix(in oklab, var(--ntf-c) 40%, transparent);
+        color: var(--ntf-c);
+    }
+    .ntf-banner .ntf-link:hover { background: color-mix(in oklab, var(--ntf-c) 12%, transparent); text-decoration: none; }
+    .ntf-close {
+        width: 2rem; height: 2rem; border-radius: 8px;
+        display: grid; place-items: center;
+        background: none; border: 0; color: var(--text-muted); cursor: pointer;
+    }
+    .ntf-close:hover { background: var(--bg-card-header); color: var(--text-primary); }
+    .ntf-close .material-icons { font-size: 18px; }
+    .ntf-banner.is-leaving { animation: ntf-out 0.22s ease-in forwards; }
+    .ntf-bell:focus-visible, .ntf-close:focus-visible, .ntf-link:focus-visible, .ntf-mark-all:focus-visible {
+        outline: 2px solid var(--accent-primary); outline-offset: 2px;
+    }
+    @keyframes ntf-in  { from { opacity: 0; transform: translateY(-6px); } }
+    @keyframes ntf-out { to   { opacity: 0; transform: translateY(-6px); } }
+    @media (prefers-reduced-motion: reduce) {
+        .ntf-banner, .ntf-banner.is-leaving { animation: none; }
+    }
+    @media (max-width: 640px) {
+        .ntf-banner-wrap { padding: 0 1rem; }
+        .ntf-banner {
+            grid-template-columns: auto 1fr auto;
+            grid-template-areas: "icon msg close" ". link link";
+            row-gap: 0.5rem;
+        }
+        .ntf-banner:not(:has(.ntf-link)) { grid-template-areas: "icon msg close"; }
+        .ntf-banner > .ntf-icon { grid-area: icon; align-self: start; }
+        .ntf-banner > .ntf-msg { grid-area: msg; }
+        .ntf-banner > .ntf-link { grid-area: link; justify-self: start; }
+        .ntf-banner > .ntf-close { grid-area: close; align-self: start; }
+    }
+</style>
+
+<script>
+    // Notifications from central: GET /api/notifications (cached on the neuron),
+    // read ids saved through POST /api/notifications/read.
+    (function () {
+        const ICON = { info: 'info', warning: 'warning_amber', critical: 'report' };
+        let items = [];
+
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+            (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const safeUrl = (u) => (typeof u === 'string' && (/^https?:\/\//i.test(u) || /^\/(?!\/)/.test(u))) ? u : null;
+        const level = (n) => (ICON[n.level] ? n.level : 'info');
+
+        function ago(iso) {
+            const t = Date.parse(iso);
+            if (!t) return '';
+            const s = Math.max(0, (Date.now() - t) / 1000);
+            if (s < 60) return 'just now';
+            if (s < 3600) return Math.floor(s / 60) + 'm ago';
+            if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+            if (s < 86400 * 14) return Math.floor(s / 86400) + 'd ago';
+            return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+        }
+
+        function linkHtml(n) {
+            const url = safeUrl(n.link_url);
+            if (!url) return '';
+            const ext = /^https?:/i.test(url);
+            return '<a class="ntf-link" href="' + esc(url) + '" data-ntf-id="' + n.id + '"'
+                + (ext ? ' target="_blank" rel="noopener"' : '') + '>' + esc(n.link_label || 'Open') + '</a>';
+        }
+
+        function iconHtml(n) {
+            return '<span class="ntf-icon" aria-hidden="true"><i class="material-icons">' + ICON[level(n)] + '</i></span>';
+        }
+
+        function renderBell() {
+            const unread = items.filter((n) => !n.read);
+            const dot = document.getElementById('ntfDot');
+            const bell = document.getElementById('ntfBell');
+            const top = unread.find((n) => n.level === 'critical') || unread.find((n) => n.level === 'warning') || unread[0];
+            dot.hidden = !top;
+            if (top) dot.dataset.ntfLevel = level(top);
+            document.getElementById('ntfBellIcon').textContent = unread.length ? 'notifications' : 'notifications_none';
+            bell.setAttribute('aria-label', unread.length ? 'Notifications, ' + unread.length + ' unread' : 'Notifications');
+            document.getElementById('ntfMarkAll').hidden = !unread.length;
+            const list = document.getElementById('ntfList');
+            if (!items.length) {
+                list.innerHTML = '<p class="ntf-empty">No notifications. Messages from the Satori network show up here.</p>';
+                return;
+            }
+            list.innerHTML = items.map((n) =>
+                '<div class="ntf-item' + (n.read ? '' : ' is-unread') + '" data-ntf-level="' + level(n) + '">'
+                + iconHtml(n)
+                + '<div><div class="ntf-msg">' + esc(n.message) + '</div>'
+                + '<div class="ntf-meta"><span>' + esc(ago(n.starts_at)) + '</span>' + linkHtml(n) + '</div></div>'
+                + '</div>').join('');
+        }
+
+        function renderBanner() {
+            const wrap = document.getElementById('ntfBannerWrap');
+            const n = items.find((x) => x.level === 'critical') || items.find((x) => !x.read);
+            const current = wrap.firstElementChild;
+            if (current && n && current.dataset.ntfId === String(n.id)) return;  // already showing
+            if (!n) { wrap.innerHTML = ''; return; }
+            wrap.innerHTML = '<div class="ntf-banner" role="status" data-ntf-id="' + n.id + '" data-ntf-level="' + level(n) + '">'
+                + iconHtml(n)
+                + '<div class="ntf-msg">' + esc(n.message) + '</div>'
+                + linkHtml(n)
+                + (n.level === 'critical' ? '' :
+                   '<button type="button" class="ntf-close" data-ntf-dismiss="' + n.id + '" aria-label="Dismiss">'
+                   + '<i class="material-icons">close</i></button>')
+                + '</div>';
+        }
+
+        function render() { renderBell(); renderBanner(); }
+
+        async function markRead(ids) {
+            ids = ids.filter((id) => items.some((n) => n.id === id && !n.read));
+            if (!ids.length) return;
+            items.forEach((n) => { if (ids.includes(n.id)) n.read = true; });
+            try {
+                await fetch('/api/notifications/read', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: ids }) });
+            } catch (e) {}
+        }
+
+        async function load() {
+            try {
+                const r = await fetch('/api/notifications');
+                if (!r.ok) return;
+                items = (await r.json()).notifications || [];
+            } catch (e) { return; }
+            render();
+        }
+
+        document.addEventListener('click', (e) => {
+            const dismiss = e.target.closest('[data-ntf-dismiss]');
+            if (dismiss) {
+                const id = Number(dismiss.dataset.ntfDismiss);
+                const banner = dismiss.closest('.ntf-banner');
+                const done = () => { markRead([id]).then(render); };
+                if (banner && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                    banner.classList.add('is-leaving');
+                    banner.addEventListener('animationend', done, { once: true });
+                } else {
+                    done();
+                }
+                return;
+            }
+            const link = e.target.closest('.ntf-link[data-ntf-id]');
+            if (link) markRead([Number(link.dataset.ntfId)]).then(render);
+            if (e.target.closest('#ntfMarkAll')) {
+                markRead(items.map((n) => n.id)).then(render);
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            load();
+            setInterval(load, 10 * 60 * 1000);
+        });
+    })();
+</script>
 
 <script>
     function sliderToSeconds(sliderValue) {

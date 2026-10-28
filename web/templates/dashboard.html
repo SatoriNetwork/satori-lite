@@ -2203,27 +2203,6 @@
     </header>
     {% endif %}
 
-    <!-- SATORIEVR migration notice (dismissible) -->
-    <div id="satorievrMigrationBanner" style="display:none; align-items:center; gap:10px; padding:10px 14px; margin-bottom:16px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-card); color:var(--text-secondary); font-size:13px;">
-        <i class="material-icons" style="font-size:18px; color:var(--accent-primary);">info</i>
-        <span style="flex:1;">SATORIEVR is now the official Satori token on Evrmore. The SATORI &rarr; SATORIEVR migration is complete.</span>
-        <button type="button" onclick="dismissSatorievrBanner()" aria-label="Dismiss" style="background:none; border:none; color:inherit; opacity:0.6; cursor:pointer; font-size:20px; line-height:1; padding:0 6px;">&times;</button>
-    </div>
-    <script>
-        (function () {
-            try {
-                if (!localStorage.getItem('satorievrMigrationDismissed')) {
-                    var b = document.getElementById('satorievrMigrationBanner');
-                    if (b) b.style.display = 'flex';
-                }
-            } catch (e) {}
-        })();
-        function dismissSatorievrBanner() {
-            try { localStorage.setItem('satorievrMigrationDismissed', '1'); } catch (e) {}
-            var b = document.getElementById('satorievrMigrationBanner');
-            if (b) b.style.display = 'none';
-        }
-    </script>
 
     <div class="row g-4" id="dashboardLayoutRow">
         <!-- Addresses Card -->

@@ -1496,6 +1496,48 @@ def register_routes(app):
             status['locked'] = True  # undelegating always locks until next round
         return status
 
+    # Notifications from central (posted there by hand with SQL): shown as a
+    # banner until read and kept in the navbar bell. Read ids live in the neuron
+    # config so they hold across browsers and restarts.
+    _notifications_cache = {'at': 0.0, 'items': []}
+
+    def _central_notifications():
+        if time.time() - _notifications_cache['at'] < 300:
+            return _notifications_cache['items']
+        from satorineuron import VERSION
+        try:
+            resp = requests.get(f"{get_api_url()}/api/v1/notifications",
+                                params={'version': VERSION}, timeout=5)
+            items = resp.json() if resp.status_code == 200 else []
+            if not isinstance(items, list):
+                items = []
+        except Exception as e:
+            logger.debug(f"notifications fetch failed: {e}")
+            items = _notifications_cache['items']  # keep the last good list
+        _notifications_cache.update(at=time.time(), items=items)
+        return items
+
+    def _read_notification_ids() -> set:
+        from satorineuron import config
+        return set(config.get().get('notifications read', []) or [])
+
+    @app.route('/api/notifications', methods=['GET'])
+    @login_required
+    def api_get_notifications():
+        read = _read_notification_ids()
+        items = [dict(n, read=n.get('id') in read) for n in _central_notifications()]
+        return jsonify({'notifications': items})
+
+    @app.route('/api/notifications/read', methods=['POST'])
+    @login_required
+    def api_read_notifications():
+        from satorineuron import config
+        ids = [i for i in (request.json or {}).get('ids', []) if isinstance(i, int)]
+        if ids:
+            read = sorted(_read_notification_ids() | set(ids))[-200:]
+            config.add(data={'notifications read': read})
+        return jsonify({'success': True})
+
     @app.route('/api/settings/base-predict', methods=['GET'])
     @login_required
     def api_get_base_predict():
