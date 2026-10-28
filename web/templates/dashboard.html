@@ -3696,17 +3696,10 @@
 
     function copyBaseKey() {
         const value = document.getElementById('basePrivateKey').textContent;
-        if (value && value !== 'Not available') {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(value)
-                    .then(() => showToast('Private key copied to clipboard'))
-                    .catch(() => showToast('Failed to copy private key', true));
-            } else {
-                showToast('Clipboard not available (needs HTTPS or localhost)', true);
-            }
-        } else {
-            showToast('No private key to copy', true);
-        }
+        if (!value || value === 'Not available') { showToast('No private key to copy', true); return; }
+        satoriCopy(value).then((ok) => ok
+            ? showToast('Private key copied to clipboard')
+            : showToast('Could not copy. Select the key and copy it by hand.', true));
     }
 
     async function addSatoriToMetaMask() {
@@ -3974,36 +3967,14 @@
     }
 
     function copyToClipboard(elementId) {
-        const input = document.getElementById(elementId);
-        const value = input.value;
-        if (value && value !== 'Loading...' && value !== 'Not available') {
-            // Check if Clipboard API is available (requires HTTPS or localhost)
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(value).then(() => {
-                    showToast('Address copied to clipboard');
-                }).catch(() => {
-                    // Fallback for older browsers or non-HTTPS
-                    try {
-                        input.select();
-                        document.execCommand('copy');
-                        showToast('Address copied to clipboard');
-                    } catch (err) {
-                        showToast('Failed to copy address', true);
-                    }
-                });
-            } else {
-                // Fallback for older browsers or non-HTTPS
-                try {
-                    input.select();
-                    document.execCommand('copy');
-                    showToast('Address copied to clipboard');
-                } catch (err) {
-                    showToast('Failed to copy address', true);
-                }
-            }
-        } else {
+        const value = document.getElementById(elementId).value;
+        if (!value || value === 'Loading...' || value === 'Not available') {
             showToast('No address to copy', true);
+            return;
         }
+        satoriCopy(value).then((ok) => ok
+            ? showToast('Address copied to clipboard')
+            : showToast('Could not copy. Select the address and copy it by hand.', true));
     }
 
     // Relay Registration

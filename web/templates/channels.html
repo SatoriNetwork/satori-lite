@@ -1054,7 +1054,8 @@ function receiverClaimable(ch) {
 
 // ── Copy to clipboard ─────────────────────────────────────────
 function copyText(text, btn) {
-  navigator.clipboard.writeText(text).then(() => {
+  satoriCopy(text).then((ok) => {
+    if (!ok) return;
     const orig = btn.innerHTML;
     btn.innerHTML = '✓';
     setTimeout(() => btn.innerHTML = orig, 1200);
@@ -1635,9 +1636,7 @@ function bxCopyTxid(txid, btn) {
       btn.querySelector('.material-icons').textContent = 'content_copy';
     }, 1400);
   };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(txid).then(done).catch(() => {});
-  }
+  satoriCopy(txid).then((ok) => { if (ok) done(); });
 }
 
 // ── Paid streams on Base ──────────────────────────────────────

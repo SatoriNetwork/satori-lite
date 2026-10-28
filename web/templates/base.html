@@ -2025,6 +2025,31 @@
         }
     </style>
     <script>
+        // Copy text, also over plain http (the UI opened by IP address), where
+        // browsers hide navigator.clipboard. Resolves true once the text is copied.
+        function satoriCopy(text) {
+            const legacy = () => {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.setAttribute('readonly', '');
+                ta.style.position = 'fixed';
+                ta.style.top = '0';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                let ok = false;
+                try { ok = document.execCommand('copy'); } catch (e) {}
+                ta.remove();
+                return ok;
+            };
+            if (!text) return Promise.resolve(false);
+            if (navigator.clipboard && window.isSecureContext) {
+                return navigator.clipboard.writeText(text).then(() => true, legacy);
+            }
+            return Promise.resolve(legacy());
+        }
+    </script>
+    <script>
         /* Liquid-glass capability detect — runs BEFORE body renders
            to avoid a flash. Opts in only when the browser can
            composite backdrop-filter smoothly AND the user hasn't
