@@ -219,10 +219,11 @@ class TestWalletOnDemandOperations:
     @pytest.mark.unit
     @patch('web.routes.get_or_create_session_wallet')
     def test_private_key_endpoint_uses_session_wallet(self, mock_get_wallet, client):
-        """Private key endpoint should use session-specific wallet."""
+        """The Base key endpoint should use the session-specific wallet."""
         mock_wallet_manager = MagicMock()
         mock_wallet = MagicMock()
-        mock_wallet.privkey = 'test_private_key'
+        mock_wallet.ethAddress = '0x' + '11' * 20
+        mock_wallet.account.key.to_0x_hex.return_value = '0x' + '22' * 32
         mock_wallet_manager.wallet = mock_wallet
         mock_get_wallet.return_value = mock_wallet_manager
 
@@ -232,29 +233,8 @@ class TestWalletOnDemandOperations:
             sess['session_id'] = 'test-session'
 
         with patch.dict('web.routes._session_wallets', {'test-session': mock_wallet_manager}):
-            response = client.get('/api/wallet/private-key')
+            response = client.get('/api/wallet/base')
 
         # Should have gotten session wallet
         mock_get_wallet.assert_called_once()
 
-    @pytest.mark.unit
-    @patch('web.routes.get_or_create_session_wallet')
-    def test_send_transaction_uses_session_wallet(self, mock_get_wallet, client):
-        """Send transaction should use session-specific wallet for signing."""
-        mock_wallet_manager = MagicMock()
-        mock_wallet_manager.wallet.send.return_value = {'txHash': 'test_hash'}
-        mock_get_wallet.return_value = mock_wallet_manager
-
-        # Setup logged in session
-        with client.session_transaction() as sess:
-            sess['wallet_open'] = True
-            sess['session_id'] = 'test-session'
-
-        with patch.dict('web.routes._session_wallets', {'test-session': mock_wallet_manager}):
-            response = client.post('/api/wallet/send', json={
-                'address': 'test_address',
-                'amount': 10
-            })
-
-        # Should have used session wallet
-        mock_get_wallet.assert_called_once()

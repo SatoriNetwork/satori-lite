@@ -24,7 +24,6 @@ from satorilib.config import get_api_url
 
 MUNDO_URL = os.environ.get('MUNDO_URL', 'https://mundo.satorinet.org')
 
-from web.balance_cache import get_balance_snapshot, get_alias_balance
 
 
 def _base_token_info() -> dict:
@@ -1086,12 +1085,6 @@ def register_routes(app):
         except requests.RequestException as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/balance/get')
-    @login_required
-    def api_balance():
-        """Proxy balance request."""
-        return proxy_api('/balance/get')
-
     @app.route('/api/peer/reward-address', methods=['GET', 'POST'])
     @login_required
     def api_reward_address():
@@ -1203,19 +1196,6 @@ def register_routes(app):
             if startup and hasattr(startup, 'nostrPubkey'):
                 result['nostr_pubkey'] = startup.nostrPubkey
             return jsonify(result)
-        return jsonify({'error': 'Wallet not initialized'}), 500
-
-    @app.route('/api/wallet/private-key')
-    @login_required
-    def api_wallet_private_key():
-        """Get wallet's private key (sensitive - requires login)."""
-        wallet_manager = get_or_create_session_wallet()
-        if wallet_manager and wallet_manager.wallet:
-            try:
-                privkey = wallet_manager.wallet.privkey
-                return jsonify({'private_key': privkey})
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
         return jsonify({'error': 'Wallet not initialized'}), 500
 
     @app.route('/api/wallet/alias-private-key', methods=['POST'])
@@ -1612,114 +1592,6 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': f'Failed (need gas on your wallet?): {e}'}), 500
 
-    @app.route('/api/wallet/send-from-alias', methods=['POST'])
-    @login_required
-    def api_wallet_send_from_alias():
-        """Send SATORI tokens from the alias."""
-        wallet_manager = get_or_create_session_wallet()
-        if not wallet_manager or not wallet_manager.alias:
-            return jsonify({'error': 'Alias not initialized'}), 500
-
-        data = request.json or {}
-        address = data.get('address', '').strip()
-        amount = data.get('amount')
-        sweep = data.get('sweep', False)
-
-        # Validate address
-        if not address:
-            return jsonify({'error': 'Address is required'}), 400
-        if not address.startswith('E') or len(address) != 34:
-            return jsonify({'error': 'Invalid address format'}), 400
-
-        # Validate amount (unless sweep)
-        if not sweep:
-            try:
-                amount = float(amount)
-                if amount <= 0:
-                    return jsonify({'error': 'Amount must be greater than 0'}), 400
-            except (TypeError, ValueError):
-                return jsonify({'error': 'Invalid amount'}), 400
-
-        try:
-            alias = wallet_manager.alias
-            # Get ready to send
-            alias.get()
-            alias.getReadyToSend()
-
-            # typicalNeuronTransaction handles both direct (has EVR) and
-            # indirect (no EVR, uses Mundo) paths, including sweep
-            result = alias.typicalNeuronTransaction(
-                amount=amount if not sweep else 0,
-                address=address,
-                sweep=sweep,
-                requestSimplePartialFn=_mundoRequestSimplePartial,
-                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
-
-            if hasattr(result, 'success') and hasattr(result, 'msg'):
-                if result.success and result.msg and len(result.msg) == 64:
-                    return jsonify({'success': True, 'txid': result.msg})
-                else:
-                    error_msg = result.msg or 'Transaction failed'
-                    return jsonify({'error': error_msg}), 500
-            else:
-                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-    @app.route('/api/wallet/send', methods=['POST'])
-    @login_required
-    def api_wallet_send():
-        """Send SATORI tokens from wallet."""
-        wallet_manager = get_or_create_session_wallet()
-        if not wallet_manager or not wallet_manager.wallet:
-            return jsonify({'error': 'Wallet not initialized'}), 500
-
-        data = request.json or {}
-        address = data.get('address', '').strip()
-        amount = data.get('amount')
-        sweep = data.get('sweep', False)
-
-        # Validate address
-        if not address:
-            return jsonify({'error': 'Address is required'}), 400
-        if not address.startswith('E') or len(address) != 34:
-            return jsonify({'error': 'Invalid address format'}), 400
-
-        # Validate amount (unless sweep)
-        if not sweep:
-            try:
-                amount = float(amount)
-                if amount <= 0:
-                    return jsonify({'error': 'Amount must be greater than 0'}), 400
-            except (TypeError, ValueError):
-                return jsonify({'error': 'Invalid amount'}), 400
-
-        try:
-            wallet = wallet_manager.wallet
-            # Get ready to send
-            wallet.get()
-            wallet.getReadyToSend()
-
-            # typicalNeuronTransaction handles both direct (has EVR) and
-            # indirect (no EVR, uses Mundo) paths, including sweep
-            result = wallet.typicalNeuronTransaction(
-                amount=amount if not sweep else 0,
-                address=address,
-                sweep=sweep,
-                requestSimplePartialFn=_mundoRequestSimplePartial,
-                broadcastSimplePartialFn=_mundoBroadcastSimplePartial)
-
-            if hasattr(result, 'success') and hasattr(result, 'msg'):
-                if result.success and result.msg and len(result.msg) == 64:
-                    return jsonify({'success': True, 'txid': result.msg})
-                else:
-                    error_msg = result.msg or 'Transaction failed'
-                    return jsonify({'error': error_msg}), 500
-            else:
-                return jsonify({'error': 'Unexpected transaction result', 'details': str(result)}), 500
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
     @app.route('/api/wallet/qr/<address>')
     @login_required
     def api_wallet_qr(address: str):
@@ -1742,35 +1614,6 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/wallet/balance/direct')
-    @login_required
-    def api_wallet_balance_direct():
-        """Combined alias+wallet balance, backed by an in-process TTL cache.
-
-        A process-global WalletManager holds a persistent ElectrumX socket,
-        and the snapshot is cached for 30 s. Pass ?refresh=1 (wired to the
-        dashboard Refresh button and to post-send refreshes) to bypass cache.
-        """
-        try:
-            force = request.args.get('refresh', '0').lower() in ('1', 'true', 'yes')
-            return jsonify(get_balance_snapshot(force=force))
-        except Exception as e:
-            import traceback
-            logger.error(f"balance fetch failed: {e}")
-            logger.error(traceback.format_exc())
-            return jsonify({'error': str(e)}), 500
-
-    @app.route('/api/wallet/balance/alias-only')
-    @login_required
-    def api_wallet_balance_alias_only():
-        """The alias's SATORI balance alone (skips the wallet). Cheap to call."""
-        try:
-            balance = get_alias_balance()
-            return jsonify({'alias_balance': balance})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-    # AI Engine Training Delay Control
     @app.route('/api/engine/training-delay', methods=['GET'])
     @login_required
     def get_training_delay():

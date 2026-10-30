@@ -53,7 +53,7 @@ def test_web_login_signs_eip191(app, test_alias):
             patch('satorilib.wallet.evrmore.wallet.signMessage', refuse), \
             patch.object(routes.requests, 'post', return_value=login) as post, \
             patch.object(routes.requests, 'get', return_value=_response({'balance': 1})) as get:
-        response = client.get('/api/balance/get')
+        response = client.get('/api/pool/open')
 
     assert response.status_code == 200
     (url,), kwargs = post.call_args
