@@ -4,6 +4,7 @@ Unit tests for neuron web UI.
 Tests the Flask application, routes, and templates.
 """
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch, Mock
 
 
@@ -265,6 +266,19 @@ class TestKeyFilesDownload:
         assert _zip_names(response) == ['wallet/vault.yaml', 'wallet/wallet.yaml']
 
     @pytest.mark.unit
+    def test_download_has_everything_needed_and_no_caches(self, keys_client):
+        client, keys = keys_client
+        for name in ('wallet.yaml', 'vault.yaml', 'vault.yaml.bak', 'wallet.scripts.json',
+                     'vault.scripts.json', 'nostr.yaml', 'wallet-link.yaml'):
+            (keys / name).write_text('x: 1\n')
+        (keys / 'vault.cache.joblib').write_text('coins')
+        (keys / 'backup_20260101_000000').mkdir()
+        response = client.get('/api/wallet/download')
+        assert _zip_names(response) == sorted('wallet/' + n for n in (
+            'wallet.yaml', 'vault.yaml', 'vault.yaml.bak', 'wallet.scripts.json',
+            'vault.scripts.json', 'nostr.yaml', 'wallet-link.yaml'))
+
+    @pytest.mark.unit
     def test_newer_layout_downloads_alias_and_wallet(self, keys_client):
         client, keys = keys_client
         (keys / 'alias.yaml').write_text('alias: 1\n')
@@ -276,21 +290,39 @@ class TestKeyFilesDownload:
             'wallet/alias.yaml', 'wallet/alias.yaml.bak', 'wallet/wallet.yaml']
 
 
+def _key(tag):
+    """A key file's body; tag makes it a different key."""
+    return f'publicKey: pub-{tag}\nentropy: ent-{tag}\nprivateKey: priv-{tag}\n'
+
+
+NOSTR = 'pubkey_hex: ab\nsecret_hex: cd\n'
+
+
 class TestKeyFilesImport:
 
     def _upload(self, client, files):
         import io
-        data = {'files': [(io.BytesIO(body.encode()), name) for name, body in files.items()]}
+        data = {'files': [(io.BytesIO(body.encode() if isinstance(body, str) else body), name)
+                          for name, body in files.items()]}
         return client.post('/api/wallet/import', data=data, content_type='multipart/form-data')
+
+    def _zip(self, files):
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as z:
+            for name, body in files.items():
+                z.writestr(name, body)
+        return buf.getvalue()
 
     @pytest.mark.unit
     def test_older_layout_upload_into_a_newer_install_is_written_by_role(self, keys_client):
         client, keys = keys_client
         (keys / 'alias.yaml').write_text('old: alias\n')
-        response = self._upload(client, {'wallet.yaml': 'the: alias\n', 'vault.yaml': 'the: wallet\n'})
+        response = self._upload(client, {'wallet.yaml': _key('a'), 'vault.yaml': _key('w')})
         assert response.status_code == 200, response.get_json()
-        assert (keys / 'alias.yaml').read_text() == 'the: alias\n'
-        assert (keys / 'wallet.yaml').read_text() == 'the: wallet\n'
+        assert (keys / 'alias.yaml').read_text() == _key('a')
+        assert (keys / 'wallet.yaml').read_text() == _key('w')
         assert not (keys / 'vault.yaml').exists()
 
     @pytest.mark.unit
@@ -298,17 +330,152 @@ class TestKeyFilesImport:
         client, keys = keys_client
         (keys / 'wallet.yaml').write_text('old: alias\n')
         (keys / 'vault.yaml').write_text('old: wallet\n')
-        response = self._upload(client, {'alias.yaml': 'the: alias\n', 'wallet.yaml': 'the: wallet\n'})
+        response = self._upload(client, {'alias.yaml': _key('a'), 'wallet.yaml': _key('w')})
         assert response.status_code == 200, response.get_json()
-        assert (keys / 'wallet.yaml').read_text() == 'the: alias\n'
-        assert (keys / 'vault.yaml').read_text() == 'the: wallet\n'
+        assert (keys / 'wallet.yaml').read_text() == _key('a')
+        assert (keys / 'vault.yaml').read_text() == _key('w')
         assert not (keys / 'alias.yaml').exists()
 
     @pytest.mark.unit
     def test_upload_without_the_wallet_file_is_refused(self, keys_client):
         client, keys = keys_client
         (keys / 'alias.yaml').write_text('old: alias\n')
-        response = self._upload(client, {'alias.yaml': 'the: alias\n'})
+        response = self._upload(client, {'alias.yaml': _key('a')})
         assert response.status_code == 400
         assert 'wallet.yaml' in response.get_json()['error']
         assert (keys / 'alias.yaml').read_text() == 'old: alias\n'
+
+    @pytest.mark.unit
+    def test_the_downloaded_zip_imports_as_is(self, keys_client):
+        client, keys = keys_client
+        (keys / 'alias.yaml').write_text(_key('old-a'))
+        (keys / 'wallet.yaml').write_text(_key('old-w'))
+        backup = self._zip({'wallet/wallet.yaml': _key('a'), 'wallet/vault.yaml': _key('w'),
+                            'wallet/vault.yaml.bak': _key('w'), 'wallet/nostr.yaml': NOSTR})
+        response = self._upload(client, {'wallet_backup.zip': backup})
+        assert response.status_code == 200, response.get_json()
+        assert (keys / 'alias.yaml').read_text() == _key('a')
+        assert (keys / 'wallet.yaml').read_text() == _key('w')
+        assert (keys / 'wallet.yaml.bak').read_text() == _key('w')
+        assert (keys / 'nostr.yaml').read_text() == NOSTR
+
+    @pytest.mark.unit
+    def test_download_then_import_round_trip(self, keys_client):
+        client, keys = keys_client
+        (keys / 'alias.yaml').write_text(_key('a'))
+        (keys / 'wallet.yaml').write_text(_key('w'))
+        (keys / 'nostr.yaml').write_text(NOSTR)
+        backup = client.get('/api/wallet/download').data
+        for f in ('alias.yaml', 'wallet.yaml', 'nostr.yaml'):
+            (keys / f).write_text('replaced: true\n')
+        response = self._upload(client, {'wallet_backup.zip': backup})
+        assert response.status_code == 200, response.get_json()
+        assert (keys / 'alias.yaml').read_text() == _key('a')
+        assert (keys / 'wallet.yaml').read_text() == _key('w')
+        assert (keys / 'nostr.yaml').read_text() == NOSTR
+
+    @pytest.mark.unit
+    def test_without_a_nostr_key_this_neurons_is_kept(self, keys_client):
+        client, keys = keys_client
+        (keys / 'nostr.yaml').write_text('pubkey_hex: mine\nsecret_hex: mine\n')
+        response = self._upload(client, {'alias.yaml': _key('a'), 'wallet.yaml': _key('w')})
+        assert response.status_code == 200, response.get_json()
+        assert 'mine' in (keys / 'nostr.yaml').read_text()
+
+    @pytest.mark.unit
+    def test_coin_caches_go_but_channel_scripts_are_never_deleted(self, keys_client):
+        client, keys = keys_client
+        (keys / 'wallet.yaml').write_text(_key('old-a'))
+        (keys / 'vault.yaml').write_text(_key('old-w'))
+        for cache in ('wallet.cache.joblib', 'vault.cache.joblib'):
+            (keys / cache).write_text('old coins')
+        for scripts in ('wallet.scripts.json', 'vault.scripts.json'):
+            (keys / scripts).write_text('{"p2sh": {"status": "funded"}}')
+        response = self._upload(client, {'wallet.yaml': _key('old-a'), 'vault.yaml': _key('old-w')})
+        assert response.status_code == 200, response.get_json()
+        assert not list(keys.glob('*.cache.joblib'))
+        assert (keys / 'wallet.scripts.json').read_text() == '{"p2sh": {"status": "funded"}}'
+        assert (keys / 'vault.scripts.json').read_text() == '{"p2sh": {"status": "funded"}}'
+        backup = Path(response.get_json()['backup_location'])
+        assert (backup / 'vault.cache.joblib').read_text() == 'old coins'
+
+    @pytest.mark.unit
+    def test_channel_scripts_and_link_in_a_backup_are_restored_by_role(self, keys_client):
+        client, keys = keys_client
+        (keys / 'alias.yaml').write_text(_key('old-a'))
+        (keys / 'wallet.yaml').write_text(_key('old-w'))
+        backup = self._zip({'wallet/wallet.yaml': _key('a'), 'wallet/vault.yaml': _key('w'),
+                            'wallet/wallet.scripts.json': '{"alias-channel": {}}',
+                            'wallet/vault.scripts.json': '{"wallet-channel": {}}',
+                            'wallet/wallet-link.yaml': 'message: m\nsignature: s\n'})
+        response = self._upload(client, {'b.zip': backup})
+        assert response.status_code == 200, response.get_json()
+        # old-layout names in the backup, newer layout here: scripts follow their key
+        assert (keys / 'alias.scripts.json').read_text() == '{"alias-channel": {}}'
+        assert (keys / 'wallet.scripts.json').read_text() == '{"wallet-channel": {}}'
+        assert (keys / 'wallet-link.yaml').read_text() == 'message: m\nsignature: s\n'
+
+    @pytest.mark.unit
+    def test_a_broken_scripts_file_is_refused(self, keys_client):
+        client, keys = keys_client
+        response = self._upload(client, {'alias.yaml': _key('a'), 'wallet.yaml': _key('w'),
+                                         'alias.scripts.json': 'not json'})
+        assert response.status_code == 400
+        assert 'payment channel scripts' in response.get_json()['error']
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize('files, why', [
+        ({'alias.yaml': 'ui port: 24601\n', 'wallet.yaml': _key('w')}, 'not an alias or wallet key file'),
+        ({'alias.yaml': _key('same'), 'wallet.yaml': _key('same')}, 'same key'),
+        ({'alias.yaml': _key('a'), 'wallet.yaml': _key('w'), 'nostr.yaml': 'x: 1\n'}, 'not a Nostr key file'),
+        ({'alias.yaml': _key('a'), 'config.yaml': _key('w')}, 'Missing required files'),
+        ({'notes.txt': 'hi'}, 'not a wallet file'),
+    ])
+    def test_wrong_files_are_refused_and_nothing_changes(self, keys_client, files, why):
+        client, keys = keys_client
+        (keys / 'alias.yaml').write_text(_key('old-a'))
+        (keys / 'wallet.yaml').write_text(_key('old-w'))
+        response = self._upload(client, files)
+        assert response.status_code == 400
+        assert why in response.get_json()['error']
+        assert (keys / 'alias.yaml').read_text() == _key('old-a')
+        assert (keys / 'wallet.yaml').read_text() == _key('old-w')
+
+    @pytest.mark.unit
+    def test_a_zip_with_other_files_is_refused(self, keys_client):
+        client, keys = keys_client
+        backup = self._zip({'wallet/alias.yaml': _key('a'), 'wallet/wallet.yaml': _key('w'), 'evil.sh': 'rm -rf /'})
+        response = self._upload(client, {'backup.zip': backup})
+        assert response.status_code == 400
+        assert 'not a wallet file' in response.get_json()['error']
+
+    @pytest.mark.unit
+    def test_check_says_what_each_file_is_and_changes_nothing(self, keys_client):
+        client, keys = keys_client
+        (keys / 'alias.yaml').write_text(_key('old-a'))
+        (keys / 'wallet.yaml').write_text(_key('old-w'))
+        backup = self._zip({'wallet/wallet.yaml': _key('a'), 'wallet/vault.yaml': _key('w'),
+                            'wallet/vault.yaml.bak': _key('w'), 'wallet/nostr.yaml': NOSTR})
+        import io
+        response = client.post('/api/wallet/import?check=1', content_type='multipart/form-data',
+                               data={'files': [(io.BytesIO(backup), 'wallet_backup.zip')]})
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()['files'] == [
+            {'name': 'wallet.yaml', 'role': 'Alias'},
+            {'name': 'vault.yaml', 'role': 'Wallet'},
+            {'name': 'vault.yaml.bak', 'role': 'Wallet (spare copy)'},
+            {'name': 'nostr.yaml', 'role': 'Nostr identity'},
+        ]
+        assert (keys / 'alias.yaml').read_text() == _key('old-a')
+        assert not list(keys.glob('backup_*'))
+
+    @pytest.mark.unit
+    def test_import_clears_the_old_aliases_last_prediction_time(self, keys_client):
+        client, keys = keys_client
+        import web.routes as routes  # noqa: F401
+        cfg = {'base predict last submit ts': 123, 'reward address': '0xabc', 'ui port': 1}
+        with patch('satorineuron.config.get', side_effect=lambda *a, **k: dict(cfg)), \
+                patch('satorineuron.config.put', side_effect=lambda *a, data=None, **k: (cfg.clear(), cfg.update(data))):
+            response = self._upload(client, {'alias.yaml': _key('a'), 'wallet.yaml': _key('w')})
+        assert response.status_code == 200, response.get_json()
+        assert cfg == {'ui port': 1}

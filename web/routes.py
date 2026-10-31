@@ -2157,8 +2157,12 @@ def register_routes(app):
 
         Rollback: If ANY step fails, automatically restores from backup
 
-        Expected files in upload ('files'): the alias's and the wallet's files
-        as a download names them (either layout), each optionally with its .bak.
+        Expected upload ('files'): the .zip a download gives, or its files: the
+        alias's and the wallet's files as a download names them (either layout),
+        and optionally their .bak, their payment channel scripts (.scripts.json),
+        nostr.yaml and wallet-link.yaml, each restored when present. The coin
+        caches are removed so the new keys don't start with the old ones' coins;
+        channel scripts are never removed.
         """
         import tempfile
         import shutil
@@ -2167,43 +2171,86 @@ def register_routes(app):
         import yaml
         from satorineuron import config
 
+        MAX_FILE = 1024 * 1024  # key files are about 1 KB; channel scripts grow with channels
+
+        def allowed(name):
+            return (name == os.path.basename(name) and not name.startswith('.') and
+                    name.endswith(('.yaml', '.yaml.bak', '.scripts.json')))
+
+        def uploaded_files():
+            """{name: bytes} from the upload: the .zip a download gives, or the loose
+            files. Only plain file names are read from a zip (folders dropped)."""
+            import io
+            import zipfile
+            files = [f for f in request.files.getlist('files') if f.filename]
+            if len(files) == 1 and files[0].filename.lower().endswith('.zip'):
+                out = {}
+                try:
+                    with zipfile.ZipFile(io.BytesIO(files[0].read(MAX_FILE * 10))) as z:
+                        for info in z.infolist():
+                            name = os.path.basename(info.filename)
+                            if info.is_dir() or not name:
+                                continue
+                            if not allowed(name):
+                                raise ValueError(f'{info.filename} is not a wallet file')
+                            if info.file_size > MAX_FILE or name in out:
+                                raise ValueError(f'{info.filename} is not a wallet file')
+                            out[name] = z.read(info)
+                except zipfile.BadZipFile:
+                    raise ValueError('That .zip could not be read')
+                return out
+            out = {}
+            for f in files:
+                if not allowed(f.filename):
+                    raise ValueError(f'{f.filename} is not a wallet file or a backup (.zip)')
+                if f.filename in out:
+                    raise ValueError(f'{f.filename} was chosen twice')
+                body = f.read(MAX_FILE + 1)
+                if len(body) > MAX_FILE:
+                    raise ValueError(f'{f.filename} is too big to be a key file')
+                out[f.filename] = body
+            return out
+
+        def key_fields(body, name):
+            """The parsed key file, or a ValueError saying it isn't one."""
+            try:
+                data = yaml.safe_load(body)
+            except Exception as e:
+                raise ValueError(f'{name} could not be read: {e}')
+            if not (isinstance(data, dict) and data.get('publicKey') and
+                    (data.get('entropy') or data.get('privateKey'))):
+                raise ValueError(f'{name} is not an alias or wallet key file')
+            return data
+
         try:
-            # 1. Validate request has files
+            # 1. Read the upload
             if 'files' not in request.files:
                 return jsonify({'error': 'No files uploaded'}), 400
-
-            files = [f for f in request.files.getlist('files') if f.filename]
-            if not files:
-                return jsonify({'error': 'No files selected'}), 400
-
-            # Validate file names (security: prevent directory traversal)
-            file_names = [f.filename for f in files]
-            for name in file_names:
-                if (
-                    name != os.path.basename(name) or name.startswith('.') or
-                    not (name.endswith('.yaml') or name.endswith('.yaml.bak'))
-                ):
-                    return jsonify({
-                        'error': f'Invalid file: {name}. Only key files allowed.'
-                    }), 400
-            if len(set(file_names)) != len(file_names) or len(file_names) > 4:
-                return jsonify({'error': 'Upload the alias file and the wallet file (and their .bak).'}), 400
+            try:
+                incoming = uploaded_files()
+            except ValueError as e:
+                return jsonify({'error': str(e)}), 400
+            if not incoming:
+                return jsonify({'error': 'No key files in the upload'}), 400
+            file_names = list(incoming)
 
             # 2. Get the keys folder path
             keys_dir = Path(config.keysPath())
 
-            # 3. Save uploaded files to temporary location first, and read their layout
+            # 3. Save the upload to a temporary folder first, and read its layout
             temp_dir = Path(tempfile.mkdtemp())
             try:
-                for file in files:
-                    file.save(str(temp_dir / file.filename))
+                for name, body in incoming.items():
+                    (temp_dir / name).write_bytes(body)
                 uploaded = config.keyFiles(str(temp_dir))
                 names = config.keyFiles(str(keys_dir))
-                # role -> (uploaded name, this install's name)
-                moves = {}
+                # uploaded name -> this install's name
+                moves = {'nostr.yaml': 'nostr.yaml', 'wallet-link.yaml': 'wallet-link.yaml'}
                 for role in ('alias', 'wallet'):
                     moves[uploaded[role]] = names[role]
                     moves[uploaded[role] + '.bak'] = names[role] + '.bak'
+                    # payment channel scripts follow their key
+                    moves[uploaded[role][:-len('.yaml')] + '.scripts.json'] = names[role][:-len('.yaml')] + '.scripts.json'
                 missing = [uploaded[role] for role in ('alias', 'wallet')
                            if uploaded[role] not in file_names]
                 if missing:
@@ -2215,27 +2262,48 @@ def register_routes(app):
                 if unexpected:
                     shutil.rmtree(temp_dir)
                     return jsonify({
-                        'error': f'Invalid file: {", ".join(unexpected)}. Only the alias and wallet files allowed.'
+                        'error': f'Invalid file: {", ".join(unexpected)}. Only the files Download Wallet makes are allowed.'
                     }), 400
 
-                # 4. Validate file contents (basic YAML check)
-                for role in ('alias', 'wallet'):
-                    file_name = uploaded[role]
-                    try:
-                        with open(temp_dir / file_name, 'r') as f:
-                            yaml.safe_load(f)
-                        logger.info(f"Validated {file_name}")
-                    except Exception as e:
-                        shutil.rmtree(temp_dir)
-                        logger.error(f"Invalid {file_name}: {e}")
-                        return jsonify({
-                            'error': f'Invalid {file_name}: {str(e)}',
-                            'rolled_back': False
-                        }), 400
+                # 4. Validate contents: real key files, two different keys
+                try:
+                    alias_keys = key_fields(incoming[uploaded['alias']], uploaded['alias'])
+                    wallet_keys = key_fields(incoming[uploaded['wallet']], uploaded['wallet'])
+                    if alias_keys['publicKey'] == wallet_keys['publicKey']:
+                        raise ValueError('The alias and the wallet are the same key; choose both files from the backup')
+                    if 'nostr.yaml' in incoming:
+                        nostr = yaml.safe_load(incoming['nostr.yaml'])
+                        if not (isinstance(nostr, dict) and nostr.get('secret_hex') and nostr.get('pubkey_hex')):
+                            raise ValueError('nostr.yaml is not a Nostr key file')
+                    for name in file_names:
+                        if name.endswith('.scripts.json'):
+                            import json
+                            try:
+                                if not isinstance(json.loads(incoming[name]), dict):
+                                    raise ValueError
+                            except ValueError:
+                                raise ValueError(f'{name} is not a payment channel scripts file')
+                except ValueError as e:
+                    shutil.rmtree(temp_dir)
+                    return jsonify({'error': str(e), 'rolled_back': False}), 400
             except Exception as e:
                 if temp_dir.exists():
                     shutil.rmtree(temp_dir)
                 return jsonify({'error': str(e)}), 500
+
+            # ?check=1: say what each file is, change nothing (the modal shows it first)
+            if request.args.get('check'):
+                shutil.rmtree(temp_dir)
+                what = {'nostr.yaml': 'Nostr identity', 'wallet-link.yaml': 'Wallet link'}
+                for role, label in (('alias', 'Alias'), ('wallet', 'Wallet')):
+                    what[uploaded[role]] = label
+                    what[uploaded[role] + '.bak'] = label + ' (spare copy)'
+                    what[uploaded[role][:-len('.yaml')] + '.scripts.json'] = label + ' payment channels'
+                order = ['Alias', 'Wallet', 'Alias (spare copy)', 'Wallet (spare copy)',
+                         'Alias payment channels', 'Wallet payment channels', 'Nostr identity', 'Wallet link']
+                return jsonify({'ok': True, 'files': [
+                    {'name': name, 'role': what[name]}
+                    for name in sorted(file_names, key=lambda n: order.index(what[n]))]})
 
             # 5. Create timestamped backup of the key files inside the keys folder
             timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -2269,6 +2337,12 @@ def register_routes(app):
 
                 logger.info(f"Wallet import: saved {len(written)} files")
 
+                # The coin caches belong to the old keys and rebuild from the chain;
+                # the backup folder keeps them. Payment channel scripts are never
+                # deleted here: they can't be rebuilt (a backup's own replace them).
+                for role in ('alias', 'wallet'):
+                    (keys_dir / (names[role][:-len('.yaml')] + '.cache.joblib')).unlink(missing_ok=True)
+
                 # 6.5. Clear reward address from config since the wallet changed
                 try:
                     # Read config, remove reward address, and write back
@@ -2290,6 +2364,12 @@ def register_routes(app):
                             logger.info("Verified: reward address successfully removed from config")
                     else:
                         logger.info("No reward address found in config to clear")
+                    # The last on-chain prediction time is the old alias's; the
+                    # contract still refuses a second prediction in one round.
+                    config_data = config.get()
+                    if 'base predict last submit ts' in config_data:
+                        del config_data['base predict last submit ts']
+                        config.put(data=config_data)
                 except Exception as config_error:
                     logger.error(f"Error clearing reward address from config: {config_error}")
                     import traceback
@@ -3094,8 +3174,10 @@ def register_routes(app):
     @app.route('/api/wallet/download', methods=['GET'])
     @login_required
     def api_wallet_download():
-        """Download the alias's and the wallet's files (named by this install's
-        layout, with their .bak when present) as a ZIP the import takes."""
+        """Download everything needed to restore this neuron as a ZIP the import
+        takes as is: the alias's and the wallet's files (named by this install's
+        layout) with their .bak, their payment channel scripts, the Nostr key and
+        the wallet link. Coin caches are left out (they rebuild from the chain)."""
         import io
         import zipfile
         import datetime
@@ -3109,7 +3191,9 @@ def register_routes(app):
 
             names = config.keyFiles(str(keys_dir))
             required_files = [names['alias'], names['wallet']]
-            allowed_files = required_files + [name + '.bak' for name in required_files]
+            allowed_files = (required_files + [name + '.bak' for name in required_files] +
+                             [name[:-len('.yaml')] + '.scripts.json' for name in required_files] +
+                             ['nostr.yaml', 'wallet-link.yaml'])
 
             missing_required = [name for name in required_files if not (keys_dir / name).exists()]
             if missing_required:
