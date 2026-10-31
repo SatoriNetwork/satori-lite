@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Build and push satorinet/satori-lite:base-test (amd64), the tester image
-# pinned to the dev central. Run on the build server from satori-lite, with
+# pinned to the production central. Run on the build server from satori-lite, with
 # satorilib checked out next to it on the same branch.
 #
 # Usage: ./build-basetest.sh            # build + push
