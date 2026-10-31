@@ -24,6 +24,9 @@ class FakeClaimer:
         self.eth = eth or {}
         self.satori = {}
         self.claims = []
+        self.airdrop = {}
+        self.airdrop_claimed = {}
+        self.airdrop_claims = []
 
     def token_balance(self, address):
         if isinstance(self.satori.get(address), Exception):
@@ -35,6 +38,15 @@ class FakeClaimer:
 
     def eth_balance(self, address):
         return self.eth.get(address, 0)
+
+    def airdrop_status(self, address):
+        alloc = self.airdrop.get(address, 0)
+        claimed = self.airdrop_claimed.get(address, 0)
+        return {'allocation': alloc, 'claimed': claimed, 'claimable': alloc - claimed}
+
+    def claim_airdrop(self, private_key):
+        self.airdrop_claims.append(private_key)
+        return '0xairdrop'
 
     def claim(self, private_key, lifetime_entitlement, proof):
         self.claims.append((private_key, lifetime_entitlement, proof))
@@ -147,3 +159,37 @@ def test_balances_one_failed_read_keeps_the_other(web):
     body = r.get_json()
     assert body['wallet'] == {'address': WALLET, 'error': 'rpc down'}
     assert body['alias']['satori'] == 1.0
+
+
+def test_airdrop_shows_the_wallet_and_the_alias(web):
+    client, _, claimer = web
+    claimer.airdrop = {WALLET: 18 * WEI // 10, ALIAS: WEI // 20}
+    r = client.get('/api/wallet/base/airdrop').get_json()
+    assert (r['address'], r['allocation'], r['claimable']) == (WALLET, 1.8, 1.8)
+    assert (r['alias']['address'], r['alias']['claimable']) == (ALIAS, 0.05)
+
+
+def test_alias_airdrop_is_claimed_with_the_alias_key(web):
+    client, _, claimer = web
+    claimer.airdrop = {ALIAS: WEI}
+    claimer.eth = {ALIAS: WEI // 100}
+    r = client.post('/api/wallet/base/airdrop/claim', json={'key': 'alias'}).get_json()
+    assert r['success'] and r['claimed'] == 1.0
+    assert claimer.airdrop_claims == [ALIAS_KEY]
+
+
+def test_airdrop_claim_without_gas_says_so(web):
+    client, _, claimer = web
+    claimer.airdrop = {WALLET: WEI}
+    response = client.post('/api/wallet/base/airdrop/claim', json={})
+    assert response.status_code == 400
+    assert 'no ETH' in response.get_json()['error'] and WALLET in response.get_json()['error']
+    assert claimer.airdrop_claims == []
+
+
+def test_airdrop_claim_with_nothing_owed_is_refused(web):
+    client, _, claimer = web
+    claimer.eth = {WALLET: WEI}
+    response = client.post('/api/wallet/base/airdrop/claim', json={})
+    assert response.status_code == 400
+    assert 'Nothing to claim' in response.get_json()['error']

@@ -1364,16 +1364,17 @@ def register_routes(app):
     @app.route('/api/wallet/base/airdrop')
     @login_required
     def api_wallet_base_airdrop():
-        """Airdrop claim status: total allocation, already claimed, and what is
-        currently vested-and-claimable (the contract computes vesting)."""
+        """Airdrop status for the wallet (and the alias under 'alias'): the
+        allocation from the SATORIEVR snapshot, what is already claimed, and what
+        can be claimed now. Allocations are claimable in full (no vesting)."""
         wallet_manager = get_or_create_session_wallet()
         if not (wallet_manager and wallet_manager.wallet):
             return jsonify({'error': 'Wallet not initialized'}), 500
-        try:
-            address = wallet_manager.wallet.ethAddress
-            s = _base_claimer().airdrop_status(address)
-            WEI = 10 ** 18
-            return jsonify({
+        WEI = 10 ** 18
+
+        def status_of(claimer, address):
+            s = claimer.airdrop_status(address)
+            return {
                 'address': address,
                 'allocation_wei': str(s['allocation']),
                 'claimed_wei': str(s['claimed']),
@@ -1381,26 +1382,43 @@ def register_routes(app):
                 'allocation': s['allocation'] / WEI,
                 'claimed': s['claimed'] / WEI,
                 'claimable': s['claimable'] / WEI,
-            })
+            }
+        try:
+            claimer = _base_claimer()
+            result = status_of(claimer, wallet_manager.wallet.ethAddress)
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+        if wallet_manager.alias:
+            try:
+                result['alias'] = status_of(claimer, wallet_manager.alias.ethAddress)
+            except Exception as e:
+                result['alias'] = {'address': wallet_manager.alias.ethAddress, 'error': str(e)}
+        return jsonify(result)
 
     @app.route('/api/wallet/base/airdrop/claim', methods=['POST'])
     @login_required
     def api_wallet_base_airdrop_claim():
-        """Claim the neuron's vested airdrop: submit claimAirdrop() signed with
-        the wallet key. No proof needed — the contract computes vesting. Needs a
-        little ETH on the user's Base address for gas."""
+        """Claim an airdrop allocation in full: claimAirdrop() signed with the
+        wallet key, or with the alias key for {"key": "alias"}. No proof needed.
+        The claiming address pays the gas, so it needs a little ETH on Base;
+        with none, it says so."""
         wallet_manager = get_or_create_session_wallet()
         if not (wallet_manager and wallet_manager.wallet):
             return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            wallet = wallet_manager.wallet
+            whose = 'alias' if (request.get_json(silent=True) or {}).get('key') == 'alias' else 'wallet'
+            signer = wallet_manager.alias if whose == 'alias' else wallet_manager.wallet
+            if signer is None:
+                return jsonify({'error': 'This neuron has no alias.'}), 400
             claimer = _base_claimer()
-            status = claimer.airdrop_status(wallet.ethAddress)
+            status = claimer.airdrop_status(signer.ethAddress)
             if status['claimable'] <= 0:
-                return jsonify({'error': 'Nothing to claim from the airdrop right now.'}), 400
-            txhash = claimer.claim_airdrop(wallet.account.key.to_0x_hex())
+                return jsonify({'error': 'Nothing to claim from the airdrop.'}), 400
+            if claimer.eth_balance(signer.ethAddress) == 0:
+                return jsonify({'error': (
+                    f"Your {whose}'s Base address {signer.ethAddress} has no ETH to pay "
+                    f"the gas. Send it a little ETH on Base, then claim again.")}), 400
+            txhash = claimer.claim_airdrop(signer.account.key.to_0x_hex())
             return jsonify({
                 'success': True,
                 'txhash': txhash,

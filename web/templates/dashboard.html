@@ -118,6 +118,7 @@
         border-bottom: 1px solid var(--border-color);
     }
     .claim-row:first-child { padding-top: 0.15rem; }
+    .claim-row[hidden] { display: none; }
     .claim-name { font-weight: 600; font-size: 0.92rem; color: var(--text-primary); }
     .claim-note { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
     .claim-amount {
@@ -1681,11 +1682,20 @@
                     <div class="claim-row">
                         <div class="claim-what">
                             <div class="claim-name">Airdrop</div>
-                            <div class="claim-note">Vests over time. Allocated <span id="airdropAllocation">…</span>, claimed <span id="airdropClaimed">…</span></div>
+                            <div class="claim-note">Your share of the SATORIEVR snapshot. Allocated <span id="airdropAllocation">…</span>, claimed <span id="airdropClaimed">…</span></div>
                         </div>
                         <div class="claim-amount"><strong id="airdropClaimable">…</strong>SATORI</div>
-                        <button class="btn btn-primary btn-sm claim-btn" id="airdropBtn" onclick="doClaimAirdrop()">Claim</button>
+                        <button class="btn btn-primary btn-sm claim-btn" id="airdropBtn" onclick="doClaimAirdrop('wallet')">Claim</button>
                         <div id="airdropStatus" class="claim-status small" style="display:none;"></div>
+                    </div>
+                    <div class="claim-row" id="aliasAirdropRow" hidden>
+                        <div class="claim-what">
+                            <div class="claim-name">Alias airdrop</div>
+                            <div class="claim-note">The snapshot share held by the alias, this neuron's signing address. Claimed to the alias.</div>
+                        </div>
+                        <div class="claim-amount"><strong id="aliasAirdropClaimable">…</strong>SATORI</div>
+                        <button class="btn btn-primary btn-sm claim-btn" id="aliasAirdropBtn" onclick="doClaimAirdrop('alias')">Claim</button>
+                        <div id="aliasAirdropStatus" class="claim-status small" style="display:none;"></div>
                     </div>
                     <div class="claim-row">
                         <div class="claim-what">
@@ -1697,7 +1707,7 @@
                         <button class="btn btn-primary btn-sm claim-btn" id="predRewardsBtn" onclick="doClaimPredictionRewards()">Claim</button>
                         <div id="predRewardsStatus" class="claim-status small" style="display:none;"></div>
                     </div>
-                    <p class="claim-foot">Claims are sent from your wallet and need a little Base ETH for gas.</p>
+                    <p class="claim-foot">Each claim is sent from the address it pays (the wallet, or the alias for its own share) and needs a little Base ETH there for gas.</p>
                 </div>
             </div>
         </div>
@@ -3004,33 +3014,48 @@
         }
     }
 
-    // ── Claim Airdrop (neuron claims with the wallet key; no proof needed) ─
+    // ── Claim Airdrop (wallet, and the alias's own share; no proof needed) ─
     async function loadAirdrop(force) {
         const el = document.getElementById('airdropClaimable');
         if (!el) return;
+        const btn = document.getElementById('airdropBtn');
+        const aliasRow = document.getElementById('aliasAirdropRow');
+        const aliasEl = document.getElementById('aliasAirdropClaimable');
+        const aliasBtn = document.getElementById('aliasAirdropBtn');
         try {
             const r = await apiCall('/wallet/base/airdrop');
-            const btn = document.getElementById('airdropBtn');
             if (r && !r.error) {
                 el.textContent = _fmtSatori(r.claimable);
                 document.getElementById('airdropAllocation').textContent = _fmtSatori(r.allocation);
                 document.getElementById('airdropClaimed').textContent = _fmtSatori(r.claimed);
                 if (btn) btn.disabled = !(parseFloat(r.claimable) > 0);
                 _markClaimRow(el, parseFloat(r.claimable) > 0);
+                // the alias's row only when the alias has an allocation
+                const a = r.alias;
+                const hasAlias = !!(a && !a.error && parseFloat(a.allocation) > 0);
+                aliasRow.hidden = !hasAlias;
+                if (hasAlias) {
+                    aliasEl.textContent = _fmtSatori(a.claimable);
+                    aliasBtn.disabled = !(parseFloat(a.claimable) > 0);
+                    _markClaimRow(aliasEl, parseFloat(a.claimable) > 0);
+                }
             } else {
                 el.textContent = 'Not available';
                 if (btn) btn.disabled = true;
                 _markClaimRow(el, false);
+                aliasRow.hidden = true;
             }
         } catch (e) {
             el.textContent = 'Not available';
             _markClaimRow(el, false);
+            aliasRow.hidden = true;
         }
     }
 
-    async function doClaimAirdrop() {
-        const status = document.getElementById('airdropStatus');
-        const btn = document.getElementById('airdropBtn');
+    async function doClaimAirdrop(key) {
+        const prefix = key === 'alias' ? 'aliasAirdrop' : 'airdrop';
+        const status = document.getElementById(prefix + 'Status');
+        const btn = document.getElementById(prefix + 'Btn');
         const show = (msg, ok) => {
             status.style.display = 'block';
             status.className = 'claim-status small ' + (ok ? 'text-success' : 'text-danger');
@@ -3040,7 +3065,11 @@
         btn.disabled = true;
         btn.innerHTML = '<i class="material-icons align-middle me-1">hourglass_empty</i> Claiming…';
         try {
-            const r = await apiCall('/wallet/base/airdrop/claim', 'POST');
+            // fetch, not apiCall: show the server's reason (e.g. no ETH for gas)
+            const res = await fetch(API_URL + '/wallet/base/airdrop/claim', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key: key === 'alias' ? 'alias' : 'wallet' }) });
+            const r = await res.json().catch(() => null);
             if (r && r.success) {
                 const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
                     ? baseTokenInfo.explorerUrl : 'https://basescan.org';
@@ -3049,10 +3078,14 @@
                     + '<a href="' + url + '" target="_blank" rel="noopener">View transaction</a>', true);
                 loadAirdrop(true);
             } else {
-                show((r && r.error) ? r.error : 'Airdrop claim failed', false);
+                status.style.display = 'block';
+                status.className = 'claim-status small text-danger';
+                status.textContent = (r && r.error) ? r.error : 'Airdrop claim failed';
             }
         } catch (e) {
-            show('Airdrop claim failed: ' + e, false);
+            status.style.display = 'block';
+            status.className = 'claim-status small text-danger';
+            status.textContent = 'Airdrop claim failed: ' + e;
         } finally {
             btn.innerHTML = orig;
             btn.disabled = false;
