@@ -3059,7 +3059,7 @@
         gasText.textContent = 'Checking ETH for gas…';
         const result = await apiCall('/wallet/base/balances');
         const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
-            ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+            ? baseTokenInfo.explorerUrl : 'https://basescan.org';
         const b = result && result.wallet;
         if (b && b.address) {
             document.getElementById('baseWalletLink').href = explorer + '/address/' + b.address;
@@ -3134,7 +3134,7 @@
             const r = await res.json().catch(() => null);
             if (r && r.success) {
                 const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
-                    ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+                    ? baseTokenInfo.explorerUrl : 'https://basescan.org';
                 const url = explorer + '/tx/' + r.txhash;
                 show('Claimed ' + _fmtSatori(r.claimed) + ' SATORI. '
                     + '<a href="' + url + '" target="_blank" rel="noopener">View transaction</a>', true);
@@ -3189,7 +3189,7 @@
             const r = await apiCall('/wallet/base/airdrop/claim', 'POST');
             if (r && r.success) {
                 const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
-                    ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+                    ? baseTokenInfo.explorerUrl : 'https://basescan.org';
                 const url = explorer + '/tx/' + r.txhash;
                 show('Claimed ' + _fmtSatori(r.claimed) + ' SATORI from the airdrop. '
                     + '<a href="' + url + '" target="_blank" rel="noopener">View transaction</a>', true);
@@ -3244,7 +3244,7 @@
             const r = await apiCall('/wallet/base/prediction-rewards/claim', 'POST');
             if (r && r.success) {
                 const explorer = (baseTokenInfo && baseTokenInfo.explorerUrl)
-                    ? baseTokenInfo.explorerUrl : 'https://sepolia.basescan.org';
+                    ? baseTokenInfo.explorerUrl : 'https://basescan.org';
                 const url = explorer + '/tx/' + r.txhash;
                 show('Claimed ' + _fmtSatori(r.claimed) + ' SATORI in prediction rewards. '
                     + '<a href="' + url + '" target="_blank" rel="noopener">View transaction</a>', true);

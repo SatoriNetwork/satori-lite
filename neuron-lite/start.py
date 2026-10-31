@@ -1259,7 +1259,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         Streams published by the Base bridge carry an object instead, because
         one observation describes an on-chain write:
 
-            {"chainId": 84532, "streamId": 1, "block": 45772737,
+            {"chainId": 8453, "streamId": 1, "block": 45772737,
              "round": 41373, "raw": "1"}
 
         For those, `raw` is authoritative: an int256 rendered as a string,

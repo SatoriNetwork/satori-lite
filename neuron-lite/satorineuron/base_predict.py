@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 UP = 1
 DOWN = 2
 
-# satori-<chainId>-<streamId>  (e.g. satori-84532-1)
+# satori-<chainId>-<streamId>  (e.g. satori-8453-1)
 _BASE_STREAM_RE = re.compile(r"^satori-(\d+)-(\d+)$")
 
 ENGINE_ABI = [

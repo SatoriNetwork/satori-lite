@@ -18,22 +18,22 @@ _cache = {"data": None, "ts": 0.0}
 
 # Fallback only (used if central is unreachable). Tracks the current deployment.
 DEFAULTS = {
-    "chainId": 84532,
-    "chainName": "Base Sepolia",
-    "rpcUrl": "https://sepolia.base.org",
-    "explorerUrl": "https://sepolia.basescan.org",
+    "chainId": 8453,
+    "chainName": "Base",
+    "rpcUrl": "https://mainnet.base.org",
+    "explorerUrl": "https://basescan.org",
     "symbol": "SATORI",
     "decimals": 18,
-    "token": "0xe6A4b12Eae75795E4D427706dc67c1392f75D54A",
-    "merkle": "0xeCc7f1d5Df7aCBD7D1b0615490A88d14CA2B1F1c",
-    "airdrop": "0x5BF17B223D623CdbD37E3497b95c911e954a3E65",
-    "rewards": "0x618138368f9Fc69585907d576DEA5C89F1C798D1",
-    "engine": "0x438Ca7a87b4D384b57f27c0829C06Ef1F1f90A60",
-    "games": "0x4AD128bF49841d8e970dC36E1D1e43b36a79B612",
-    "registry": "0xcE4278b73dFE00772B485697FD1E97Bb0669c87f",
-    "hub": "0x97D53d240e3dcfC6569d7B4001b03062681f4818",
+    "token": "0xd0a5bFF2789230b0fb1Bd989fc7CE7084c947E17",
+    "merkle": "0x8d2EcABbDd72C427A62ECe45E30a75B41Eb71E9B",
+    "airdrop": "0x4Ec6F7a801A3A39Ca5E77C6c0A397C93067Bafa1",
+    "rewards": "0x965bcCAF7ac896ba5a8FD57d5E9Dc1F044792Be4",
+    "engine": "0x433aBc7877F37560c50238a09F8F3CA207664e12",
+    "games": "0xda8f3D153bb620EF676a10EF331B9B3Db4348f81",
+    "registry": "0x0917659Fb65192B342A0Baf95b25E61Fc71a76F7",
+    "hub": "0x195083eE270ad89459e8dbF2d40fDFc85fb21327",
     # SatoriRewardsLens: read-only views, e.g. claimable prediction rewards.
-    "lens": "0x5404db175634ef5e83B23B6f9BD1836b040A47Dd",
+    "lens": "0x5a81cd45D6832CD6f2b4Ef53694ea07431c96DD5",
     # Nostr pubkey of the bridge that mirrors registry streams.
     "streamProvider": "cb45de2a76a5df79ea8aff0c867e96e527f803eb389420419e441a4946129838",
 }
