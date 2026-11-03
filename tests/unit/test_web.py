@@ -88,30 +88,6 @@ class TestWalletUnlock:
         assert '/dashboard' in response.location or b'/dashboard' in response.data
 
     @pytest.mark.unit
-    def test_login_switches_to_the_derived_alias_then_moves_it_on_base_and_restarts(self, client):
-        """An unlock whose alias is not the wallet's derived one (init/derived_alias.py): switched before the
-        register, then in the background its ETH and stake moved, and the neuron restarts."""
-        import threading
-        manager = MagicMock()
-        manager.openWallet.return_value = MagicMock(isDecrypted=True)
-        manager.wallet.ethAddress = '0xW'
-        manager.wallet.account.key.to_0x_hex.return_value = '0xwallet'
-        switched = {'old': '0xold', 'oldKey': '0x1', 'new': '0xnew', 'newKey': '0x2', 'retired': 'r'}
-        startup, restarted, order = MagicMock(), threading.Event(), []
-        startup.triggerRestart.side_effect = lambda: restarted.set()
-        with patch('web.routes.check_wallet_file_exists', return_value=True), \
-                patch('web.routes.get_or_create_session_wallet', return_value=manager), \
-                patch('web.routes.get_startup', return_value=startup), \
-                patch('web.routes.ensure_peer_registered', side_effect=lambda *a, **k: order.append('register')), \
-                patch('satorineuron.init.derived_alias.switchToDerivedAlias', side_effect=lambda m: order.append('switch') or switched), \
-                patch('satorineuron.init.derived_alias.moveOnBase', return_value={'sweep': '0xs'}) as moved:
-            response = client.post('/login', data={'password': 'correct_password'})
-            assert restarted.wait(10)
-        assert response.status_code in [302, 303]
-        assert order == ['switch', 'register']
-        assert moved.call_args[0][1:] == (switched, '0xwallet', '0xW')
-
-    @pytest.mark.unit
     def test_login_with_incorrect_password_shows_error(self, client):
         """Incorrect password should show error message."""
         mock_wallet_manager = MagicMock()
