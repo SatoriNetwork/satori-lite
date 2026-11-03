@@ -8,6 +8,7 @@ Handles all web routes for the minimal UI:
 """
 from functools import wraps
 import asyncio
+import threading
 import os
 import time
 import logging
@@ -447,6 +448,15 @@ def register_routes(app):
         session['encrypted_wallet_password'] = encrypted_pw
         session['session_key'] = session_key
 
+        # The alias the Satori app derives from this wallet, so both run one alias
+        # (satorineuron/init/derived_alias.py): switched now, linked, then registered
+        switched = None
+        try:
+            from satorineuron.init.derived_alias import switchToDerivedAlias
+            switched = switchToDerivedAlias(wallet_manager)
+        except Exception as e:
+            logger.warning(f"Could not switch to the wallet's derived alias: {e}")
+
         # Register peer with API server (non-blocking)
         try:
             peer_info = ensure_peer_registered(
@@ -457,6 +467,29 @@ def register_routes(app):
         except Exception as e:
             # Don't block login if registration fails
             logger.warning(f"Peer registration warning: {e}")
+
+        if switched:
+            _after_alias_switch(wallet_manager, switched)
+
+    def _after_alias_switch(wallet_manager, switched):
+        """The old alias's ETH and stake moved to the new alias (in the background, the wallet's key taken now),
+        then the neuron restarts so all of it uses the new alias."""
+        wallet = wallet_manager.wallet
+        wallet_key, wallet_addr = wallet.account.key.to_0x_hex(), wallet.ethAddress
+        flash('This neuron now uses the same alias as the Satori app for this wallet. '
+              'It restarts in a moment to switch over; log in again then.', 'info')
+
+        def finish():
+            try:
+                from satorineuron.init.derived_alias import moveOnBase
+                logger.info(f"Moved to the new alias on Base: {moveOnBase(_base_predictor(), switched, wallet_key, wallet_addr)}")
+            except Exception as e:
+                logger.warning(f"Could not move to the new alias on Base: {e}")
+            startup = get_startup()
+            if startup is not None:
+                startup.triggerRestart()
+
+        threading.Thread(target=finish, daemon=True).start()
 
     @app.route('/login', methods=['GET', 'POST'])
     def login():

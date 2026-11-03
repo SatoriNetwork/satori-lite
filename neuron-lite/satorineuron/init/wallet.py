@@ -245,6 +245,15 @@ class WalletManager:
             and self._electrumx.connected()
         )
 
+    def reloadAlias(self) -> Optional[EvrmoreWallet]:
+        """The alias read again from its file (after derived_alias replaced it)."""
+        path = self._alias.identity.walletPath if self._alias is not None else config.aliasPath()
+        self._alias = None
+        self._initializeAlias(path, self._cachePath, self._peersCache)
+        if self._electrumx is not None:
+            self._alias.electrumx = self._electrumx
+        return self._alias
+
     @property
     def alias(self) -> Optional[EvrmoreWallet]:
         """Get the alias without ensuring connection."""

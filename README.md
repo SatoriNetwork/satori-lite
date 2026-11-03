@@ -100,6 +100,19 @@ The neuron holds two keys:
   the stake, the claims). It is made at wallet setup and encrypted with the
   person's password.
 
+**The alias is derived from the wallet**, the way the Satori app derives it
+(the owner, 2026-11-03), so a wallet run here and in the app is one alias,
+not two fighting over the wallet's link: the wallet's 24 words (its key as
+BIP-39 words), their seed, then `m/44'/60'/1'/0'/0'`
+(`satorineuron/init/derived_alias.py`). The alias made at startup is a
+placeholder until the wallet is first unlocked (the only time its key is
+here). Then the derived alias takes its place: the old alias file is kept as
+`<file>.retired-<time>` (keys are never deleted), its payment channel scripts
+beside it the same way; the wallet links the new alias and registers it; the
+old alias's ETH is moved to the new one and a stake with the old alias moves
+to the new one (if that fails, for want of gas, Stake again on the
+dashboard); then the neuron restarts so all of it uses the new alias.
+
 Key files, in the keys folder (`/Satori/Neuron/wallet` in the image): a new
 install writes `alias.yaml` (the alias) and `wallet.yaml` (the wallet). An
 install from before the rename keeps `wallet.yaml` (the alias) and
