@@ -761,7 +761,7 @@
                 <div class="bst-actions" id="bstActions"></div>
             </div>
             <div class="bst-confirm" id="bstConfirm" hidden>
-                <span>Your tokens unlock about 24h after you unstake, and this neuron stops predicting on Base.</span>
+                <span>Your tokens unlock at the start of the next full UTC day after you unstake (24 to 48h), and this neuron stops predicting on Base.</span>
                 <button class="stk-btn stk-btn-danger stk-btn-sm" type="button" onclick="baseStake(false)">Unstake now</button>
                 <button class="stk-btn stk-btn-sm" type="button" onclick="bstConfirm(false)">Cancel</button>
             </div>
@@ -769,7 +769,7 @@
             <div class="bst-msg small" id="bstMsg" hidden></div>
             <p class="bst-explain">
                 Staking locks your wallet's SATORI on Base and lets this neuron predict with it once a day.
-                Rewards go to your wallet. Unstaking takes about 24h.
+                Rewards go to your wallet. Unstaking takes 24 to 48h (tokens unlock at the start of the next full UTC day).
             </p>
 
             <div class="bst-gas">
@@ -1651,7 +1651,7 @@
                 ? new Date(s.unlock_ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
                 : null;
             bstSet('unstaking', 'Unstaking',
-                when ? 'Your tokens unlock around ' + when + '.' : 'Your tokens unlock in about 24h.',
+                when ? 'Your tokens unlock around ' + when + '.' : 'Your tokens unlock in 24 to 48h.',
                 [['Stake again', 'primary', () => baseStake(true), noGas]]);
         } else {
             bstSet('off', 'Not staked', 'Your tokens are free to move. This neuron is not predicting on Base.',
@@ -1715,7 +1715,7 @@
             }
             bstMsg(enabled
                 ? 'Staked. This neuron predicts on Base once a day.'
-                : 'Unstaked. Your tokens unlock in about 24h.', 'success');
+                : 'Unstaked. Your tokens unlock in 24 to 48h.', 'success');
             bst.predict = Object.assign({}, bst.predict, { enabled: j.enabled, stake: j.stake });
             bstRenderState();
             bstGet('/api/wallet/base/balances').then((b) => { bst.balances = b; bstRenderGas(); }).catch(() => {});

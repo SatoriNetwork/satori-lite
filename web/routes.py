@@ -1600,7 +1600,7 @@ def register_routes(app):
                     startup.ensureBaseStreamsSync()
                 return jsonify({'success': True, 'enabled': True, 'setup': setup,
                                 'stake': _stake_status_after(predictor, wallet_addr, True)})
-            # Unstake: undelegate the wallet (tokens unlock next round, ~24h) and
+            # Unstake: undelegate the wallet (tokens unlock after the next round, 24 to 48h) and
             # stop predicting. Predictions stop as soon as the toggle is off.
             result = predictor.ensure_undelegated(
                 wallet_key=wallet.account.key.to_0x_hex(), wallet_address=wallet_addr)

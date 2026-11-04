@@ -320,7 +320,8 @@ class BasePredictor:
 
     def undelegate(self, wallet_key: str) -> str:
         """Undelegate (delegate to address(0)). Frees the wallet's prediction
-        power and switches the token lock from indefinite to next-round (~24h)."""
+        power and switches the token lock from indefinite to the end of the next round
+        (tokens free at 00:00 UTC two days on, 24 to 48h)."""
         return self.delegate_to(wallet_key, ZERO_ADDRESS)
 
     def ensure_undelegated(self, wallet_key: str, wallet_address: str) -> dict:
@@ -342,11 +343,13 @@ class BasePredictor:
         lock_round = self.transfer_locked_until(wallet_address)
         current = self.current_round()
         indefinite = lock_round >= _LOCK_INDEFINITE
-        locked = lock_round > current
+        # Locked through lock_round inclusive (SatoriToken._update reverts while
+        # currentRound <= lock), so tokens free at the start of lock_round + 1.
+        locked = lock_round >= current
         return {
             "staked": staked,
             "locked": locked,
             "indefinite": indefinite,
             "unlock_round": None if (indefinite or not locked) else lock_round,
-            "unlock_ts": None if (indefinite or not locked) else lock_round * TIME_UNIT_SECONDS,
+            "unlock_ts": None if (indefinite or not locked) else (lock_round + 1) * TIME_UNIT_SECONDS,
         }
