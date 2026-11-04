@@ -1632,12 +1632,13 @@
         const noGas = !!(w && !w.error && !(w.eth > 0));
         const gasReason = 'Your wallet needs a little Base ETH to pay for this.';
         const toThis = s.staked && s.to_this_neuron !== false;
+        const closed = p.staking_open === false;  // new stakes paused, unstake still works
 
         if (toThis && !p.enabled) {
             // staked on-chain (say, an imported wallet) but this neuron's daily loop is off
             bstSet('idle', 'Staked, not predicting',
                 'Your wallet is staked to this neuron, but the neuron is not sending predictions yet.',
-                [['Start predicting', 'primary', () => baseStake(true), false]]);
+                [['Start predicting', 'primary', () => baseStake(true), closed]]);
         } else if (toThis) {
             bstSet('staked', satori === 0 ? 'Staked, with no SATORI to predict with' : 'Staked and predicting',
                 (satori != null ? bstFmt(satori, 8) + ' SATORI staked. ' : '') + 'Tokens stay locked while staked.',
@@ -1645,21 +1646,23 @@
         } else if (s.staked) {
             bstSet('elsewhere', 'Staked to another address',
                 'Your wallet is staked, but not to this neuron, so this neuron cannot predict with it.',
-                [['Stake to this neuron', 'primary', () => baseStake(true), noGas]]);
+                [['Stake to this neuron', 'primary', () => baseStake(true), noGas || closed]]);
         } else if (s.locked) {
             const when = s.unlock_ts
                 ? new Date(s.unlock_ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
                 : null;
             bstSet('unstaking', 'Unstaking',
                 when ? 'Your tokens unlock around ' + when + '.' : 'Your tokens unlock in 24 to 48h.',
-                [['Stake again', 'primary', () => baseStake(true), noGas]]);
+                [['Stake again', 'primary', () => baseStake(true), noGas || closed]]);
         } else {
             bstSet('off', 'Not staked', 'Your tokens are free to move. This neuron is not predicting on Base.',
-                [['Stake', 'primary', () => baseStake(true), noGas]]);
+                [['Stake', 'primary', () => baseStake(true), noGas || closed]]);
         }
 
         const alias = bst.balances && bst.balances.alias;
-        if (noGas) {
+        if (closed && !(toThis && p.enabled)) {
+            bstNote('Staking on Base is paused for now. Unstaking still works.', true);
+        } else if (noGas) {
             bstNote(gasReason + ' Send some to the wallet address below.', true);
         } else if (toThis && alias && !alias.error && !(alias.eth > 0)) {
             bstNote('The alias has no ETH, so the daily prediction cannot be sent. Send a little Base ETH to the alias address below.', true);

@@ -1537,6 +1537,11 @@ def register_routes(app):
             config.add(data={'notifications read': read})
         return jsonify({'success': True})
 
+    def _base_staking_open() -> bool:
+        """New Base stakes are paused for now (unstaking and neurons already
+        staked are unaffected). SATORI_BASE_STAKING=1 opens them again."""
+        return os.environ.get('SATORI_BASE_STAKING') == '1'
+
     @app.route('/api/settings/base-predict', methods=['GET'])
     @login_required
     def api_get_base_predict():
@@ -1545,6 +1550,7 @@ def register_routes(app):
         resp = {
             'enabled': bool(config.get().get('predict base on-chain', False)),
             'hour_utc': int(config.get().get('base predict hour utc', 20)),
+            'staking_open': _base_staking_open(),
         }
         try:
             wm = get_or_create_session_wallet()
@@ -1575,6 +1581,8 @@ def register_routes(app):
         from satorineuron import config
         data = request.json or {}
         enabled = bool(data.get('enabled', False))
+        if enabled and not _base_staking_open():
+            return jsonify({'error': 'Staking on Base is paused for now. Unstaking still works.'}), 403
 
         # Both on (delegate) and off (undelegate) need the wallet to sign, so it
         # must be unlocked either way.
