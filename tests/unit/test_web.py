@@ -183,8 +183,9 @@ def _manager(link=None):
 
 
 class TestEnsurePeerRegistered:
-    """Register sends alias-pubkey, nostr-pubkey, neuron-version and the
-    wallet's link when there is one; nothing named for the older roles."""
+    """Register sends alias-pubkey, what it is for (off-chain and on-chain,
+    by a neuron), nostr-pubkey, neuron-version and the wallet's link when
+    there is one; nothing named for the older roles."""
 
     def _register(self, app, manager, answer):
         import web.routes as routes
@@ -205,6 +206,8 @@ class TestEnsurePeerRegistered:
         assert url.endswith('/api/v1/peer/register')
         assert kwargs['headers'] == {
             'alias-pubkey': ALIAS_PUBKEY,
+            'alias-scoring': 'offchain,onchain',
+            'alias-reported-by': 'neuron',
             'nostr-pubkey': NOSTR_PUBKEY,
             'neuron-version': VERSION}
         get.assert_not_called()  # no peer/login check
@@ -220,7 +223,8 @@ class TestEnsurePeerRegistered:
             app, _manager(link), {'success': True, 'peer_id': 7, 'wallet_address': '0xW'})
         headers = post.call_args.kwargs['headers']
         assert set(headers) == {
-            'alias-pubkey', 'nostr-pubkey', 'neuron-version', 'wallet-link', 'wallet-signature'}
+            'alias-pubkey', 'alias-scoring', 'alias-reported-by', 'nostr-pubkey', 'neuron-version',
+            'wallet-link', 'wallet-signature'}
         assert base64.b64decode(headers['wallet-link']).decode('utf-8') == link['message']
         assert headers['wallet-signature'] == link['signature']
         get.assert_not_called()

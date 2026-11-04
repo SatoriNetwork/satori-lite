@@ -243,8 +243,9 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
     """Register the alias with the Satori Network (register is idempotent).
 
     Called after the wallet is unlocked. Sends the current form:
-    alias-pubkey, nostr-pubkey, neuron-version, and the wallet's link
-    (wallet-link, wallet-signature) when there is one. Without a link the
+    alias-pubkey, what it is for (alias-scoring, alias-reported-by:
+    satorilib.wallet.link.ALIAS_REPORT), nostr-pubkey, neuron-version, and
+    the wallet's link (wallet-link, wallet-signature) when there is one. Without a link the
     alias registers alone. Retries with a delay on a server error.
 
     Args:
@@ -256,7 +257,7 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
     Returns:
         dict with the register answer if successful, None if failed
     """
-    from satorilib.wallet.link import linkHeaders
+    from satorilib.wallet.link import ALIAS_REPORT, linkHeaders
     api_url = app.config.get('SATORI_API_URL', get_api_url())
 
     alias = getattr(wallet_manager, 'alias', None)
@@ -273,7 +274,7 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
     if not isinstance(link, dict):
         link = None
 
-    headers = {'alias-pubkey': alias_pubkey}
+    headers = {'alias-pubkey': alias_pubkey, **ALIAS_REPORT}
     startup = get_startup()
     nostr_pubkey = getattr(startup, 'nostrPubkey', None) if startup else None
     if nostr_pubkey:
