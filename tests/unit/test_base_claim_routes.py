@@ -75,6 +75,7 @@ def web():
     manager.wallet.isDecrypted = True
     manager.alias = _key(ALIAS_KEY)
     manager.alias.ethAddress = ALIAS
+    manager.onchainAlias = manager.alias  # no other alias for the Satori contract (init/onchain_alias.py)
     drop = {}
 
     def proof(url, timeout=None):

@@ -1041,7 +1041,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             from satorineuron.base_config import base_config
             cfg = base_config()
             chain_id = int(cfg.get('chainId', 0))
-            alias = self.alias
+            alias = self.walletManager.onchainAlias  # the Satori contract's alias (init/onchain_alias.py)
             address = alias.ethAddress
             private_key = alias.account.key.to_0x_hex()
             predictor = BasePredictor(

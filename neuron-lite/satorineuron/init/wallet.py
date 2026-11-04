@@ -185,6 +185,7 @@ class WalletManager:
         wallet, alias = self._wallet, self._alias
         if not isinstance(wallet, EvrmoreWallet) or not wallet.isDecrypted or alias is None:
             return None
+        self.ensureOnchainLink()
         try:
             link = readWalletLink()
             if linkIsFor(link, alias.ethAddress, wallet.ethAddress):
@@ -195,6 +196,47 @@ class WalletManager:
             return link
         except Exception as e:
             logging.warning(f'could not make the wallet\'s link to the alias: {e}')
+            return None
+
+    @property
+    def onchainAlias(self):
+        """The alias for the Satori contract (stake with, the daily batch):
+        onchain-alias.yaml's when there is one (init/onchain_alias.py), else
+        the alias."""
+        from satorineuron.init.onchain_alias import readOnchainAlias
+        try:
+            return readOnchainAlias() or self._alias
+        except Exception as e:
+            logging.warning(f'could not read the on-chain alias, using the alias: {e}')
+            return self._alias
+
+    @property
+    def onchainLink(self) -> Optional[dict]:
+        """The wallet's stored link to the on-chain alias, or None."""
+        from satorineuron.init.onchain_alias import onchainLinkPath
+        return readWalletLink(onchainLinkPath())
+
+    def ensureOnchainLink(self) -> Optional[dict]:
+        """With the wallet decrypted and another alias for the Satori
+        contract, make sure the wallet's link to it is stored. Returns the
+        link, or None (no such alias, or the wallet locked)."""
+        from satorineuron.init.onchain_alias import readOnchainAlias, onchainLinkPath
+        wallet = self._wallet
+        if not isinstance(wallet, EvrmoreWallet) or not wallet.isDecrypted:
+            return None
+        try:
+            onchain = readOnchainAlias()
+            if onchain is None:
+                return None
+            link = readWalletLink(onchainLinkPath())
+            if linkIsFor(link, onchain.ethAddress, wallet.ethAddress):
+                return link
+            link = makeLink(wallet, onchain.ethAddress)
+            writeWalletLink(link, onchainLinkPath())
+            logging.info('the wallet linked the on-chain alias')
+            return link
+        except Exception as e:
+            logging.warning(f'could not make the wallet\'s link to the on-chain alias: {e}')
             return None
 
     def connect(self) -> bool:

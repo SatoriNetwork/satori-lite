@@ -130,7 +130,19 @@ The link (the message and its signature; nothing secret) is kept in
   `wallet-link` (base64 of the message's UTF-8) and `wallet-signature`.
   Before a wallet exists the alias registers alone. The answer's
   `wallet_address` is the linked wallet's Base address (or null), and
-  `wallet_link_error` says why a link was not accepted.
+  `wallet_link_error` says why a link was not accepted. It also says what
+  the alias is for: `alias-scoring: offchain,onchain` (the Satori Network and
+  the Satori contract) and `alias-reported-by: neuron`.
+- **Another alias for the Satori contract** (optional): the Stake page's
+  "Alias for the Satori contract" takes another alias's private key (such as
+  a Satori app's) and the wallet password. It is kept in `onchain-alias.yaml`
+  beside the keys, with the wallet's link to it in `onchain-wallet-link.yaml`;
+  the wallet stakes with it and it sends the daily Base prediction and pays
+  its gas, while the alias keeps the Satori Network. Register then reports
+  the alias as `offchain` and that one as `onchain`, each with its link.
+  "Use this neuron's alias" hands the job back; a replaced key is renamed
+  `onchain-alias.retired-<time>.yaml`, never deleted. After a change, stake
+  again (the stake is with the alias it had).
 - **Login** (`POST /api/v1/auth/login`, satorilib's `SatoriServerClient` and
   the web UI's `get_auth_headers`) and the legacy header auth (`authPayload`)
   send `alias-pubkey` (compressed secp256k1 hex), `message` and `signature`,

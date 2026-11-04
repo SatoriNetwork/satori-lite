@@ -806,6 +806,18 @@
                 </div>
                 <div class="small mt-2" id="aliasStatus" hidden></div>
             </div>
+
+            <div class="bst-gas" id="onchainAliasBox">
+                <label class="stk-section-label">Alias for the Satori contract</label>
+                <p class="bst-explain mb-2" id="onchainAliasNote">This neuron's alias predicts for the Satori Network and on the Satori contract. You can give the Satori contract another alias, such as your Satori app's (its Backup shows the alias key).</p>
+                <form class="bst-key-form" id="onchainAliasForm" onsubmit="setOnchainAlias(event, false)">
+                    <input type="password" class="form-control form-control-sm" id="onchainAliasKey" placeholder="Another alias's private key (0x…)" autocomplete="off" aria-label="Another alias's private key">
+                    <input type="password" class="form-control form-control-sm" id="onchainAliasPassword" placeholder="Wallet password" autocomplete="current-password" aria-label="Wallet password">
+                    <button class="stk-btn stk-btn-sm" type="submit">Use this alias</button>
+                    <button class="stk-btn stk-btn-sm" type="button" id="onchainAliasBack" hidden onclick="setOnchainAlias(event, true)">Use this neuron's alias</button>
+                </form>
+                <div class="small mt-2" id="onchainAliasMsg" hidden></div>
+            </div>
         </div>
     </section>
 
@@ -1547,7 +1559,40 @@
         return r.json();
     }
 
+    // Another alias for the Satori contract (init/onchain_alias.py): which alias does which job
+    async function loadOnchainAlias() {
+        try {
+            const r = await bstGet('/api/wallet/onchain-alias');
+            const other = r.onchain_alias && r.onchain_alias !== r.alias;
+            document.getElementById('onchainAliasBack').hidden = !other;
+            document.getElementById('onchainAliasNote').textContent = other
+                ? `The Satori contract uses another alias, ${bstShort(r.onchain_alias)}: your wallet stakes with it and it sends the daily prediction. This neuron's alias, ${bstShort(r.alias)}, still predicts for the Satori Network.`
+                : "This neuron's alias predicts for the Satori Network and on the Satori contract. You can give the Satori contract another alias, such as your Satori app's (its Backup shows the alias key).";
+        } catch (e) { /* the wallet is not open yet */ }
+    }
+
+    async function setOnchainAlias(event, back) {
+        event.preventDefault();
+        const msg = document.getElementById('onchainAliasMsg');
+        const password = document.getElementById('onchainAliasPassword').value;
+        const key = back ? '' : document.getElementById('onchainAliasKey').value;
+        if (!password) { msg.hidden = false; msg.textContent = 'Give the wallet password: it signs the link.'; return; }
+        msg.hidden = false; msg.textContent = 'Saving…';
+        const r = await fetch('/api/wallet/onchain-alias', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ private_key: key, password }) });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { msg.textContent = data.error || ('HTTP ' + r.status); return; }
+        document.getElementById('onchainAliasKey').value = '';
+        document.getElementById('onchainAliasPassword').value = '';
+        msg.textContent = data.onchain_alias === data.alias
+            ? "The Satori contract uses this neuron's alias again. Stake with it again below."
+            : `The Satori contract now uses ${bstShort(data.onchain_alias)}. Stake with it below, and send it a little Base ETH for its gas.`;
+        await loadOnchainAlias();
+        await loadBaseStake();
+    }
+
     async function loadBaseStake() {
+        loadOnchainAlias();
         bstConfirm(false);
         bstSet('loading', 'Checking your stake on Base…', '', []);
         const [p, b] = await Promise.allSettled([

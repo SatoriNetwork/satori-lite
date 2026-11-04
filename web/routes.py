@@ -274,7 +274,11 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
     if not isinstance(link, dict):
         link = None
 
+    # another alias for the Satori contract (init/onchain_alias.py): each registers for its own job
+    onchain = _separate_onchain_alias(wallet_manager, alias_pubkey)
     headers = {'alias-pubkey': alias_pubkey, **ALIAS_REPORT}
+    if onchain is not None:
+        headers['alias-scoring'] = 'offchain'
     startup = get_startup()
     nostr_pubkey = getattr(startup, 'nostrPubkey', None) if startup else None
     if nostr_pubkey:
@@ -309,6 +313,9 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
                         pass  # outside a request
                     if startup is not None:
                         startup.linkedWalletAddress = wallet_address
+                    if onchain is not None:
+                        data['onchain'] = _register_onchain_alias(
+                            api_url, wallet_manager, onchain, headers)
                     return data
 
             # 4xx responses are caused by the request itself — retrying with
@@ -342,6 +349,43 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
 
     logger.error("Failed to register peer after all retries")
     return None
+
+
+def _separate_onchain_alias(wallet_manager, alias_pubkey):
+    """The alias for the Satori contract when it is not the alias, else None."""
+    try:
+        onchain = getattr(wallet_manager, 'onchainAlias', None)
+        pubkey = getattr(onchain, 'pubkey', None)
+        if isinstance(pubkey, str) and pubkey and pubkey != alias_pubkey:
+            return onchain
+    except Exception as e:
+        logger.warning(f"Could not read the on-chain alias: {e}")
+    return None
+
+
+def _register_onchain_alias(api_url, wallet_manager, onchain, offchain_headers):
+    """Register the Satori contract's alias for on-chain scoring, with the
+    wallet's link to it. Returns the answer, or {'error': ...}; never raises."""
+    from satorilib.wallet.link import linkHeaders
+    link = None
+    try:
+        link = wallet_manager.ensureOnchainLink() or wallet_manager.onchainLink
+    except Exception as e:
+        logger.warning(f"Could not read the wallet's link to the on-chain alias: {e}")
+    headers = {k: v for k, v in offchain_headers.items() if k not in ('wallet-link', 'wallet-signature')}
+    headers.update({'alias-pubkey': onchain.pubkey, 'alias-scoring': 'onchain'})
+    headers.update(linkHeaders(link if isinstance(link, dict) else None))
+    try:
+        resp = requests.post(f"{api_url}/api/v1/peer/register", headers=headers, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('wallet_link_error'):
+                logger.warning("The Satori Network did not accept the wallet's link to the on-chain alias: "
+                               f"{data.get('wallet_link_error')}")
+            return data
+        return {'error': f"{resp.status_code}: {_extract_error_detail(resp)}"}
+    except requests.RequestException as e:
+        return {'error': str(e)}
 
 
 def _extract_error_detail(resp):
@@ -1199,6 +1243,46 @@ def register_routes(app):
             return jsonify(result)
         return jsonify({'error': 'Wallet not initialized'}), 500
 
+    @app.route('/api/wallet/onchain-alias', methods=['GET'])
+    @login_required
+    def api_get_onchain_alias():
+        """Which alias does which job: {alias, onchain_alias} (the same
+        address while the neuron's alias does both)."""
+        wm = get_or_create_session_wallet()
+        if not (wm and wm.alias):
+            return jsonify({'error': 'Wallet not initialized'}), 500
+        onchain = wm.onchainAlias
+        return jsonify({'alias': wm.alias.ethAddress, 'onchain_alias': onchain.ethAddress if onchain else None})
+
+    @app.route('/api/wallet/onchain-alias', methods=['POST'])
+    @login_required
+    def api_set_onchain_alias():
+        """Another alias for the Satori contract (init/onchain_alias.py), for
+        {"private_key": its 0x hex, "password": the wallet's}; an empty
+        private_key hands the job back to the neuron's alias. The wallet signs
+        the link, and both register at once. Stake with it again after."""
+        import hmac
+        from satorineuron.init.onchain_alias import setOnchainAlias
+        body = request.get_json(silent=True) or {}
+        given = body.get('password')
+        held = decrypt_wallet_password_from_session()
+        if not (isinstance(given, str) and held and hmac.compare_digest(given.encode(), held.encode())):
+            return jsonify({'error': 'Wrong password'}), 403
+        wm = get_or_create_session_wallet()
+        if not (wm and wm.alias and wm.wallet):
+            return jsonify({'error': 'Unlock your wallet first.'}), 400
+        try:
+            onchain = setOnchainAlias(body.get('private_key'), own_alias=wm.alias.ethAddress,
+                                      wallet=wm.wallet.ethAddress)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        wm.ensureOnchainLink()
+        registered = ensure_peer_registered(app, wm, max_retries=1)
+        return jsonify({'alias': wm.alias.ethAddress,
+                        'onchain_alias': onchain.ethAddress if onchain else wm.alias.ethAddress,
+                        'registered': bool(registered),
+                        'onchain_registered': (registered or {}).get('onchain')})
+
     @app.route('/api/wallet/alias-private-key', methods=['POST'])
     @login_required
     def api_wallet_alias_private_key():
@@ -1261,7 +1345,8 @@ def register_routes(app):
             return jsonify({'error': str(e)}), 500
         WEI = 10 ** 18
         result = {}
-        for whose, w in (('wallet', wallet_manager.wallet), ('alias', wallet_manager.alias)):
+        # the alias here is the Satori contract's: it pays the daily prediction's gas (init/onchain_alias.py)
+        for whose, w in (('wallet', wallet_manager.wallet), ('alias', wallet_manager.onchainAlias)):
             if not w:
                 continue
             entry = {'address': w.ethAddress}
@@ -1556,15 +1641,16 @@ def register_routes(app):
             wm = get_or_create_session_wallet()
             if wm and wm.wallet:
                 resp['wallet_address'] = wm.wallet.ethAddress
-                if wm.alias:
-                    resp['alias_address'] = wm.alias.ethAddress
+                onchain = wm.onchainAlias  # the Satori contract's alias (init/onchain_alias.py)
+                if onchain:
+                    resp['alias_address'] = onchain.ethAddress
                 predictor = _base_predictor()
                 resp['stake'] = predictor.stake_status(wm.wallet.ethAddress)
-                if wm.alias and resp['stake']['staked']:
+                if onchain and resp['stake']['staked']:
                     # staked could mean staked to another address, not this neuron
                     delegate = predictor.current_delegate(wm.wallet.ethAddress)
                     resp['stake']['to_this_neuron'] = (
-                        delegate.lower() == wm.alias.ethAddress.lower())
+                        delegate.lower() == onchain.ethAddress.lower())
         except Exception as e:
             resp['stake_error'] = str(e)
         return jsonify(resp)
@@ -1591,7 +1677,7 @@ def register_routes(app):
             return jsonify({'error': 'Unlock your wallet to change staking.'}), 400
         try:
             wallet = wallet_manager.wallet
-            alias = wallet_manager.alias
+            alias = wallet_manager.onchainAlias  # the Satori contract's alias (init/onchain_alias.py)
             try:
                 wallet_addr = wallet.ethAddress
                 alias_addr = alias.ethAddress
