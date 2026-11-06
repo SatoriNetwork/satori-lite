@@ -209,6 +209,57 @@
     }
     .base-step-extra { grid-column: 2 / -1; }
 
+    /* ── Key slip: the wallet's Base private key, grouped in 8s, masked until asked ── */
+    .keyslip {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: start;
+        column-gap: 0.6rem;
+        padding: 0.7rem 0.5rem 0.7rem 0.85rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-input);
+        text-align: left;
+    }
+    .keyslip-prefix,
+    .keyslip-grid {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8rem;
+        line-height: 1.7;
+    }
+    .keyslip-prefix { color: var(--text-muted); }
+    .keyslip-grid {
+        display: grid;
+        grid-template-columns: repeat(4, max-content);
+        column-gap: 0.9ch;
+        color: var(--text-primary);
+        user-select: all;
+    }
+    .keyslip.is-masked .keyslip-grid { color: var(--text-muted); letter-spacing: 0.08em; user-select: none; }
+    .keyslip-actions { display: flex; gap: 0.15rem; margin-top: -0.15rem; }
+    .keyslip-btn {
+        width: 30px; height: 30px;
+        display: grid; place-items: center;
+        border: 0; border-radius: 6px;
+        background: none;
+        color: var(--text-secondary);
+    }
+    .keyslip-btn .material-icons { font-size: 17px; }
+    .keyslip-btn:hover { color: var(--text-primary); background: var(--bg-card-header); }
+    .keyslip-btn:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
+    .keyslip-btn.is-done { color: #22c55e; }
+    .keyslip-note {
+        display: flex; align-items: center; gap: 0.35rem;
+        margin: 0.45rem 0 0;
+        font-size: 0.74rem;
+        color: var(--text-muted);
+        text-align: left;
+    }
+    .keyslip-note .material-icons { font-size: 14px; color: #e5484d; }
+    @media (max-width: 420px) {
+        .keyslip-grid { grid-template-columns: repeat(2, max-content); }
+    }
+
     /* ── Card-header rhythm (matches stake/local-predictions/marketplace) ── */
     #dashboardLayoutRow .card-header {
         padding: 0.9rem 1.15rem !important;
@@ -1614,25 +1665,21 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="text-center">
-                            <p id="showPrivateKeyBtn" class="text-danger mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
-                                <i class="material-icons align-middle" style="font-size: 18px;">visibility</i>
-                                Show Private Key
-                            </p>
-                            <div id="privateKeySection" style="display: none;">
-                                <p class="text-muted mb-2" style="cursor: pointer;" onclick="togglePrivateKey()">
-                                    <i class="material-icons align-middle" style="font-size: 18px;">visibility_off</i>
-                                    Hide Private Key
-                                </p>
-                                <div class="alert alert-warning" style="word-break: break-all;">
-                                    <small><strong>Private key (Base):</strong> the key MetaMask imports. Never share it.</small><br>
-                                    <code id="walletPrivateKey">Loading...</code>
+                        <div>
+                            <label class="form-label">Private Key (Base)</label>
+                            <div class="keyslip is-masked" id="walletKeySlip">
+                                <span class="keyslip-prefix">0x</span>
+                                <div class="keyslip-grid" aria-label="Private key, hidden"></div>
+                                <div class="keyslip-actions">
+                                    <button type="button" class="keyslip-btn" onclick="toggleKeySlip('walletKeySlip')" title="Show key" aria-label="Show key" aria-pressed="false">
+                                        <i class="material-icons">visibility</i>
+                                    </button>
+                                    <button type="button" class="keyslip-btn" onclick="copyKeySlip('walletKeySlip', this)" title="Copy key" aria-label="Copy key">
+                                        <i class="material-icons">content_copy</i>
+                                    </button>
                                 </div>
-                                <button class="btn btn-outline-secondary btn-sm" onclick="copyPrivateKey()">
-                                    <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
-                                    Copy Private Key
-                                </button>
                             </div>
+                            <p class="keyslip-note"><i class="material-icons">lock</i>Anyone with this key controls your wallet. Never share it.</p>
                         </div>
                     </div>
                     <!-- Nostr pane -->
@@ -1753,17 +1800,21 @@
                         <div class="base-mm-title">See it in MetaMask</div>
                         <ol class="base-steps">
                             <li>
-                                <span>Import your wallet key</span>
-                                <button class="btn btn-sm btn-outline-secondary" id="showBaseKeyBtn" onclick="toggleBaseKey()">Show key</button>
-                                <div class="base-step-extra" id="baseKeySection" style="display: none;">
-                                    <div class="alert alert-warning mb-2" style="word-break: break-all;">
-                                        <small>In MetaMask choose Import account and paste this key. Anyone with it controls your wallet, so never share it.</small><br>
-                                        <code id="basePrivateKey"></code>
+                                <span>In MetaMask choose Import account and paste your wallet key</span>
+                                <div class="base-step-extra">
+                                    <div class="keyslip is-masked" id="baseKeySlip">
+                                        <span class="keyslip-prefix">0x</span>
+                                        <div class="keyslip-grid" aria-label="Private key, hidden"></div>
+                                        <div class="keyslip-actions">
+                                            <button type="button" class="keyslip-btn" onclick="toggleKeySlip('baseKeySlip')" title="Show key" aria-label="Show key" aria-pressed="false">
+                                                <i class="material-icons">visibility</i>
+                                            </button>
+                                            <button type="button" class="keyslip-btn" onclick="copyKeySlip('baseKeySlip', this)" title="Copy key" aria-label="Copy key">
+                                                <i class="material-icons">content_copy</i>
+                                            </button>
+                                        </div>
                                     </div>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="copyBaseKey()">
-                                        <i class="material-icons align-middle" style="font-size: 16px;">content_copy</i>
-                                        Copy key
-                                    </button>
+                                    <p class="keyslip-note"><i class="material-icons">lock</i>Anyone with this key controls your wallet. Never share it.</p>
                                 </div>
                             </li>
                             <li>
@@ -2841,23 +2892,50 @@
         }
     }
 
-    function toggleBaseKey() {
-        const section = document.getElementById('baseKeySection');
-        const btn = document.getElementById('showBaseKeyBtn');
-        const opening = section.style.display === 'none' || !section.style.display;
-        if (opening) {
-            document.getElementById('basePrivateKey').textContent = _baseKeyLoaded || 'Not available';
-        }
-        section.style.display = opening ? 'block' : 'none';
-        btn.textContent = opening ? 'Hide key' : 'Show key';
+    // Key slips (Addresses card + Base card) show the same key in groups of 8.
+    // Masked, they hold only dots: the real key enters the DOM on reveal.
+    async function getBaseKey() {
+        if (!_baseKeyLoaded) _baseKeyLoaded = ((await apiCall('/wallet/base')) || {}).private_key || null;
+        return _baseKeyLoaded;
     }
 
-    function copyBaseKey() {
-        const value = document.getElementById('basePrivateKey').textContent;
-        if (!value || value === 'Not available') { showToast('No private key to copy', true); return; }
-        satoriCopy(value).then((ok) => ok
-            ? showToast('Private key copied to clipboard')
-            : showToast('Could not copy. Select the key and copy it by hand.', true));
+    function renderKeySlip(slip, key) {
+        const grid = slip.querySelector('.keyslip-grid');
+        const hex = key ? key.replace(/^0x/i, '') : '•'.repeat(64);
+        grid.replaceChildren(...(hex.match(/.{1,8}/g) || []).map((g) => {
+            const s = document.createElement('span');
+            s.textContent = g;
+            return s;
+        }));
+        slip.classList.toggle('is-masked', !key);
+        grid.setAttribute('aria-label', key ? 'Private key' : 'Private key, hidden');
+        const btn = slip.querySelector('[aria-pressed]');
+        const label = key ? 'Hide key' : 'Show key';
+        btn.setAttribute('aria-pressed', String(!!key));
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+        btn.querySelector('.material-icons').textContent = key ? 'visibility_off' : 'visibility';
+    }
+    document.querySelectorAll('.keyslip').forEach((s) => renderKeySlip(s, null));
+
+    async function toggleKeySlip(id) {
+        const slip = document.getElementById(id);
+        if (!slip.classList.contains('is-masked')) { renderKeySlip(slip, null); return; }
+        const key = await getBaseKey();
+        if (!key) { showToast('Could not load the private key', true); return; }
+        renderKeySlip(slip, key);
+    }
+
+    async function copyKeySlip(id, btn) {
+        const key = await getBaseKey();
+        if (!key) { showToast('No private key to copy', true); return; }
+        const ok = await satoriCopy(key);
+        if (!ok) { showToast('Could not copy. Show the key and copy it by hand.', true); return; }
+        showToast('Private key copied to clipboard');
+        const icon = btn.querySelector('.material-icons');
+        btn.classList.add('is-done');
+        icon.textContent = 'check';
+        setTimeout(() => { btn.classList.remove('is-done'); icon.textContent = 'content_copy'; }, 1500);
     }
 
     async function addSatoriToMetaMask() {
@@ -4461,8 +4539,6 @@
     }
 
     // Wallet Card Functions
-    let privateKeyLoaded = false;
-
     async function loadQrCode(address) {
         const qrContainer = document.getElementById('walletQrCode');
         const result = await apiCall('/wallet/qr/' + encodeURIComponent(address));
@@ -4471,42 +4547,6 @@
         } else {
             qrContainer.innerHTML = '<p class="text-muted mb-0">QR code unavailable</p>';
         }
-    }
-
-    async function togglePrivateKey() {
-        const showBtn = document.getElementById('showPrivateKeyBtn');
-        const section = document.getElementById('privateKeySection');
-
-        if (section.style.display === 'none') {
-            // Show the wallet's private key
-            if (!privateKeyLoaded) {
-                // the Base card's loadBaseWallet() usually has it already
-                const key = _baseKeyLoaded || ((await apiCall('/wallet/base')) || {}).private_key;
-                if (key) {
-                    document.getElementById('walletPrivateKey').textContent = key;
-                    privateKeyLoaded = true;
-                } else {
-                    document.getElementById('walletPrivateKey').textContent = 'Unable to load private key';
-                }
-            }
-            showBtn.style.display = 'none';
-            section.style.display = 'block';
-        } else {
-            // Hide private key
-            showBtn.style.display = 'block';
-            section.style.display = 'none';
-        }
-    }
-
-    function copyPrivateKey() {
-        const privateKey = document.getElementById('walletPrivateKey').textContent;
-        if (!privateKey || privateKey === 'Loading...' || privateKey === 'Unable to load private key') {
-            showToast('No private key to copy', true);
-            return;
-        }
-        satoriCopy(privateKey).then((ok) => ok
-            ? showToast('Private key copied to clipboard')
-            : showToast('Could not copy. Select the key and copy it by hand.', true));
     }
 
     // AI Engine Performance Charts
