@@ -1195,6 +1195,12 @@ def register_routes(app):
         """Proxy pool worker delete request."""
         return proxy_api(f'/pool/worker/{worker_address}', 'DELETE')
 
+    @app.route('/api/pool/membership', methods=['GET', 'DELETE'])
+    @login_required
+    def api_pool_membership():
+        """The pool that lists this neuron as its worker; DELETE leaves it."""
+        return proxy_api('/pool/membership', request.method)
+
     @app.route('/api/pool/toggle-open', methods=['POST'])
     @login_required
     def api_pool_toggle():

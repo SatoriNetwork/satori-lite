@@ -853,6 +853,17 @@
                     </div>
 
                     <div class="stk-section">
+                        <label class="stk-section-label">Worker for a pool</label>
+                        <div class="d-flex align-items-center justify-content-between gap-2">
+                            <div class="stk-status-sub" id="workerPoolText">Loading...</div>
+                            <button class="stk-btn stk-btn-danger" id="workerPoolLeaveBtn" onclick="leaveWorkerPool()" type="button" style="display:none;">
+                                <i class="material-icons">logout</i>
+                                Leave pool
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="stk-section">
                         <label class="stk-section-label">
                             <i class="material-icons">groups_2</i>
                             Available open pools
@@ -1250,6 +1261,28 @@
             document.getElementById('poolAddress').value = '';
         }
         updateMutualExclusionUI();
+    }
+
+    // A pool lists a worker without the worker's yes; the worker can leave it here.
+    async function loadWorkerPool() {
+        const text = document.getElementById('workerPoolText');
+        const btn = document.getElementById('workerPoolLeaveBtn');
+        const result = await apiCall('/pool/membership');
+        if (result && result.pool_address) {
+            text.textContent = (result.pool_name ? result.pool_name + ' ' : '') + result.pool_address;
+            btn.style.display = '';
+        } else {
+            text.textContent = result ? 'Not a worker for any pool' : 'Unable to load';
+            btn.style.display = 'none';
+        }
+    }
+
+    async function leaveWorkerPool() {
+        const result = await apiCall('/pool/membership', 'DELETE');
+        if (result) {
+            showToast('Left the pool');
+            loadWorkerPool();
+        }
     }
 
     async function addStakeToPool() {
@@ -1888,6 +1921,7 @@
         }
 
         loadStakingStatus();
+        loadWorkerPool();
         loadWorkers();
         loadLenders();
         loadAvailablePools();
