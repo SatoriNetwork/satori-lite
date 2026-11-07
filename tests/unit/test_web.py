@@ -177,23 +177,35 @@ def _register_answer(body):
 def _manager(link=None):
     manager = MagicMock()
     manager.alias.pubkey = ALIAS_PUBKEY
+    manager.alias.ethSign = lambda message: f'signed:{message}'
     manager.ensureWalletLink.return_value = link
     manager.walletLink = link
     return manager
 
 
+def _challenges(*challenges):
+    """GET /api/v1/auth/challenge answers, one per challenge (None: no challenge given)."""
+    answers = []
+    for challenge in challenges:
+        answer = MagicMock(status_code=200 if challenge else 503)
+        answer.json.return_value = {'challenge': challenge}
+        answers.append(answer)
+    return answers
+
+
 class TestEnsurePeerRegistered:
     """Register sends alias-pubkey, what it is for (off-chain and on-chain,
-    by a neuron), nostr-pubkey, neuron-version and the wallet's link when
-    there is one; nothing named for the older roles."""
+    by a neuron), nostr-pubkey, neuron-version, the wallet's link when
+    there is one and the alias's proof (its signature of a fresh challenge);
+    nothing named for the older roles."""
 
-    def _register(self, app, manager, answer):
+    def _register(self, app, manager, answer, challenges=('c1',)):
         import web.routes as routes
         startup = MagicMock(nostrPubkey=NOSTR_PUBKEY)
         with app.test_request_context(), \
                 patch.object(routes, 'get_startup', return_value=startup), \
                 patch.object(routes.requests, 'post', return_value=_register_answer(answer)) as post, \
-                patch.object(routes.requests, 'get') as get:
+                patch.object(routes.requests, 'get', side_effect=_challenges(*challenges)) as get:
             result = routes.ensure_peer_registered(app, manager, max_retries=1)
         return result, post, get, startup
 
@@ -209,8 +221,11 @@ class TestEnsurePeerRegistered:
             'alias-scoring': 'offchain,onchain',
             'alias-reported-by': 'neuron',
             'nostr-pubkey': NOSTR_PUBKEY,
-            'neuron-version': VERSION}
-        get.assert_not_called()  # no peer/login check
+            'neuron-version': VERSION,
+            'message': 'c1',
+            'signature': 'signed:c1'}
+        (url,), _ = get.call_args  # the challenge, and no peer/login check
+        assert get.call_count == 1 and url.endswith('/api/v1/auth/challenge')
         assert result['peer_id'] == 7
         assert startup.linkedWalletAddress is None
 
@@ -224,11 +239,35 @@ class TestEnsurePeerRegistered:
         headers = post.call_args.kwargs['headers']
         assert set(headers) == {
             'alias-pubkey', 'alias-scoring', 'alias-reported-by', 'nostr-pubkey', 'neuron-version',
-            'wallet-link', 'wallet-signature'}
+            'wallet-link', 'wallet-signature', 'message', 'signature'}
         assert base64.b64decode(headers['wallet-link']).decode('utf-8') == link['message']
         assert headers['wallet-signature'] == link['signature']
-        get.assert_not_called()
+        assert get.call_count == 1
         assert startup.linkedWalletAddress == '0xW'
+
+    @pytest.mark.unit
+    def test_each_attempt_signs_a_fresh_challenge(self, app):
+        """A challenge is used up when sent, so a retry takes a new one."""
+        import web.routes as routes
+        busy = MagicMock(status_code=503, text='busy')
+        with app.test_request_context(), \
+                patch.object(routes, 'get_startup', return_value=MagicMock(nostrPubkey=NOSTR_PUBKEY)), \
+                patch.object(routes.requests, 'post',
+                             side_effect=[busy, _register_answer({'success': True, 'peer_id': 7})]) as post, \
+                patch.object(routes.requests, 'get', side_effect=_challenges('c1', 'c2')), \
+                patch.object(routes.time, 'sleep'):
+            result = routes.ensure_peer_registered(app, _manager(), max_retries=2)
+        assert [(c.kwargs['headers']['message'], c.kwargs['headers']['signature'])
+                for c in post.call_args_list] == [('c1', 'signed:c1'), ('c2', 'signed:c2')]
+        assert result['peer_id'] == 7
+
+    @pytest.mark.unit
+    def test_without_a_challenge_it_registers_without_the_proof(self, app):
+        """Central lets such a register through, logged, until it requires the proof."""
+        result, post, get, startup = self._register(
+            app, _manager(), {'success': True, 'peer_id': 7}, challenges=(None,))
+        assert not {'message', 'signature'} & set(post.call_args.kwargs['headers'])
+        assert result['peer_id'] == 7
 
 
 # Download and import of the key files, by layout ##########################

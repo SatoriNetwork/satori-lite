@@ -18,6 +18,7 @@ from typing import Optional
 
 import yaml
 from eth_account import Account
+from eth_account.messages import encode_defunct
 
 from satorineuron import config
 
@@ -25,14 +26,19 @@ _KEY = re.compile(r'^(0x)?[0-9a-fA-F]{64}$')
 
 
 class KeyAlias:
-    """An alias from its private key: what the on-chain code uses of one
-    (ethAddress, account, pubkey)."""
+    """An alias from its private key: what the on-chain code and register use
+    of one (ethAddress, account, pubkey, ethSign)."""
 
     def __init__(self, private_key: str):
         self.account = Account.from_key(private_key)
         self.ethAddress = self.account.address
         self.address = self.ethAddress
         self.pubkey = self.account._key_obj.public_key.to_compressed_bytes().hex()
+
+    def ethSign(self, message: str) -> str:
+        """EIP-191 (personal_sign) signature of message, 0x and r || s || v,
+        as satorilib's alias signs."""
+        return '0x' + bytes(self.account.sign_message(encode_defunct(text=message)).signature).hex()
 
 
 def onchainAliasPath() -> str:

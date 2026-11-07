@@ -244,9 +244,10 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
 
     Called after the wallet is unlocked. Sends the current form:
     alias-pubkey, what it is for (alias-scoring, alias-reported-by:
-    satorilib.wallet.link.ALIAS_REPORT), nostr-pubkey, neuron-version, and
-    the wallet's link (wallet-link, wallet-signature) when there is one. Without a link the
-    alias registers alone. Retries with a delay on a server error.
+    satorilib.wallet.link.ALIAS_REPORT), nostr-pubkey, neuron-version, the
+    wallet's link (wallet-link, wallet-signature) when there is one, and the
+    alias's proof (_alias_proof). Without a link the alias registers alone.
+    Retries with a delay on a server error.
 
     Args:
         app: Flask app instance for config access
@@ -294,7 +295,7 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
         try:
             resp = requests.post(
                 f"{api_url}/api/v1/peer/register",
-                headers=headers,
+                headers={**headers, **_alias_proof(api_url, alias)},
                 timeout=15
             )
 
@@ -351,6 +352,22 @@ def ensure_peer_registered(app, wallet_manager, max_retries=3):
     return None
 
 
+def _alias_proof(api_url, alias):
+    """The alias's proof on a register: headers message (a fresh challenge)
+    and signature (the alias's EIP-191 signature of it). Central needs it to
+    move the alias to another wallet or replace its Nostr key. A challenge is
+    used up when sent, so each register takes a new one. {} when none is had."""
+    try:
+        resp = requests.get(f"{api_url}/api/v1/auth/challenge", timeout=10)
+        challenge = resp.json().get('challenge') if resp.status_code == 200 else None
+        if challenge:
+            return {'message': challenge, 'signature': alias.ethSign(challenge)}
+        logger.warning(f"No challenge for the register's proof ({resp.status_code})")
+    except Exception as e:
+        logger.warning(f"No challenge for the register's proof: {e}")
+    return {}
+
+
 def _separate_onchain_alias(wallet_manager, alias_pubkey):
     """The alias for the Satori contract when it is not the alias, else None."""
     try:
@@ -365,7 +382,8 @@ def _separate_onchain_alias(wallet_manager, alias_pubkey):
 
 def _register_onchain_alias(api_url, wallet_manager, onchain, offchain_headers):
     """Register the Satori contract's alias for on-chain scoring, with the
-    wallet's link to it. Returns the answer, or {'error': ...}; never raises."""
+    wallet's link to it and its own proof. Returns the answer, or
+    {'error': ...}; never raises."""
     from satorilib.wallet.link import linkHeaders
     link = None
     try:
@@ -376,7 +394,8 @@ def _register_onchain_alias(api_url, wallet_manager, onchain, offchain_headers):
     headers.update({'alias-pubkey': onchain.pubkey, 'alias-scoring': 'onchain'})
     headers.update(linkHeaders(link if isinstance(link, dict) else None))
     try:
-        resp = requests.post(f"{api_url}/api/v1/peer/register", headers=headers, timeout=15)
+        resp = requests.post(f"{api_url}/api/v1/peer/register",
+                             headers={**headers, **_alias_proof(api_url, onchain)}, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
             if data.get('wallet_link_error'):

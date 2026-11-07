@@ -33,6 +33,15 @@ def test_a_key_alias_has_the_address_and_compressed_pubkey_of_its_key():
     assert a.account.key.to_0x_hex() == KEY
 
 
+def test_a_key_alias_signs_eip191_as_the_alias_does():
+    """0x and r || s || v, recovering to its address: the register's proof by it."""
+    from eth_account.messages import encode_defunct
+    a = oa.KeyAlias(KEY)
+    signature = a.ethSign('a challenge')
+    assert signature.startswith('0x') and len(signature) == 132
+    assert Account.recover_message(encode_defunct(text='a challenge'), signature=signature) == a.ethAddress
+
+
 def test_set_stores_it_and_a_replaced_or_handed_back_one_is_kept_renamed(tmp_path):
     path = str(tmp_path / 'onchain-alias.yaml')
     assert oa.readOnchainAlias(path) is None
@@ -79,8 +88,13 @@ class TestRegisterEachForItsJob:
         import web.routes as routes
         answer = MagicMock(status_code=200)
         answer.json.return_value = {'success': True, 'peer_id': 7, 'wallet_address': WALLET}
+        challenges = []
+        for c in ('c1', 'c2'):
+            challenges.append(MagicMock(status_code=200))
+            challenges[-1].json.return_value = {'challenge': c}
         with app.test_request_context(), \
                 patch.object(routes, 'get_startup', return_value=MagicMock(nostrPubkey='ab' * 32)), \
+                patch.object(routes.requests, 'get', side_effect=challenges), \
                 patch.object(routes.requests, 'post', return_value=answer) as post:
             result = routes.ensure_peer_registered(app, manager, max_retries=1)
         return result, [c.kwargs['headers'] for c in post.call_args_list]
@@ -89,6 +103,7 @@ class TestRegisterEachForItsJob:
     def _manager(onchain):
         manager = MagicMock()
         manager.alias.pubkey = '02' + '11' * 32
+        manager.alias.ethSign = lambda message: f'signed:{message}'
         manager.ensureWalletLink.return_value = {'message': 'link alias', 'signature': '0xaa'}
         manager.onchainAlias = onchain
         manager.ensureOnchainLink.return_value = {'message': 'link onchain', 'signature': '0xbb'}
@@ -110,3 +125,15 @@ class TestRegisterEachForItsJob:
             ('02' + '11' * 32, 'offchain', 'neuron'), (onchain.pubkey, 'onchain', 'neuron')]
         assert [base64.b64decode(h['wallet-link']).decode() for h in headers] == ['link alias', 'link onchain']
         assert result['onchain']['peer_id'] == 7
+
+    @pytest.mark.unit
+    def test_each_alias_proves_itself_with_its_own_challenge(self, app):
+        """The on-chain register's proof is the on-chain key's signature of a
+        challenge of its own, not the alias's."""
+        from eth_account.messages import encode_defunct
+        onchain = oa.KeyAlias(KEY)
+        _, headers = self._register(app, self._manager(onchain))
+        assert (headers[0]['message'], headers[0]['signature']) == ('c1', 'signed:c1')
+        assert headers[1]['message'] == 'c2'
+        assert Account.recover_message(
+            encode_defunct(text='c2'), signature=headers[1]['signature']) == onchain.ethAddress

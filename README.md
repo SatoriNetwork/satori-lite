@@ -132,7 +132,11 @@ The link (the message and its signature; nothing secret) is kept in
   `wallet_address` is the linked wallet's Base address (or null), and
   `wallet_link_error` says why a link was not accepted. It also says what
   the alias is for: `alias-scoring: offchain,onchain` (the Satori Network and
-  the Satori contract) and `alias-reported-by: neuron`.
+  the Satori contract) and `alias-reported-by: neuron`. Each register carries
+  the alias's proof, `message` (a fresh challenge from
+  `GET /api/v1/auth/challenge`, used up by the register) and `signature` (the
+  alias's EIP-191 signature of it); Central needs it to move the alias to
+  another wallet or replace its Nostr key.
 - **Another alias for the Satori contract** (optional): the Stake page's
   "Alias for the Satori contract" takes another alias's private key (such as
   a Satori app's) and the wallet password. It is kept in `onchain-alias.yaml`
