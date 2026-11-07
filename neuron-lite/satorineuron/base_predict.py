@@ -198,8 +198,8 @@ def no_power_reason(predictor, alias: str, wallet: Optional[str] = None) -> str:
     if int(delegate, 16) == 0:
         return f"wallet {wallet} is not staked; stake it on the Stake page"
     if delegate.lower() != alias.lower():
-        return (f"wallet {wallet} is staked to {delegate}, not this neuron; "
-                "stake it to this neuron on the Stake page")
+        return (f"wallet {wallet} is staked with {delegate}, not this app; "
+                "stake it with this app on the Stake page")
     return f"wallet {wallet} is staked but holds no SATORI on Base; send SATORI to the wallet"
 
 

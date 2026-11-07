@@ -410,9 +410,9 @@ def test_what_cant_buy_in_plain_words_nothing_kept(w):
         run(w.buyer.buy(w.entry(None), 5 * PRICE, wallet_key=B_WALLET))
     with pytest.raises(mk.MarketError, match='at least one observation'):
         run(w.buyer.buy(w.entry(), PRICE - 1, wallet_key=B_WALLET))
-    w.chain.refuse = ChannelError("Your wallet is staked with this neuron, so it can't send SATORI: "
+    w.chain.refuse = ChannelError("Your wallet is staked with this app, so it can't send SATORI: "
                                   "a channel needs SATORI the wallet can send.", reason='Locked')
-    with pytest.raises(mk.MarketError, match="Your wallet is staked with this neuron, so it can't send SATORI"):
+    with pytest.raises(mk.MarketError, match="Your wallet is staked with this app, so it can't send SATORI"):
         run(w.buyer.buy(w.entry(), 5 * PRICE, wallet_key=B_WALLET))
     assert w.buyer.status()['bought'] == []
     assert [x for x in w.brelay.sent if x[0] == 'subscription'] == []
