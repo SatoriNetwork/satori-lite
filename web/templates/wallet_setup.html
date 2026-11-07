@@ -351,9 +351,9 @@
             <div class="login-logo-wrap">
                 <img src="{{ url_for('static', filename='img/satori-logo.svg') }}" alt="Satori">
             </div>
-            <h1 class="login-title"><span class="accent">Set a wallet password</span></h1>
+            <h1 class="login-title"><span class="accent">Set a wallet passphrase</span></h1>
             <p class="login-sub">
-                This password encrypts your wallet's private key locally.
+                This passphrase encrypts your wallet's private key locally.
             </p>
         </div>
 
@@ -373,7 +373,7 @@
         <form action="{{ url_for('wallet_setup') }}" method="POST" id="setupForm">
             <div class="login-field" id="passwordField">
                 <div class="login-field-label">
-                    <span>Wallet password</span>
+                    <span>Wallet passphrase</span>
                     <span class="caps-lock-hint" id="capsLockHint">Caps lock</span>
                 </div>
                 <div class="login-input-wrap">
@@ -381,14 +381,14 @@
                     <input type="password"
                            name="password"
                            class="form-control"
-                           placeholder="Choose a strong password"
+                           placeholder="Choose a strong passphrase"
                            autofocus
                            autocomplete="new-password"
                            spellcheck="false"
                            id="password"
                            minlength="4"
                            required>
-                    <button type="button" class="login-reveal" id="loginRevealBtn" aria-label="Toggle password visibility">
+                    <button type="button" class="login-reveal" id="loginRevealBtn" aria-label="Toggle passphrase visibility">
                         <i class="material-icons" id="loginRevealIcon">visibility</i>
                     </button>
                 </div>
@@ -402,7 +402,7 @@
 
             <div class="login-field" id="confirmField">
                 <div class="login-field-label">
-                    <span>Confirm password</span>
+                    <span>Confirm passphrase</span>
                     <span class="match-hint" id="matchHint"></span>
                 </div>
                 <div class="login-input-wrap" id="confirmWrap">
@@ -410,13 +410,13 @@
                     <input type="password"
                            name="password_confirm"
                            class="form-control"
-                           placeholder="Re-enter the same password"
+                           placeholder="Re-enter the same passphrase"
                            autocomplete="new-password"
                            spellcheck="false"
                            id="password_confirm"
                            minlength="4"
                            required>
-                    <button type="button" class="login-reveal" id="confirmRevealBtn" aria-label="Toggle password visibility">
+                    <button type="button" class="login-reveal" id="confirmRevealBtn" aria-label="Toggle passphrase visibility">
                         <i class="material-icons" id="confirmRevealIcon">visibility</i>
                     </button>
                 </div>
@@ -527,12 +527,12 @@
             const b = confirmEl.value;
             if (a.length < 4) {
                 e.preventDefault();
-                alert('Password must be at least 4 characters long');
+                alert('Passphrase must be at least 4 characters long');
                 return false;
             }
             if (a !== b) {
                 e.preventDefault();
-                alert('Passwords do not match. Please try again.');
+                alert('Passphrases do not match. Please try again.');
                 return false;
             }
             button.disabled = true;

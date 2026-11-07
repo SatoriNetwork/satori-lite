@@ -721,14 +721,14 @@
             <span class="stk-hero-eyebrow">Stake &amp; Pools</span>
             <h1 class="stk-hero-h1">Stake <span class="stk-accent">Management</span></h1>
             <p class="stk-hero-sub">
-                Stake your SATORI on Base so this neuron predicts with it, stake to a pool,
+                Stake your SATORI on the Satori contract so this app predicts with it, stake with a pool,
                 or run your own pool and share rewards with worker neurons.
             </p>
         </div>
         <div class="stk-hero-meta">
             <span class="stk-meta-pill" id="stkBasePill">
                 <span class="dot"></span>
-                <span id="stkBasePillLabel">Base stake…</span>
+                <span id="stkBasePillLabel">Contract stake…</span>
             </span>
             <span class="stk-meta-pill" id="stkStakingPill">
                 <span class="dot"></span>
@@ -744,7 +744,7 @@
     <!-- ── Stake on Base (on-chain; the neuron predicts with the stake) ── -->
     <section class="card mb-4" id="baseStakeCard">
         <div class="card-header stk-card-head">
-            <h5><i class="material-icons">savings</i>Stake on Base</h5>
+            <h5><i class="material-icons">savings</i>Stake on the Satori contract</h5>
             <div class="stk-head-actions">
                 <button class="stk-btn stk-btn-ghost" onclick="loadBaseStake()" title="Refresh" aria-label="Refresh" type="button">
                     <i class="material-icons" style="font-size: 16px;">refresh</i>
@@ -755,21 +755,21 @@
             <div class="bst-state" id="bstState" data-state="loading" aria-live="polite">
                 <span class="bst-dot"></span>
                 <div>
-                    <div class="bst-title" id="bstTitle">Checking your stake on Base…</div>
+                    <div class="bst-title" id="bstTitle">Checking your contract stake…</div>
                     <div class="bst-sub" id="bstSub"></div>
                 </div>
                 <div class="bst-actions" id="bstActions"></div>
             </div>
             <div class="bst-confirm" id="bstConfirm" hidden>
-                <span>Your tokens unlock at the start of the next full UTC day after you unstake (24 to 48h), and this neuron stops predicting on Base.</span>
+                <span>Your tokens are free to move at the start of the next full UTC day after you unstake (24 to 48h), and this app stops predicting on the Satori contract.</span>
                 <button class="stk-btn stk-btn-danger stk-btn-sm" type="button" onclick="baseStake(false)">Unstake now</button>
                 <button class="stk-btn stk-btn-sm" type="button" onclick="bstConfirm(false)">Cancel</button>
             </div>
             <div class="bst-note" id="bstNote" hidden></div>
             <div class="bst-msg small" id="bstMsg" hidden></div>
             <p class="bst-explain">
-                Staking locks your wallet's SATORI on Base and lets this neuron predict with it once a day.
-                Rewards go to your wallet. Unstaking takes 24 to 48h (tokens unlock at the start of the next full UTC day).
+                Staking holds your wallet's SATORI and lets this app predict with it on the Satori contract once a day.
+                Rewards go to your wallet. Unstaking takes 24 to 48h (tokens are free to move at the start of the next full UTC day).
             </p>
 
             <div class="bst-gas">
@@ -787,7 +787,7 @@
                     <div class="bst-gas-who">Alias</div>
                     <code class="bst-gas-addr" id="bstAliasAddr">…</code>
                     <div class="bst-gas-eth" id="bstAliasEth">… ETH</div>
-                    <div class="bst-gas-why">This neuron's signing address. Pays for the daily prediction</div>
+                    <div class="bst-gas-why">This app's signing address. Pays for the daily prediction</div>
                     <button class="stk-btn stk-btn-sm bst-copy" type="button" onclick="bstCopyAddr('alias', this)" title="Copy alias address" aria-label="Copy alias address">
                         <i class="material-icons">content_copy</i>
                     </button>
@@ -797,7 +797,7 @@
                     <button class="stk-btn stk-btn-sm" type="button" id="aliasClaimBtn" onclick="claimOnAlias()" hidden></button>
                 </div>
                 <form class="bst-key-form" id="aliasKeyForm" hidden onsubmit="showAliasKey(event)">
-                    <input type="password" class="form-control form-control-sm" id="aliasKeyPassword" placeholder="Wallet password" autocomplete="current-password" aria-label="Wallet password">
+                    <input type="password" class="form-control form-control-sm" id="aliasKeyPassword" placeholder="Wallet passphrase" autocomplete="current-password" aria-label="Wallet passphrase">
                     <button class="stk-btn stk-btn-sm" type="submit">Show</button>
                 </form>
                 <div class="bst-key-out" id="aliasKeyOut" hidden>
@@ -809,12 +809,12 @@
 
             <div class="bst-gas" id="onchainAliasBox">
                 <label class="stk-section-label">Alias for the Satori contract</label>
-                <p class="bst-explain mb-2" id="onchainAliasNote">This neuron's alias predicts for the Satori Network and on the Satori contract. You can give the Satori contract another alias, such as your Satori app's (its Backup shows the alias key).</p>
+                <p class="bst-explain mb-2" id="onchainAliasNote">This app's alias predicts for the Satori Service and on the Satori contract. You can give the Satori contract another alias, such as your Satori app's (its Backup shows the alias key).</p>
                 <form class="bst-key-form" id="onchainAliasForm" onsubmit="setOnchainAlias(event, false)">
                     <input type="password" class="form-control form-control-sm" id="onchainAliasKey" placeholder="Another alias's private key (0x…)" autocomplete="off" aria-label="Another alias's private key">
-                    <input type="password" class="form-control form-control-sm" id="onchainAliasPassword" placeholder="Wallet password" autocomplete="current-password" aria-label="Wallet password">
+                    <input type="password" class="form-control form-control-sm" id="onchainAliasPassword" placeholder="Wallet passphrase" autocomplete="current-password" aria-label="Wallet passphrase">
                     <button class="stk-btn stk-btn-sm" type="submit">Use this alias</button>
-                    <button class="stk-btn stk-btn-sm" type="button" id="onchainAliasBack" hidden onclick="setOnchainAlias(event, true)">Use this neuron's alias</button>
+                    <button class="stk-btn stk-btn-sm" type="button" id="onchainAliasBack" hidden onclick="setOnchainAlias(event, true)">Use this app's alias</button>
                 </form>
                 <div class="small mt-2" id="onchainAliasMsg" hidden></div>
             </div>
@@ -827,7 +827,7 @@
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="stake_pool_staking">
             <div class="card h-100">
                 <div class="card-header stk-card-head">
-                    <h5><i class="material-icons">handshake</i>Pool Staking</h5>
+                    <h5><i class="material-icons">handshake</i>Stake with a pool</h5>
                     <div class="stk-head-actions">
                         <button class="stk-btn stk-btn-ghost" onclick="loadAvailablePools()" title="Reload pools" aria-label="Reload pools" type="button">
                             <i class="material-icons" style="font-size: 16px;">refresh</i>
@@ -890,7 +890,7 @@
                             <span class="d-inline-block" id="addStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
                                 <button class="stk-btn stk-btn-primary" id="addStakeBtn" onclick="addStakeToPool()" type="button">
                                     <i class="material-icons">add</i>
-                                    Stake to pool
+                                    Stake with pool
                                 </button>
                             </span>
                             <span class="d-inline-block" id="removeStakeBtnWrapper" data-bs-toggle="tooltip" data-bs-placement="top" title="">
@@ -921,7 +921,7 @@
                         <div class="stk-notice pool-staking-notice" id="poolStakingNotice" style="display: none;">
                             <i class="material-icons">info</i>
                             <div>
-                                <strong>Note:</strong> staking to a pool disables this neuron from acting as a pool itself.
+                                <strong>Note:</strong> staking with a pool disables this app from acting as a pool itself.
                                 Unstake first to enable pool management.
                             </div>
                         </div>
@@ -1127,7 +1127,7 @@
             return await response.json();
         } catch (error) {
             console.error('API call error:', error);
-            showToast('Network error: ' + error.message, true);
+            showToast('Connection error: ' + error.message, true);
             return null;
         }
     }
@@ -1140,7 +1140,7 @@
         pill.classList.remove('is-active');
         if (isStakingToPool) {
             pill.classList.add('is-active');
-            label.textContent = 'Staking to pool';
+            label.textContent = 'Staking with pool';
         } else {
             label.textContent = 'No pool stake';
         }
@@ -1191,7 +1191,7 @@
             removeStakeBtnWrapper.setAttribute('title', '');
         } else {
             removeStakeBtn.disabled = true;
-            removeStakeBtnWrapper.setAttribute('title', 'You are not currently staking to a pool');
+            removeStakeBtnWrapper.setAttribute('title', 'You are not currently staking with a pool');
         }
 
         const poolManagementBody = document.getElementById('poolManagementBody');
@@ -1297,7 +1297,7 @@
         }
         const result = await apiCall('/lender/lend', 'POST', { pool_address: pool });
         if (result) {
-            showToast('Stake added to pool');
+            showToast('Staked with the pool');
             loadStakingStatus();
         }
     }
@@ -1305,7 +1305,7 @@
     async function removeStakeFromPool() {
         const result = await apiCall('/lender/lend', 'DELETE');
         if (result) {
-            showToast('Stake removed from pool');
+            showToast('Unstaked from the pool');
             loadStakingStatus();
         }
     }
@@ -1599,8 +1599,8 @@
             const other = r.onchain_alias && r.onchain_alias !== r.alias;
             document.getElementById('onchainAliasBack').hidden = !other;
             document.getElementById('onchainAliasNote').textContent = other
-                ? `The Satori contract uses another alias, ${bstShort(r.onchain_alias)}: your wallet stakes with it and it sends the daily prediction. This neuron's alias, ${bstShort(r.alias)}, still predicts for the Satori Network.`
-                : "This neuron's alias predicts for the Satori Network and on the Satori contract. You can give the Satori contract another alias, such as your Satori app's (its Backup shows the alias key).";
+                ? `The Satori contract uses another alias, ${bstShort(r.onchain_alias)}: your wallet stakes with it and it sends the daily prediction. This app's alias, ${bstShort(r.alias)}, still predicts for the Satori Service.`
+                : "This app's alias predicts for the Satori Service and on the Satori contract. You can give the Satori contract another alias, such as your Satori app's (its Backup shows the alias key).";
         } catch (e) { /* the wallet is not open yet */ }
     }
 
@@ -1609,7 +1609,7 @@
         const msg = document.getElementById('onchainAliasMsg');
         const password = document.getElementById('onchainAliasPassword').value;
         const key = back ? '' : document.getElementById('onchainAliasKey').value;
-        if (!password) { msg.hidden = false; msg.textContent = 'Give the wallet password: it signs the link.'; return; }
+        if (!password) { msg.hidden = false; msg.textContent = 'Give the wallet passphrase: it signs the link.'; return; }
         msg.hidden = false; msg.textContent = 'Saving…';
         const r = await fetch('/api/wallet/onchain-alias', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ private_key: key, password }) });
@@ -1618,7 +1618,7 @@
         document.getElementById('onchainAliasKey').value = '';
         document.getElementById('onchainAliasPassword').value = '';
         msg.textContent = data.onchain_alias === data.alias
-            ? "The Satori contract uses this neuron's alias again. Stake with it again below."
+            ? "The Satori contract uses this app's alias again. Stake with it again below."
             : `The Satori contract now uses ${bstShort(data.onchain_alias)}. Stake with it below, and send it a little Base ETH for its gas.`;
         await loadOnchainAlias();
         await loadBaseStake();
@@ -1627,7 +1627,7 @@
     async function loadBaseStake() {
         loadOnchainAlias();
         bstConfirm(false);
-        bstSet('loading', 'Checking your stake on Base…', '', []);
+        bstSet('loading', 'Checking your contract stake…', '', []);
         const [p, b] = await Promise.allSettled([
             bstGet('/api/settings/base-predict'),
             bstGet('/api/wallet/base/balances'),
@@ -1681,9 +1681,9 @@
         const label = document.getElementById('stkBasePillLabel');
         pill.classList.toggle('is-active', state === 'staked');
         label.textContent = {
-            loading: 'Base stake…', staked: 'Staked on Base', unstaking: 'Unstaking on Base',
-            elsewhere: 'Staked elsewhere', idle: 'Staked, not predicting', off: 'Not staked on Base', error: 'Base stake unknown',
-        }[state] || 'Base stake…';
+            loading: 'Contract stake…', staked: 'Staked on contract', unstaking: 'Unstaking on contract',
+            elsewhere: 'Staked elsewhere', idle: 'Staked, not predicting', off: 'No contract stake', error: 'Contract stake unknown',
+        }[state] || 'Contract stake…';
     }
 
     function bstRenderState() {
@@ -1691,18 +1691,18 @@
         const w = bst.balances && bst.balances.wallet;
         bstNote('');
         if (!p) {
-            bstSet('error', 'Could not read your stake on Base',
-                'Check that your neuron is running, then refresh.', []);
+            bstSet('error', 'Could not read your contract stake',
+                'Check that Satori Lite is running, then refresh.', []);
             return;
         }
         const s = p.stake;
         if (!s) {
             if (p.stake_error) {
-                bstSet('error', 'Could not read your stake on Base',
+                bstSet('error', 'Could not read your contract stake',
                     'The Base network did not answer. Refresh in a moment.', []);
             } else {
                 bstSet('error', 'Unlock your wallet to see your stake',
-                    'Log in with your wallet password, then come back to this page.', []);
+                    'Enter your wallet passphrase on the Unlock page, then come back to this page.', []);
             }
             return;
         }
@@ -1715,39 +1715,39 @@
         if (toThis && !p.enabled) {
             // staked on-chain (say, an imported wallet) but this neuron's daily loop is off
             bstSet('idle', 'Staked, not predicting',
-                'Your wallet is staked to this neuron, but the neuron is not sending predictions yet.',
+                'Your wallet is staked with this app, but this app is not sending predictions yet.',
                 [['Start predicting', 'primary', () => baseStake(true), closed]]);
         } else if (toThis) {
             bstSet('staked', satori === 0 ? 'Staked, with no SATORI to predict with' : 'Staked and predicting',
-                (satori != null ? bstFmt(satori, 8) + ' SATORI staked. ' : '') + 'Tokens stay locked while staked.',
+                (satori != null ? bstFmt(satori, 8) + ' SATORI staked. ' : '') + 'Tokens are held while staked.',
                 [['Unstake', 'danger', () => bstConfirm(true), noGas]]);
         } else if (s.staked) {
-            bstSet('elsewhere', 'Staked to another address',
-                'Your wallet is staked, but not to this neuron, so this neuron cannot predict with it.',
-                [['Stake to this neuron', 'primary', () => baseStake(true), noGas || closed]]);
+            bstSet('elsewhere', 'Staked with another address',
+                'Your wallet is staked, but not with this app, so this app cannot predict with it.',
+                [['Stake with this app', 'primary', () => baseStake(true), noGas || closed]]);
         } else if (s.locked) {
             const when = s.unlock_ts
                 ? new Date(s.unlock_ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
                 : null;
             bstSet('unstaking', 'Unstaking',
-                when ? 'Your tokens unlock around ' + when + '.' : 'Your tokens unlock in 24 to 48h.',
+                when ? 'Your tokens are free to move from about ' + when + '.' : 'Your tokens are free to move in 24 to 48h.',
                 [['Stake again', 'primary', () => baseStake(true), noGas || closed]]);
         } else {
-            bstSet('off', 'Not staked', 'Your tokens are free to move. This neuron is not predicting on Base.',
+            bstSet('off', 'Not staked', 'Your tokens are free to move. This app is not predicting on the Satori contract.',
                 [['Stake', 'primary', () => baseStake(true), noGas || closed]]);
         }
 
         const alias = bst.balances && bst.balances.alias;
         if (closed && !(toThis && p.enabled)) {
-            bstNote('Staking on Base is paused for now. Unstaking still works.', true);
+            bstNote('Staking on the Satori contract is paused for now. Unstaking still works.', true);
         } else if (noGas) {
             bstNote(gasReason + ' Send some to the wallet address below.', true);
         } else if (toThis && alias && !alias.error && !(alias.eth > 0)) {
             bstNote('The alias has no ETH, so the daily prediction cannot be sent. Send a little Base ETH to the alias address below.', true);
         } else if (satori === 0) {
             bstNote(toThis
-                ? 'Your wallet holds no SATORI on Base, so this neuron has nothing to predict with. Claim your rewards on the <a href="/dashboard">Dashboard</a>.'
-                : 'Your wallet holds no SATORI on Base yet, so staking gives this neuron nothing to predict with. Claim your rewards on the <a href="/dashboard">Dashboard</a> first.',
+                ? 'Your wallet holds no SATORI on Base, so this app has nothing to predict with. Claim your rewards on the <a href="/dashboard">Dashboard</a>.'
+                : 'Your wallet holds no SATORI on Base yet, so staking gives this app nothing to predict with. Claim your rewards on the <a href="/dashboard">Dashboard</a> first.',
                 true);
         }
     }
@@ -1795,8 +1795,8 @@
                 return;
             }
             bstMsg(enabled
-                ? 'Staked. This neuron predicts on Base once a day.'
-                : 'Unstaked. Your tokens unlock in 24 to 48h.', 'success');
+                ? 'Staked. This app predicts on the Satori contract once a day.'
+                : 'Unstaked. Your tokens are free to move in 24 to 48h.', 'success');
             bst.predict = Object.assign({}, bst.predict, { enabled: j.enabled, stake: j.stake });
             bstRenderState();
             bstGet('/api/wallet/base/balances').then((b) => { bst.balances = b; bstRenderGas(); }).catch(() => {});

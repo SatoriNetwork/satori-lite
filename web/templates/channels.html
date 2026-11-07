@@ -33,7 +33,7 @@
           <div class="hiw-num">1</div>
           <div>
             <div class="hiw-title">Open a channel</div>
-            <div class="small text-muted">Get the receiver's wallet pubkey, set an amount and timeout. SATORI gets locked into a shared on-chain address.</div>
+            <div class="small text-muted">Get the receiver's alias pubkey, set an amount and timeout. SATORI gets locked into a shared on-chain address.</div>
           </div>
         </div>
         <div class="hiw-step">
@@ -47,7 +47,7 @@
           <div class="hiw-num">3</div>
           <div>
             <div class="hiw-title">Reclaim unused funds</div>
-            <div class="small text-muted">After the timeout expires, use <strong>Reclaim</strong> to sweep any unspent SATORI back to your wallet.</div>
+            <div class="small text-muted">After the timeout expires, use <strong>Reclaim</strong> to sweep any unspent SATORI back to your alias.</div>
           </div>
         </div>
       </div>
@@ -168,7 +168,7 @@
       </div>
       <div class="modal-body">
         <div class="ch-field">
-          <label class="form-label" for="ocReceiverPubkey">Receiver wallet pubkey</label>
+          <label class="form-label" for="ocReceiverPubkey">Receiver alias pubkey</label>
           <input type="text" class="form-control font-monospace" id="ocReceiverPubkey"
                  placeholder="02abc123… (hex)">
         </div>
@@ -1193,7 +1193,7 @@ function detailField(label, value, copyable) {
 function buildDetailPanel(ch, isSender) {
   const paidSoFar = ch.locked_sats - ch.remainder_sats;
   const claimable = isSender ? paidSoFar : receiverClaimable(ch);
-  const counterpartyLabel = isSender ? 'Receiver Wallet Pubkey' : 'Sender Wallet Pubkey';
+  const counterpartyLabel = isSender ? 'Receiver Alias Pubkey' : 'Sender Alias Pubkey';
   const counterpartyKey = isSender ? ch.receiver_pubkey : ch.sender_pubkey;
   const pendingInfo = !isSender
     ? detailField('Pending Commitment', ch.pending_commitment ? 'Yes, ready to claim' : 'No commitments received yet', false)
@@ -1458,7 +1458,7 @@ function openBroadcastReview(opts) {
   const { num, unit } = bxFormatAmount(opts.amountSats);
   const actionCopy = isClaim
     ? 'Broadcast on-chain claim using the latest commitment.'
-    : 'Sweep the unspent remainder back to your wallet.';
+    : 'Sweep the unspent remainder back to your alias.';
 
   slot.innerHTML = `
     <div class="bx-console ${isClaim ? 'is-claim' : 'is-reclaim'}">
@@ -1477,7 +1477,7 @@ function openBroadcastReview(opts) {
           <dt>Action</dt>
           <dd>${actionCopy}</dd>
           <dt>Fee</dt>
-          <dd>≤ 0.25 EVR (paid from wallet)</dd>
+          <dd>≤ 0.25 EVR (paid from alias)</dd>
         </dl>
         <div class="bx-actions">
           <button class="bx-btn-ghost" onclick="cancelBroadcast()">

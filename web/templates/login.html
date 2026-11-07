@@ -462,7 +462,7 @@
         <form action="{{ url_for('login') }}" method="POST" id="loginForm">
             <div class="login-field" id="passwordField">
                 <div class="login-field-label">
-                    <span>Wallet password</span>
+                    <span>Wallet passphrase</span>
                     <span class="caps-lock-hint" id="capsLockHint">Caps lock</span>
                 </div>
                 <div class="login-input-wrap">
@@ -476,7 +476,7 @@
                            spellcheck="false"
                            id="password"
                            required>
-                    <button type="button" class="login-reveal" id="loginRevealBtn" aria-label="Toggle password visibility">
+                    <button type="button" class="login-reveal" id="loginRevealBtn" aria-label="Toggle passphrase visibility">
                         <i class="material-icons" id="loginRevealIcon">visibility</i>
                     </button>
                 </div>
@@ -510,7 +510,7 @@
         </div>
         <div class="auth-loading-meta">
             <div class="auth-step-wrap">
-                <span id="authLoadingStep">Verifying credentials…</span>
+                <span id="authLoadingStep">Verifying passphrase…</span>
             </div>
             <strong id="authLoadingPercent">0%</strong>
         </div>

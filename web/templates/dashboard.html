@@ -1573,7 +1573,7 @@
             <div class="iw-head">
                 <div class="iw-head-text">
                     <span class="iw-eyebrow">Wallet · Restore</span>
-                    <h5 class="iw-title" id="importWalletModalLabel">Import Wallet</h5>
+                    <h5 class="iw-title" id="importWalletModalLabel">Restore wallet</h5>
                 </div>
                 <button type="button" class="iw-close" data-bs-dismiss="modal" aria-label="Close">
                     <i class="material-icons">close</i>
@@ -1591,13 +1591,13 @@
                         <input type="file" id="iwInput" accept=".zip,.yaml,.bak,.json" multiple aria-describedby="iwDropHint">
                         <span class="iw-drop-icon" aria-hidden="true"><i class="material-icons">folder_zip</i></span>
                         <span class="iw-drop-primary" id="iwDropTitle"><u>Choose your backup</u> or drop it here</span>
-                        <span class="iw-drop-secondary" id="iwDropHint">the .zip from Download Wallet, or the files in it</span>
+                        <span class="iw-drop-secondary" id="iwDropHint">the .zip from Backup, or the files in it</span>
                     </label>
                     <div class="iw-files" id="iwFiles" hidden>
                         <div class="iw-files-head"><span>Will be restored</span><span class="iw-files-count" id="iwFilesCount"></span></div>
                         <ul id="iwFilesList"></ul>
                     </div>
-                    <p class="iw-note" id="iwNote" hidden>After the restart, log in with the password of the wallet you imported.</p>
+                    <p class="iw-note" id="iwNote" hidden>After the restart, unlock with the passphrase of the wallet you restored.</p>
                 </div>
 
                 <div id="importResultModal" class="iw-result" style="display: none;"></div>
@@ -1607,7 +1607,7 @@
                 <button type="button" class="iw-btn" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="iw-btn iw-btn-danger" onclick="importWalletFromModal()" id="importWalletBtnModal" disabled>
                     <i class="material-icons">upload</i>
-                    Import & Restart
+                    Restore & Restart
                 </button>
             </div>
         </div>
@@ -1620,9 +1620,9 @@
     <header class="dash-hero">
         <div class="dash-hero-title">
             <span class="dash-hero-eyebrow">Overview</span>
-            <h1 class="dash-hero-h1">Neuron <span class="dash-accent">Dashboard</span></h1>
+            <h1 class="dash-hero-h1">Satori Lite <span class="dash-accent">Dashboard</span></h1>
             <p class="dash-hero-sub">
-                Your wallet and rewards on Base, and the health of your neuron at a glance.
+                Your wallet and rewards on Base, and the health of this app at a glance.
             </p>
         </div>
     </header>
@@ -1720,7 +1720,7 @@
                     <div class="claim-row">
                         <div class="claim-what">
                             <div class="claim-name">Rewards</div>
-                            <div class="claim-note">Earned <span id="claimTotal">…</span>, claimed <span id="claimClaimed">…</span></div>
+                            <div class="claim-note">Total <span id="claimTotal">…</span>, claimed <span id="claimClaimed">…</span></div>
                         </div>
                         <div class="claim-amount"><strong id="claimClaimable">…</strong>SATORI</div>
                         <button class="btn btn-primary btn-sm claim-btn" id="claimBtn" onclick="doClaim()">Claim</button>
@@ -1738,7 +1738,7 @@
                     <div class="claim-row" id="aliasAirdropRow" hidden>
                         <div class="claim-what">
                             <div class="claim-name">Alias airdrop</div>
-                            <div class="claim-note">The snapshot share held by the alias, this neuron's signing address. Claimed to the alias.</div>
+                            <div class="claim-note">The snapshot share held by the alias, this app's signing address. Claimed to the alias.</div>
                         </div>
                         <div class="claim-amount"><strong id="aliasAirdropClaimable">…</strong>SATORI</div>
                         <button class="btn btn-primary btn-sm claim-btn" id="aliasAirdropBtn" onclick="doClaimAirdrop('alias')">Claim</button>
@@ -1859,7 +1859,7 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">monitor_heart</i>
-                        Neuron Monitoring
+                        Satori Lite Monitoring
                     </h5>
                     <div class="d-flex align-items-center gap-2">
                         <small class="text-muted" id="systemStatsLastUpdate">Waiting for data...</small>
@@ -2358,7 +2358,7 @@
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
                 const text = await response.text();
-                throw new Error(`Server returned non-JSON response: ${text.substring(0, 100)}`);
+                throw new Error(`Satori Lite returned a non-JSON response: ${text.substring(0, 100)}`);
             }
 
             const result = await response.json();
@@ -2400,8 +2400,8 @@
 
     // Update UI based on mutual exclusion rules
     function updateMutualExclusionUI() {
-        const poolStakingReasonCommission = 'You cannot stake to a pool while you have commission set (open pool)';
-        const poolStakingReasonWorkers = 'You cannot stake to a pool while you have workers (active pool)';
+        const poolStakingReasonCommission = 'You cannot stake with a pool while you have commission set (open pool)';
+        const poolStakingReasonWorkers = 'You cannot stake with a pool while you have workers (active pool)';
 
         // Pool Staking elements
         const poolAddressInput = document.getElementById('poolAddress');
@@ -2441,7 +2441,7 @@
                 removeStakeBtnWrapper.setAttribute('title', '');
             } else {
                 removeStakeBtn.disabled = true;
-                removeStakeBtnWrapper.setAttribute('title', 'You are not currently staking to a pool');
+                removeStakeBtnWrapper.setAttribute('title', 'You are not currently staking with a pool');
             }
         // }
 
@@ -2567,7 +2567,7 @@
         }
         const result = await apiCall('/lender/lend', 'POST', { pool_address: pool });
         if (result) {
-            showToast('Stake added to pool');
+            showToast('Staked with the pool');
             loadStakingStatus();
         }
     }
@@ -2575,7 +2575,7 @@
     async function removeStakeFromPool() {
         const result = await apiCall('/lender/lend', 'DELETE');
         if (result) {
-            showToast('Stake removed from pool');
+            showToast('Unstaked from the pool');
             loadStakingStatus();
         }
     }
@@ -4490,7 +4490,7 @@
                 '<div class="pub-del-body">' +
                   '<div class="pub-del-text">' +
                     'Delete <code>' + pubDelEscapeHtml(streamName) + '</code>? ' +
-                    '<span class="pub-del-hint">Removes it locally, broadcasts a tombstone to the network, and drops the paired prediction.</span>' +
+                    '<span class="pub-del-hint">Removes it locally, broadcasts a tombstone to the Satori Network, and drops the paired prediction.</span>' +
                   '</div>' +
                   '<div class="pub-del-actions">' +
                     '<button type="button" class="btn btn-sm pub-del-cancel" data-action="cancel">Cancel</button>' +
@@ -4902,7 +4902,7 @@
     function iwError(message) {
         const resultDiv = document.getElementById('importResultModal');
         resultDiv.className = 'iw-result iw-result-error';
-        resultDiv.innerHTML = '<div class="iw-result-title"><i class="material-icons">error_outline</i>That backup can\'t be imported</div>';
+        resultDiv.innerHTML = '<div class="iw-result-title"><i class="material-icons">error_outline</i>That backup can\'t be restored</div>';
         resultDiv.appendChild(document.createTextNode(message));
         resultDiv.style.display = 'block';
     }
@@ -4921,8 +4921,8 @@
         try {
             const r = await fetch('/api/wallet/import?check=1', { method: 'POST', body: formData });
             data = await r.json().catch(() => ({}));
-            if (!r.ok || !data.ok) { iwError(data.error || 'The server could not read it.'); return; }
-        } catch (e) { iwError('Could not reach the neuron: ' + e.message); return; }
+            if (!r.ok || !data.ok) { iwError(data.error || 'Satori Lite could not read it.'); return; }
+        } catch (e) { iwError('Could not reach Satori Lite: ' + e.message); return; }
         iwUpload = files;
         const list = document.getElementById('iwFilesList');
         list.innerHTML = '';
@@ -4954,7 +4954,7 @@
 
         // Disable button and show loading
         importBtn.disabled = true;
-        importBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:0.85rem;height:0.85rem;border-width:0.15em;"></span> Importing…';
+        importBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:0.85rem;height:0.85rem;border-width:0.15em;"></span> Restoring…';
         resultDiv.style.display = 'none';
 
         try {
@@ -4975,13 +4975,13 @@
             if (response.ok && data.success) {
                 resultDiv.className = 'iw-result iw-result-success';
                 resultDiv.innerHTML =
-                    '<div class="iw-result-title"><i class="material-icons">check_circle</i>Wallet imported · restarting</div>' +
-                    'Redirecting to login in 15s. Log in with the imported wallet\'s password, then check your reward address.' +
+                    '<div class="iw-result-title"><i class="material-icons">check_circle</i>Wallet restored · restarting</div>' +
+                    'Redirecting to Unlock in 15s. Enter the restored wallet\'s passphrase there, then check your reward address.' +
                     '<span class="iw-result-meta">backup → ' + (data.backup_location || '-') + '</span>';
                 resultDiv.style.display = 'block';
 
                 importBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:0.85rem;height:0.85rem;border-width:0.15em;"></span> Restarting…';
-                showToast('Wallet imported. The neuron is restarting.');
+                showToast('Wallet restored. Satori Lite is restarting.');
 
                 // Auto-redirect after 15 seconds
                 setTimeout(() => {
@@ -4989,33 +4989,33 @@
                 }, 15000);
 
             } else {
-                const errorMsg = data.error || 'Import failed';
+                const errorMsg = data.error || 'Restore failed';
                 const rolledBack = data.rolled_back
-                    ? '<span class="iw-result-meta">Your previous wallet has been restored.</span>'
+                    ? '<span class="iw-result-meta">Your previous wallet is back in place.</span>'
                     : '';
                 resultDiv.className = 'iw-result iw-result-error';
                 resultDiv.innerHTML =
-                    '<div class="iw-result-title"><i class="material-icons">error_outline</i>Import failed</div>' +
+                    '<div class="iw-result-title"><i class="material-icons">error_outline</i>Restore failed</div>' +
                     errorMsg + rolledBack;
                 resultDiv.style.display = 'block';
-                showToast('Import failed: ' + errorMsg, true);
+                showToast('Restore failed: ' + errorMsg, true);
 
                 // Re-enable button
                 importBtn.disabled = false;
-                importBtn.innerHTML = '<i class="material-icons">upload</i> Import & Restart';
+                importBtn.innerHTML = '<i class="material-icons">upload</i> Restore & Restart';
             }
 
         } catch (error) {
             resultDiv.className = 'iw-result iw-result-error';
             resultDiv.innerHTML =
-                '<div class="iw-result-title"><i class="material-icons">error_outline</i>Import failed</div>' +
+                '<div class="iw-result-title"><i class="material-icons">error_outline</i>Restore failed</div>' +
                 error.message;
             resultDiv.style.display = 'block';
-            showToast('Import error: ' + error.message, true);
+            showToast('Restore error: ' + error.message, true);
 
             // Re-enable button
             importBtn.disabled = false;
-            importBtn.innerHTML = '<i class="material-icons">upload</i> Import & Restart';
+            importBtn.innerHTML = '<i class="material-icons">upload</i> Restore & Restart';
         }
     }
 

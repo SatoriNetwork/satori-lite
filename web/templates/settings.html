@@ -722,7 +722,7 @@
             <span class="set-hero-eyebrow">Network &amp; Relays</span>
             <h1 class="set-hero-h1">Network <span class="set-accent">Settings</span></h1>
             <p class="set-hero-sub">
-                Manage relays your neuron talks to, register your own Nostr relay, and run a local
+                Manage relays this app talks to, register your own Nostr relay, and run a local
                 public or private embedded relay directly from Satori Lite.
             </p>
         </div>
@@ -800,7 +800,7 @@
                     <div class="set-help">
                         Set this as <code style="padding:0; background: none; color: var(--accent-primary);">NOSTR_PUBKEY</code>
                         in your relay's <code style="padding:0; background:none; color: var(--accent-primary);">.env</code>
-                        file so NIP-11 can announce your identity.
+                        file so NIP-11 can announce your Nostr key.
                     </div>
                 </div>
                 <div class="mb-3 set-mono-field">
@@ -825,7 +825,7 @@
         <!-- ── Local Relay Server ────────────────────────── -->
         <div class="card">
             <div class="card-header set-card-head">
-                <h5><i class="material-icons">settings_input_antenna</i>Local relay server</h5>
+                <h5><i class="material-icons">settings_input_antenna</i>Local relay</h5>
                 <div class="set-head-actions">
                     <span class="mode-chip status-off" id="relayRunningChip">Relay Off</span>
                     <button class="set-btn set-btn-ghost" onclick="refreshRelayStatus()" type="button">
@@ -908,7 +908,7 @@
                             </div>
                             <ul>
                                 <li>Accepts general relay traffic</li>
-                                <li>Publishes your Nostr identity via NIP-11</li>
+                                <li>Publishes your Nostr key via NIP-11</li>
                                 <li>Runtime port: <span class="font-mono-small" id="relayPublicPort">{{ relay_status.public_port }}</span></li>
                             </ul>
                             <div class="mode-port-group">
@@ -998,7 +998,7 @@
                     <div class="set-alert set-alert-muted mb-0">
                         <i class="material-icons">article</i>
                         <div>
-                            Embedded relay lifecycle events are written into the standard neuron log
+                            Embedded relay lifecycle events are written into the standard Satori Lite log
                             with the prefix <span class="font-mono-small" style="color: var(--accent-primary);">Relay:</span>
                             so you can verify start, stop, mode selection, and runtime issues from the normal Satori logs.
                         </div>
@@ -1019,7 +1019,7 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-3">
-                        Add external Nostr relay URLs for this neuron to connect to.
+                        Add external Nostr relay URLs for this app to connect to.
                         Your relay list is published as a NIP-65 event so the network
                         can discover which relays carry Satori traffic.
                     </p>
@@ -1057,9 +1057,9 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-3">
-                        Central pays relay rewards to the Base address of your relay's
+                        The Satori Service pays relay rewards to the Base address of your relay's
                         Nostr public key (even-y, 0x02 convention). This is the address
-                        central lists for your relay.
+                        the Satori Service lists for your relay.
                     </p>
                     <div class="settings-grid mb-4">
                         <div class="settings-stat">
@@ -1395,7 +1395,7 @@
             const data = await resp.json();
             document.getElementById('evrNostrPubkey').textContent = data.nostr_pubkey || '-';
             document.getElementById('evrDerivedAddress').textContent =
-                data.address || (data.error ? 'Error' : 'Not listed by central');
+                data.address || (data.error ? 'Error' : 'Not listed by the Satori Service');
         } catch (err) {
             document.getElementById('evrDerivedAddress').textContent = 'Error';
         }
@@ -1576,9 +1576,9 @@
         pageItems.forEach(r => {
             const row = document.createElement('tr');
             const sourceBadge = r.source === 'both'
-                ? '<span class="badge bg-info">server + local</span>'
+                ? '<span class="badge bg-info">Service + local</span>'
                 : r.source === 'server'
-                    ? '<span class="badge bg-secondary">server</span>'
+                    ? '<span class="badge bg-secondary">Service</span>'
                     : '<span class="badge bg-outline-secondary border">local</span>';
             const deleteBtn = r.source !== 'server'
                 ? '<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteRelay(\'' + r.relay_url.replace(/'/g, "\\'") + '\')" title="Remove" aria-label="Remove"><i class="material-icons align-middle" style="font-size: 14px;">close</i></button>'

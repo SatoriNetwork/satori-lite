@@ -88,12 +88,12 @@
                     {% if request.endpoint == 'dashboard' %}
                     <a class="dropdown-item satori-dd-item" href="#"
                        onclick="openImportWalletModal(); return false;">
-                        <i class="material-icons">upload_file</i>Import Wallet
+                        <i class="material-icons">upload_file</i>Restore
                     </a>
                     {% else %}
                     <a class="dropdown-item satori-dd-item"
                        href="{{ url_for('dashboard') }}">
-                        <i class="material-icons">upload_file</i>Import Wallet
+                        <i class="material-icons">upload_file</i>Restore
                     </a>
                     {% endif %}
                 </li>
@@ -101,7 +101,7 @@
                 <li>
                     <a class="dropdown-item satori-dd-item"
                        href="/api/wallet/download">
-                        <i class="material-icons">download</i>Download Wallet
+                        <i class="material-icons">download</i>Backup
                     </a>
                 </li>
             </ul>
@@ -166,7 +166,7 @@
         <!-- Logout (desktop) -->
         <a href="{{ url_for('logout') }}" class="util-btn util-ghost util-desktop-only">
             <i class="material-icons">logout</i>
-            <span class="util-label">Logout</span>
+            <span class="util-label">Lock</span>
         </a>
 
         <!-- Mobile overflow menu -->
@@ -179,7 +179,7 @@
             <ul class="dropdown-menu dropdown-menu-end satori-dropdown" style="min-width: 230px;">
                 <li>
                     <a class="dropdown-item satori-dd-item" href="/api/wallet/download">
-                        <i class="material-icons">download</i>Download Wallet
+                        <i class="material-icons">download</i>Backup
                     </a>
                 </li>
                 <li><hr class="satori-dd-divider"></li>
@@ -215,7 +215,7 @@
                 <li><hr class="satori-dd-divider"></li>
                 <li>
                     <a class="dropdown-item satori-dd-item" href="{{ url_for('logout') }}">
-                        <i class="material-icons">logout</i>Logout
+                        <i class="material-icons">logout</i>Lock
                     </a>
                 </li>
             </ul>
@@ -235,7 +235,7 @@
                     <button type="button" class="ntf-mark-all" id="ntfMarkAll" hidden>Mark all read</button>
                 </div>
                 <div class="ntf-list" id="ntfList">
-                    <p class="ntf-empty">No notifications. Messages from the Satori network show up here.</p>
+                    <p class="ntf-empty">No notifications. Messages from the Satori Service show up here.</p>
                 </div>
             </div>
         </div>
@@ -403,7 +403,7 @@
             document.getElementById('ntfMarkAll').hidden = !unread.length;
             const list = document.getElementById('ntfList');
             if (!items.length) {
-                list.innerHTML = '<p class="ntf-empty">No notifications. Messages from the Satori network show up here.</p>';
+                list.innerHTML = '<p class="ntf-empty">No notifications. Messages from the Satori Service show up here.</p>';
                 return;
             }
             list.innerHTML = items.map((n) =>

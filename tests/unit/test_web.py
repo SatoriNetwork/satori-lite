@@ -50,7 +50,7 @@ class TestLoginPage:
         with patch('web.routes.check_wallet_file_exists', return_value=True):
             response = client.get('/login')
         assert response.status_code == 200
-        assert b'password' in response.data.lower()
+        assert b'passphrase' in response.data.lower()
 
     @pytest.mark.unit
     def test_login_page_has_form(self, client):
@@ -507,7 +507,7 @@ class TestKeyFilesImport:
             {'name': 'wallet.yaml', 'role': 'Alias'},
             {'name': 'vault.yaml', 'role': 'Wallet'},
             {'name': 'vault.yaml.bak', 'role': 'Wallet (spare copy)'},
-            {'name': 'nostr.yaml', 'role': 'Nostr identity'},
+            {'name': 'nostr.yaml', 'role': 'Nostr key'},
         ]
         assert (keys / 'alias.yaml').read_text() == _key('old-a')
         assert not list(keys.glob('backup_*'))

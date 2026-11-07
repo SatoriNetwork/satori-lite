@@ -577,13 +577,13 @@ def register_routes(app):
                         flash('Error: Could not open wallet', 'error')
                     elif not wallet.isDecrypted:
                         # Wrong password - the wallet is still encrypted
-                        flash('Error: Invalid password', 'error')
+                        flash('Error: Invalid passphrase', 'error')
                     else:
                         # Successfully decrypted - the wallet stays unlocked for this session
                         _wallet_unlocked(wallet_manager, password)
                         return redirect(url_for('dashboard'))
                 except Exception as e:
-                    flash(f'Error: Invalid password or wallet error', 'error')
+                    flash(f'Error: Invalid passphrase or wallet error', 'error')
             else:
                 # For testing without a wallet
                 if app.config.get('TESTING'):
@@ -603,7 +603,7 @@ def register_routes(app):
 
         # If the wallet file already exists, redirect to login with message
         if check_wallet_file_exists():
-            flash('Wallet already exists. Please log in with your existing password.', 'info')
+            flash('Wallet already exists. Please unlock it with your existing passphrase.', 'info')
             logger.info("Attempted to access wallet setup but the wallet already exists")
             return redirect(url_for('login'))
 
@@ -613,12 +613,12 @@ def register_routes(app):
 
             # Validate password length
             if len(password) < 4:
-                flash('Password must be at least 4 characters long', 'error')
+                flash('Passphrase must be at least 4 characters long', 'error')
                 return render_wallet_setup()
 
             # Validate passwords match
             if password != password_confirm:
-                flash('Passwords do not match. Please try again.', 'error')
+                flash('Passphrases do not match. Please try again.', 'error')
                 return render_wallet_setup()
 
             # Create the wallet with the password (DO NOT save password to config for security)
@@ -631,7 +631,7 @@ def register_routes(app):
                     wallet = wallet_manager.openWallet(password=password, create=True)
 
                     if wallet and wallet.isDecrypted:
-                        flash('Wallet created successfully! Please log in with your password.', 'success')
+                        flash('Wallet created successfully! Please unlock it with your passphrase.', 'success')
                         logger.info("Wallet created via web UI (password NOT saved to config)")
                         return redirect(url_for('login'))
                     else:
@@ -1292,7 +1292,7 @@ def register_routes(app):
         given = body.get('password')
         held = decrypt_wallet_password_from_session()
         if not (isinstance(given, str) and held and hmac.compare_digest(given.encode(), held.encode())):
-            return jsonify({'error': 'Wrong password'}), 403
+            return jsonify({'error': 'Wrong passphrase'}), 403
         wm = get_or_create_session_wallet()
         if not (wm and wm.alias and wm.wallet):
             return jsonify({'error': 'Unlock your wallet first.'}), 400
@@ -1318,7 +1318,7 @@ def register_routes(app):
         given = (request.get_json(silent=True) or {}).get('password')
         held = decrypt_wallet_password_from_session()
         if not (isinstance(given, str) and held and hmac.compare_digest(given.encode(), held.encode())):
-            return jsonify({'error': 'Wrong password'}), 403
+            return jsonify({'error': 'Wrong passphrase'}), 403
         wallet_manager = get_or_create_session_wallet()
         if wallet_manager and wallet_manager.alias:
             try:
@@ -1399,7 +1399,7 @@ def register_routes(app):
             return resp.json()
         if resp.status_code == 404:
             return None
-        raise RuntimeError(f"central returned {resp.status_code} for proof")
+        raise RuntimeError(f"The Satori Service returned {resp.status_code} for proof")
 
     def _merkle_status(claimer, address):
         """(proof entry or None, claim numbers) for one Base address: lifetime
@@ -1520,7 +1520,7 @@ def register_routes(app):
             whose = 'alias' if (request.get_json(silent=True) or {}).get('key') == 'alias' else 'wallet'
             signer = wallet_manager.alias if whose == 'alias' else wallet_manager.wallet
             if signer is None:
-                return jsonify({'error': 'This neuron has no alias.'}), 400
+                return jsonify({'error': 'This app has no alias.'}), 400
             claimer = _base_claimer()
             status = claimer.airdrop_status(signer.ethAddress)
             if status['claimable'] <= 0:
@@ -1693,7 +1693,7 @@ def register_routes(app):
         data = request.json or {}
         enabled = bool(data.get('enabled', False))
         if enabled and not _base_staking_open():
-            return jsonify({'error': 'Staking on Base is paused for now. Unstaking still works.'}), 403
+            return jsonify({'error': 'Staking on the Satori contract is paused for now. Unstaking still works.'}), 403
 
         # Both on (delegate) and off (undelegate) need the wallet to sign, so it
         # must be unlocked either way.
@@ -2400,7 +2400,7 @@ def register_routes(app):
                 if unexpected:
                     shutil.rmtree(temp_dir)
                     return jsonify({
-                        'error': f'Invalid file: {", ".join(unexpected)}. Only the files Download Wallet makes are allowed.'
+                        'error': f'Invalid file: {", ".join(unexpected)}. Only the files Backup makes are allowed.'
                     }), 400
 
                 # 4. Validate contents: real key files, two different keys
@@ -2432,13 +2432,13 @@ def register_routes(app):
             # ?check=1: say what each file is, change nothing (the modal shows it first)
             if request.args.get('check'):
                 shutil.rmtree(temp_dir)
-                what = {'nostr.yaml': 'Nostr identity', 'wallet-link.yaml': 'Wallet link'}
+                what = {'nostr.yaml': 'Nostr key', 'wallet-link.yaml': 'Wallet link'}
                 for role, label in (('alias', 'Alias'), ('wallet', 'Wallet')):
                     what[uploaded[role]] = label
                     what[uploaded[role] + '.bak'] = label + ' (spare copy)'
                     what[uploaded[role][:-len('.yaml')] + '.scripts.json'] = label + ' payment channels'
                 order = ['Alias', 'Wallet', 'Alias (spare copy)', 'Wallet (spare copy)',
-                         'Alias payment channels', 'Wallet payment channels', 'Nostr identity', 'Wallet link']
+                         'Alias payment channels', 'Wallet payment channels', 'Nostr key', 'Wallet link']
                 return jsonify({'ok': True, 'files': [
                     {'name': name, 'role': what[name]}
                     for name in sorted(file_names, key=lambda n: order.index(what[n]))]})
@@ -2535,7 +2535,7 @@ def register_routes(app):
                     except Exception as rollback_error:
                         logger.error(f"Rollback failed: {rollback_error}")
                         return jsonify({
-                            'error': f'Import failed AND rollback failed: {str(e)}. Backup at: {backup_dir}',
+                            'error': f'Restore failed AND rollback failed: {str(e)}. Backup at: {backup_dir}',
                             'rolled_back': False
                         }), 500
 
@@ -2565,7 +2565,7 @@ def register_routes(app):
 
             return jsonify({
                 'success': True,
-                'message': 'Wallet imported successfully. Container restarting...',
+                'message': 'Wallet restored successfully. Container restarting...',
                 'backup_location': str(backup_dir)
             })
 

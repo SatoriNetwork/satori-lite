@@ -337,7 +337,7 @@
                 <th>Rank</th>
                 <th>Predictor</th>
                 <th class="text-end">Predictions</th>
-                <th class="text-end">Total Earned (sats)</th>
+                <th class="text-end">Total Rewards (sats)</th>
               </tr>
             </thead>
             <tbody id="leaderboardTable">
@@ -635,7 +635,7 @@ async function joinBounty(streamName, providerPubkey, hostPubkey) {
     });
     const data = await resp.json();
     if (data.error) { showAlert(data.error); return; }
-    showAlert('Joined. Your neuron will now predict this stream.', 'success');
+    showAlert('Joined. Satori Lite will now predict this stream.', 'success');
     loadBrowse();
   } catch(e) {
     showAlert('Failed to join: ' + e);
@@ -655,7 +655,7 @@ async function leaveBounty(streamName, providerPubkey, hostPubkey) {
     });
     const data = await resp.json();
     if (data.error) { showAlert(data.error); return; }
-    showAlert('Left bounty. Your neuron will no longer submit predictions to this host.', 'success');
+    showAlert('Left bounty. Satori Lite will no longer submit predictions to this host.', 'success');
     loadBrowse();
   } catch(e) {
     showAlert('Failed to leave: ' + e);
