@@ -1,5 +1,5 @@
 """
-The words Satori Lite's pages show follow the Satori app's glossary, its docs/words.md.
+The words the neuron's pages show follow the Satori app's glossary, its docs/words.md.
 
 Each template's visible text (text nodes, and the placeholder, title, aria-label
 and alt attributes) is read without its scripts, styles, comments, Jinja tags or
@@ -26,10 +26,8 @@ NEVER = {
     'wallet pubkey': r'\bwallet pubkeys?\b',
     'Download Wallet': r'\bdownload wallet\b',
     'Import Wallet': r'\bimport wallet\b',
-    'Satori Neuron': r'\bsatori neuron\b',
-    'Neuron Dashboard': r'\bneuron dashboard\b',
-    # The product is Satori Lite; "neurons" (plural) still names other people's, such as workers.
-    'neuron for the product': r'\bneuron\b',
+    # This is the Satori Neuron; the browser is the Satori app. Nothing is "Satori Lite".
+    'Satori Lite': r'\bsatori lite\b',
     'stake to': r'\b(stake[ds]?|staking)\s+to\b',
     'Pool Staking': r'\bpool staking\b',
     'stake / predict on Base': r'\b(stake[ds]?|staking|predicts?|predicting)\s+on\s+base\b',

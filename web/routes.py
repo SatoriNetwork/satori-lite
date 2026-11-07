@@ -1520,7 +1520,7 @@ def register_routes(app):
             whose = 'alias' if (request.get_json(silent=True) or {}).get('key') == 'alias' else 'wallet'
             signer = wallet_manager.alias if whose == 'alias' else wallet_manager.wallet
             if signer is None:
-                return jsonify({'error': 'This app has no alias.'}), 400
+                return jsonify({'error': 'This neuron has no alias.'}), 400
             claimer = _base_claimer()
             status = claimer.airdrop_status(signer.ethAddress)
             if status['claimable'] <= 0:

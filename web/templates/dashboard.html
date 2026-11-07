@@ -1620,9 +1620,9 @@
     <header class="dash-hero">
         <div class="dash-hero-title">
             <span class="dash-hero-eyebrow">Overview</span>
-            <h1 class="dash-hero-h1">Satori Lite <span class="dash-accent">Dashboard</span></h1>
+            <h1 class="dash-hero-h1">Neuron <span class="dash-accent">Dashboard</span></h1>
             <p class="dash-hero-sub">
-                Your wallet and rewards on Base, and the health of this app at a glance.
+                Your wallet and rewards on Base, and the health of your neuron at a glance.
             </p>
         </div>
     </header>
@@ -1738,7 +1738,7 @@
                     <div class="claim-row" id="aliasAirdropRow" hidden>
                         <div class="claim-what">
                             <div class="claim-name">Alias airdrop</div>
-                            <div class="claim-note">The snapshot share held by the alias, this app's signing address. Claimed to the alias.</div>
+                            <div class="claim-note">The snapshot share held by the alias, this neuron's signing address. Claimed to the alias.</div>
                         </div>
                         <div class="claim-amount"><strong id="aliasAirdropClaimable">…</strong>SATORI</div>
                         <button class="btn btn-primary btn-sm claim-btn" id="aliasAirdropBtn" onclick="doClaimAirdrop('alias')">Claim</button>
@@ -1859,7 +1859,7 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="material-icons align-middle me-2" style="font-size: 20px; color: var(--text-primary); opacity: 0.5;">monitor_heart</i>
-                        Satori Lite Monitoring
+                        Neuron Monitoring
                     </h5>
                     <div class="d-flex align-items-center gap-2">
                         <small class="text-muted" id="systemStatsLastUpdate">Waiting for data...</small>
@@ -2358,7 +2358,7 @@
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
                 const text = await response.text();
-                throw new Error(`Satori Lite returned a non-JSON response: ${text.substring(0, 100)}`);
+                throw new Error(`The neuron returned a non-JSON response: ${text.substring(0, 100)}`);
             }
 
             const result = await response.json();
@@ -4921,8 +4921,8 @@
         try {
             const r = await fetch('/api/wallet/import?check=1', { method: 'POST', body: formData });
             data = await r.json().catch(() => ({}));
-            if (!r.ok || !data.ok) { iwError(data.error || 'Satori Lite could not read it.'); return; }
-        } catch (e) { iwError('Could not reach Satori Lite: ' + e.message); return; }
+            if (!r.ok || !data.ok) { iwError(data.error || 'The neuron could not read it.'); return; }
+        } catch (e) { iwError('Could not reach the neuron: ' + e.message); return; }
         iwUpload = files;
         const list = document.getElementById('iwFilesList');
         list.innerHTML = '';
@@ -4981,7 +4981,7 @@
                 resultDiv.style.display = 'block';
 
                 importBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:0.85rem;height:0.85rem;border-width:0.15em;"></span> Restarting…';
-                showToast('Wallet restored. Satori Lite is restarting.');
+                showToast('Wallet restored. The neuron is restarting.');
 
                 // Auto-redirect after 15 seconds
                 setTimeout(() => {
