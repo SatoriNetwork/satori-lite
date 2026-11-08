@@ -343,28 +343,11 @@ def chooseAdapter(self):
 
 ### Model Training Loop
 
-**File:** `engine-lite/engine.py:1070-1124`
+**Files:** `engine-lite/engine.py` (`run_forever`, `_single_training_iteration`), `engine-lite/satoriengine/veda/training/queue_manager.py`
 
-Each model runs in its own thread:
+Streams train one at a time. `run_forever` puts each stream's model on one shared queue, `TrainingQueueManager`, served by a single worker thread; StarterAdapter and TimesFmAdapter streams are not queued, as they do not train. The worker takes the next stream (once more than 500 MB of memory is free) and runs one iteration: choose the adapter, fit a pilot model, and if it beats the stable model and saves, it becomes the stable one. Then the worker waits the training delay (at least 5 s) and puts the stream back at the end of the queue. An iteration still running after an hour is abandoned and the queue moves on. (`run()` is the old loop, one thread per model, kept for compatibility.)
 
-```python
-def run(self):
-    while len(self.data) > 0:
-        # 1. Choose best adapter
-        self.chooseAdapter(inplace=True)
-
-        # 2. Train pilot model
-        trainingResult = self.pilot.fit(data=self.data, stable=self.stable)
-
-        # 3. Compare to stable model
-        if self.pilot.compare(self.stable):
-            # 4. Save if better
-            if self.pilot.save(self.modelPath()):
-                self.stable = copy.deepcopy(self.pilot)
-
-        # 5. Sleep before next iteration
-        time.sleep(self.trainingDelay)  # Default: 600 seconds (10 min)
-```
+**Training delay:** `training_delay` in the neuron's config, in seconds, default 600 (`_loadTrainingDelay`). The Training menu's "Training frequency" slider sets it: position p (0-100) is 86400 x (1 - p/100)^7 seconds, so 24 h at the left, about 11 min in the middle and 0 ("Continuous", which the queue holds to 5 s) at the right (`sliderToSeconds` in `web/templates/partials/navbar.html`). The slider posts `{"delay_seconds": n}` to `POST /api/engine/training-delay`, which takes 0-86400, needs login, saves the config and updates every running stream model; `GET` on the same path returns the current value.
 
 **Model Path:** `/Satori/Neuron/models/veda/<predictionStreamUuid>/<AdapterName>.joblib`
 
