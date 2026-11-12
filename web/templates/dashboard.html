@@ -184,7 +184,8 @@
     .base-addr { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.75rem; }
     .base-addr code { flex: 1; min-width: 0; font-size: 0.82rem; color: var(--text-primary); background: none; padding: 0; }
     .base-mm { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border-color); }
-    .base-mm-title { font-weight: 600; font-size: 0.88rem; color: var(--text-primary); margin-bottom: 0.4rem; }
+    .base-mm-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.4rem; }
+    .base-mm-title { font-weight: 600; font-size: 0.88rem; color: var(--text-primary); }
     .base-steps { list-style: none; counter-reset: step; padding: 0; margin: 0; }
     .base-steps > li {
         counter-increment: step;
@@ -1759,7 +1760,7 @@
             </div>
         </div>
 
-        <!-- SATORI on Base Card: balance, gas, address, MetaMask steps -->
+        <!-- SATORI on Base Card: balance, gas, address, wallet (Satori GO / MetaMask) steps -->
         <div class="col-12 col-lg-6 dashboard-widget-col" data-widget-id="base" draggable="true">
             <div class="card h-100 d-flex flex-column">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -1797,10 +1798,16 @@
                     </div>
 
                     <div class="base-mm">
-                        <div class="base-mm-title">See it in MetaMask</div>
+                        <div class="base-mm-head">
+                            <div class="base-mm-title">See it in your wallet</div>
+                            <div class="bal-tabs" role="group" aria-label="Wallet">
+                                <button type="button" class="bal-tab" data-wallet="satorigo" onclick="pickWallet('satorigo')">Satori GO</button>
+                                <button type="button" class="bal-tab" data-wallet="metamask" onclick="pickWallet('metamask')">MetaMask</button>
+                            </div>
+                        </div>
                         <ol class="base-steps">
                             <li>
-                                <span>In MetaMask choose Import account and paste your wallet key</span>
+                                <span id="walletImportStep">In Satori GO choose Import private key, pick Base and paste your wallet key</span>
                                 <div class="base-step-extra">
                                     <div class="keyslip is-masked" id="baseKeySlip">
                                         <span class="keyslip-prefix">0x</span>
@@ -1819,8 +1826,8 @@
                             </li>
                             <li>
                                 <span>Add the SATORI token</span>
-                                <button class="btn btn-sm btn-primary" id="addToMetaMaskBtn" onclick="addSatoriToMetaMask()">Add to MetaMask</button>
-                                <div class="base-step-extra small" id="metaMaskStatus" style="display:none;"></div>
+                                <button class="btn btn-sm btn-primary" id="addToWalletBtn" onclick="addSatoriToWallet()">Add to Satori GO</button>
+                                <div class="base-step-extra small" id="walletAddStatus" style="display:none;"></div>
                             </li>
                         </ol>
                     </div>
@@ -2867,9 +2874,9 @@
         }
     }
 
-    // ── Base / MetaMask ──────────────────────────────────────────
+    // ── Base / browser wallets ──────────────────────────────────────────
     // The wallet key is also its Base key: `/wallet/base` returns the wallet's EVM
-    // address (where rewards land) and the 0x-hex key MetaMask imports, plus
+    // address (where rewards land) and the 0x-hex key a wallet imports, plus
     // the SATORI-on-Base token + network params for wallet_watchAsset.
     let baseTokenInfo = null;
     let _baseKeyLoaded = null;
@@ -2938,29 +2945,75 @@
         setTimeout(() => { btn.classList.remove('is-done'); icon.textContent = 'content_copy'; }, 1500);
     }
 
-    async function addSatoriToMetaMask() {
-        const status = document.getElementById('metaMaskStatus');
-        const show = (msg, ok) => {
+    // Browser wallets for SATORI on Base. Each is found by its EIP-6963
+    // announcement (so the right one answers when both are installed), falling
+    // back to window.ethereum when it is that wallet.
+    const WALLETS = {
+        satorigo: {
+            name: 'Satori GO', rdns: 'io.satorinet.go', site: 'satorigo.app',
+            is: (p) => !!p.isSatoriGO,
+            importStep: 'In Satori GO choose Import private key, pick Base and paste your wallet key',
+        },
+        metamask: {
+            name: 'MetaMask', rdns: 'io.metamask', site: 'metamask.io',
+            is: (p) => !!p.isMetaMask && !p.isSatoriGO,
+            importStep: 'In MetaMask choose Import account and paste your wallet key',
+        },
+    };
+    const _announcedWallets = {};
+    window.addEventListener('eip6963:announceProvider', (e) => {
+        const d = e.detail;
+        if (d && d.info && d.provider) _announcedWallets[d.info.rdns] = d.provider;
+    });
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+    function walletProvider(w) {
+        if (_announcedWallets[w.rdns]) return _announcedWallets[w.rdns];
+        return window.ethereum && w.is(window.ethereum) ? window.ethereum : null;
+    }
+
+    let _walletChoice = 'satorigo';
+    try { if (WALLETS[localStorage.getItem('satori.baseWallet')]) _walletChoice = localStorage.getItem('satori.baseWallet'); } catch (e) {}
+
+    function pickWallet(key) {
+        _walletChoice = key;
+        try { localStorage.setItem('satori.baseWallet', key); } catch (e) {}
+        const w = WALLETS[key];
+        document.querySelectorAll('.base-mm-head .bal-tab').forEach((b) => {
+            const on = b.dataset.wallet === key;
+            b.classList.toggle('bal-tab-active', on);
+            b.setAttribute('aria-pressed', String(on));
+        });
+        document.getElementById('walletImportStep').textContent = w.importStep;
+        document.getElementById('addToWalletBtn').textContent = 'Add to ' + w.name;
+        document.getElementById('walletAddStatus').style.display = 'none';
+    }
+    pickWallet(_walletChoice);
+
+    async function addSatoriToWallet() {
+        const w = WALLETS[_walletChoice];
+        const status = document.getElementById('walletAddStatus');
+        const show = (msg, ok, link) => {
             status.style.display = 'block';
-            status.textContent = msg;
             status.className = 'base-step-extra small ' + (ok ? 'text-success' : 'text-danger');
+            status.textContent = msg;
+            if (link) {
+                const a = document.createElement('a');
+                a.href = 'https://' + link; a.target = '_blank'; a.rel = 'noopener'; a.textContent = link;
+                status.append(' Get it at ', a, ', then reload this page.');
+            }
         };
-        if (!window.ethereum) {
-            show('MetaMask not detected. Install the MetaMask browser extension, then reload this page.', false);
-            return;
-        }
+        const eth = walletProvider(w);
+        if (!eth) { show(w.name + ' not found in this browser.', false, w.site); return; }
         const t = baseTokenInfo;
         if (!t) { show('Token info is still loading. Try again in a moment.', false); return; }
         try {
             // Make sure the Base network is present and selected before adding the token.
             try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: t.chainIdHex }],
-                });
+                await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: t.chainIdHex }] });
             } catch (switchErr) {
-                if (switchErr && switchErr.code === 4902) {
-                    await window.ethereum.request({
+                if (switchErr && switchErr.code === 4902 && _walletChoice === 'metamask') {
+                    await eth.request({
                         method: 'wallet_addEthereumChain',
                         params: [{
                             chainId: t.chainIdHex,
@@ -2972,14 +3025,17 @@
                     });
                 } else { throw switchErr; }
             }
-            await window.ethereum.request({
+            // Satori GO lists SATORI on Base by default and answers true.
+            const added = await eth.request({
                 method: 'wallet_watchAsset',
                 params: { type: 'ERC20', options: {
                     address: t.address, symbol: t.symbol, decimals: t.decimals } },
             });
-            show('SATORI added to MetaMask on ' + t.chainName + '. Your balance shows there.', true);
+            if (added === false) { show('SATORI was not added in ' + w.name + '.', false); return; }
+            show('SATORI on ' + t.chainName + ' is in ' + w.name + '. Your balance shows there.', true);
         } catch (err) {
-            show('MetaMask request failed: ' + (err && err.message ? err.message : err), false);
+            if (err && err.code === 4001) { show('Cancelled in ' + w.name + '.', false); return; }
+            show(w.name + ' request failed: ' + (err && err.message ? err.message : err), false);
         }
     }
 
@@ -5328,7 +5384,7 @@
             // Health check disabled to reduce API load
             // checkHealth();
             loadWalletAddresses();
-            loadBaseWallet();  // Base/EVM address + token info for MetaMask
+            loadBaseWallet();  // Base/EVM address + token info for the browser wallet
             loadBaseBalances();  // SATORI and ETH on Base, wallet and predicting wallet
             loadClaimable();  // Base reward claim amount
             loadAirdrop();  // Base airdrop claim amount
