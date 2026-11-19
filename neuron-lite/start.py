@@ -1920,6 +1920,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'sender signature failed to verify against stored pubkey',
                 color='red')
             return
+        if not self._channelPaysAsStated(commitment, channel):
+            logging.warning(
+                f'Channel: rejecting commitment for {commitment.p2sh_address} — '
+                f'its transaction does not pay what it states',
+                color='red')
+            return
         try:
             commitment_json = commitment.to_json()
             await asyncio.to_thread(
@@ -1971,6 +1977,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if not commitment_json:
             raise ValueError(f'No pending commitment for channel: {p2sh_address}')
         commitment = ChannelCommitment.from_json(commitment_json)
+        if not self._channelPaysAsStated(commitment, channel):
+            raise ValueError(
+                f'The pending commitment for {p2sh_address} does not pay what '
+                f'it states, so it is not claimed.')
         from evrmore.core import (
             CMutableTransaction, CMutableTxIn, CMutableTxOut, COutPoint, lx, Hash160)
         from evrmore.core.script import (
@@ -2582,6 +2592,36 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(
                 f'Channel: signature verification errored for '
+                f'{getattr(commitment, "p2sh_address", "?")}: {e}')
+            return False
+
+    def _channelPaysAsStated(self, commitment, channel: dict) -> bool:
+        """Whether the partial tx pays what the commitment states.
+
+        The sender's signature covers the tx, not the commitment's numbers, so
+        the tx's outputs must be exactly the ones sendChannelPayment builds:
+        locked − remainder SATORI to the receiver, then any remainder back to
+        the channel. A commitment that pays nothing is refused too.
+        """
+        try:
+            from evrmore.core import CMutableTransaction
+            locked = int(channel['locked_sats'])
+            paid = locked - int(commitment.remainder_sats)
+            if paid <= 0:
+                return False
+            expected = self.alias._compileSatoriOutputs({
+                EvrmoreWallet.generateAddress(channel['receiver_pubkey']): paid})
+            change = self.alias._compileSatoriChangeOutput(
+                satoriSats=paid, gatheredSatoriSats=locked,
+                changeAddress=channel['p2sh_address'])
+            expected += [change] if change else []
+            tx = CMutableTransaction.deserialize(
+                bytes.fromhex(commitment.partial_tx_hex))
+            return ([(o.nValue, bytes(o.scriptPubKey)) for o in tx.vout]
+                    == [(o.nValue, bytes(o.scriptPubKey)) for o in expected])
+        except Exception as e:
+            logging.warning(
+                f'Channel: could not check the outputs of the commitment for '
                 f'{getattr(commitment, "p2sh_address", "?")}: {e}')
             return False
 
