@@ -369,7 +369,7 @@
             position: absolute;
             top: -160px;
             left: 5%;
-            width: 55vmax;
+            width: min(55vmax, 95%);  /* never past the screen's right edge */
             height: 300px;
             background: radial-gradient(
                 ellipse 60% 80% at 50% 50%,
@@ -386,7 +386,7 @@
             position: absolute;
             top: -140px;
             right: 8%;
-            width: 45vmax;
+            width: min(45vmax, 92%);
             height: 280px;
             background: radial-gradient(
                 ellipse 60% 80% at 50% 50%,
