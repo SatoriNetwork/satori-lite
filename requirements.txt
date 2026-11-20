@@ -23,14 +23,7 @@ joblib==1.2.0
 # AI Engine - Machine Learning
 xgboost==1.7.2
 scikit-learn>=1.5.0
-lightgbm>=4.5.0
-catboost>=1.2.7
 statsmodels>=0.14.4
-skforecast>=0.13.0
-pmdarima>=2.0.4
-linear-tree>=0.3.5
-sktime>=0.33.1
-optuna>=4.0.0
 
 # AI Engine - Deep Learning (optional, for advanced models)
 # torch (CPU wheel) + timesfm==2.0.1 are installed in the Dockerfile in a

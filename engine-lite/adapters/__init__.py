@@ -1,5 +1,4 @@
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
-# from satoriengine.veda.adapters.sktime import SKAdapter
 from satoriengine.veda.adapters.starter import StarterAdapter
 from satoriengine.veda.adapters.xgboost import XgbAdapter
 
@@ -20,5 +19,3 @@ try:
     from satoriengine.veda.adapters.timesfm import TimesFmAdapter
 except ImportError:
     TimesFmAdapter = None
-
-# from satoriengine.veda.adapters.tinytimemixer import SimpleTTMAdapter

@@ -112,7 +112,7 @@ Either variant should also key on `adapter_class` so an in-flight adapter upgrad
 
 **Change.** Ladder is read off the profile:
 - **fast / medium**: `[Starter, ETS, XGB]` — cheap first, heavier only when budget allows.
-- **slow**: `[Starter, ZeroShot (Chronos/TTM), ETS]` — pretrained zero-shot adapters work with very few points and avoid the "min 10 rows" cliff. Wake the existing scaffolds at `adapters/xgbchronos/` and `adapters/tinytimemixer/` whose `condition()` is currently `0.0`.
+- **slow**: `[Starter, ZeroShot (Chronos/TTM), ETS]` — pretrained zero-shot adapters work with very few points and avoid the "min 10 rows" cliff. Wake the existing scaffold at `adapters/xgbchronos/`, whose `condition()` is currently `0.0`; the TinyTimeMixer one went unused (git log -- engine-lite/adapters/tinytimemixer keeps it).
 
 ### B.7 Cadence-derived seasonality / lag features
 
@@ -254,7 +254,7 @@ Live container telemetry (post-prototype, B.3 reverted): ETS fits cost ~10–60m
 | Training queue | `engine-lite/satoriengine/veda/training/queue_manager.py` | B.2, B.3, B.10 |
 | Adapter interface | `engine-lite/adapters/interface.py` | B.4, B.8 |
 | Per-adapter `update()` opt-in | `engine-lite/adapters/xgboost/xgb.py`, `engine-lite/adapters/ets/ets_model.py` | B.4 |
-| Wake zero-shot adapters | `engine-lite/adapters/xgbchronos/chronos_adapter.py`, `engine-lite/adapters/tinytimemixer/simplettm.py` | B.6 |
+| Wake zero-shot adapters | `engine-lite/adapters/xgbchronos/chronos_adapter.py` | B.6 |
 | Backtest harness | `engine-lite/engine.py` (new module) | B.5, B.11 |
 | Feature cache | `engine-lite/adapters/*` + `engine-lite/storage/` | B.12 |
 | Telemetry | `engine-lite/engine.py`, `queue_manager.py` | B.13 |

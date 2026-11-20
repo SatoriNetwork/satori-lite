@@ -1,1 +1,0 @@
-from satoriengine.veda.adapters.tinytimemixer.simplettm import SimpleTTMAdapter

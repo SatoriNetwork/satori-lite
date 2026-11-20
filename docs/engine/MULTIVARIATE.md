@@ -66,7 +66,6 @@ main obstacle. Verified hooks:
 | `EngineStorageManager.getInstance()` is a process-wide singleton; `StreamStore` is thread-safe (`RLock`) and exposes `history()`, `stream_uuids()`, `row_count()` | `storage/manager.py:25` | The adapter can self-serve peer data at call time |
 | Adapters are constructed with the target uuid: `self.adapter(uid=self.streamUuid)` | `engine.py:608, 620` | No `fit`/`predict` call-site changes needed to know "who am I" |
 | `TimesFmAdapter` holds one shared resident model behind class-level locks | `adapters/timesfm/timesfm_adapter.py:30-32` | The multivariate adapter reuses it, never loads its own copy |
-| A `MultivariateAdapter` stub already exists (unimplemented) | `adapters/multivariate/multivariate.py` | Natural home; registry key reserved by convention |
 | `XgbAdapter.merge(dfs, targetColumn)` sketches multi-frame `merge_asof` alignment ("Layer 1", with TODOs about combining sources) | `adapters/xgboost/xgb.py:400` | The alignment idea is pre-sanctioned; needs a staleness tolerance added |
 | Cross-stream/global models are already proposed as future work | `IMPROVEMENTS.md` section C.9 | This doc is the concrete first step |
 | Registering an adapter auto-exposes it in the web settings UI via `VALID_ADAPTER_CHOICES` | `engine.py:58`, `web/routes.py` | Opt-in with zero UI changes |
@@ -142,7 +141,7 @@ Feature schema v1, kept deliberately small for thin data:
 
 ### 3.4 Adapter architecture
 
-New opt-in adapter implementing the existing stub. Nothing enters
+New opt-in adapter. Nothing enters
 `AUTO_ADAPTERS`; the univariate XGB default path is untouched.
 
 **Files (when implemented):**
@@ -151,8 +150,8 @@ New opt-in adapter implementing the existing stub. Nothing enters
 |---|---|
 | `adapters/multivariate/heads.py` | NEW: pluggable head (`Head` interface + `XgbHead` + `HEAD_REGISTRY`) |
 | `adapters/multivariate/features.py` | NEW: `alignPeers`, `selectPeers`, `buildTrainingMatrix`, `buildInferenceRow` (pure functions, unit-testable) |
-| `adapters/multivariate/multivariate.py` | REWRITE the stub (its `condition()` logic is currently inverted) |
-| `adapters/multivariate/__init__.py` | FIX: currently imports `StarterAdapter` (copy-paste bug) |
+| `adapters/multivariate/multivariate.py` | NEW: `MultivariateAdapter` |
+| `adapters/multivariate/__init__.py` | NEW: exports it |
 | `adapters/__init__.py` | guarded optional import, same pattern as TimesFM |
 | `engine.py` | two lines: import + `ADAPTER_REGISTRY['multivariate']` |
 | `satoriengine/stream_store.py` | one method: `count_streams_with_min_rows(min_rows)` (single `GROUP BY ... HAVING` query) |
@@ -654,7 +653,7 @@ opt-in until it proves itself.
    correlation-on-deltas vs levels, and the section 5.5 data-quality guards
    (NaN corr, inf clamping, near-duplicate exclusion, duplicate timestamps,
    future-timestamp drop, winsorization).
-2. **Adapter + wiring.** Rewrite the stub, fix the `__init__.py` bug, registry
+2. **Adapter + wiring.** The adapter and its `__init__.py`, registry
    entry, config keys, `count_streams_with_min_rows`. Lifecycle checks:
    `copy.deepcopy(fitted_adapter)` works, joblib save -> load round trip,
    `load` refuses wrong schema.

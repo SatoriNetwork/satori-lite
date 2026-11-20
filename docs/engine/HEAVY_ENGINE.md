@@ -29,8 +29,6 @@ save(modelPath) → bool
 | **StarterAdapter** | `adapters/starter/starter_model.py` | ≤ 10 rows | 25 MB | Also selected when RAM < 25MB regardless of data size |
 | **XgbAdapter** | `adapters/xgboost/xgb.py` | > 10 rows | 25 MB | Also selected when CPU = 1 |
 | **XgbChronosAdapter** | `adapters/xgbchronos/xgb_chronos.py` | 20–1000 rows | 100 MB | Adds Chronos predictions as features |
-| **SKAdapter** | `adapters/sktime/sk.py` | 1000–10000 rows | 100 MB | Requires CPU > 4 |
-| **SimpleTTMAdapter** | `adapters/tinytimemixer/simplettm.py` | < 10 rows | 100 MB | TinyTimeMixer-based |
 
 ### Selection Logic (`chooseAdapter()` — engine.py:1133-1182)
 

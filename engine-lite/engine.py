@@ -1257,14 +1257,6 @@ class StreamModel:
             f'{self.adapter.__name__}.joblib')
 
     def chooseAdapter(self, inplace: bool = False) -> ModelAdapter:
-        """
-        everything can try to handle some cases
-        Engine
-            - low resources available - SKAdapter
-            - few observations - SKAdapter
-            - (mapping of cases to suitable adapters)
-        examples: StartPipeline, SKAdapter, XGBoostPipeline, ChronosPipeline, DNNPipeline
-        """
         # TODO: this needs to be aultered. I think the logic is not right. we
         #       should gather a list of adapters that can be used in the
         #       current condition we're in. if we're already using one in that
