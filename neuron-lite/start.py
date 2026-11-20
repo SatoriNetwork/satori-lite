@@ -9,7 +9,6 @@ import threading
 import hashlib
 import yaml
 from satorilib.concepts.structs import StreamId, Stream
-from satorilib.concepts import constants
 from satorilib.wallet import EvrmoreWallet
 from satorilib.server import SatoriServerClient
 from satorineuron import logging
@@ -4638,7 +4637,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.info("in WALLETONLYMODE")
             startWebUI(self, port=self.uiPort)  # Start web UI after sync
             return
-        self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
@@ -4668,7 +4666,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 logging.info(f"Server connected recently, waiting {wait_minutes:.1f} minutes")
                 time.sleep(wait_minutes * 60)
         self.recordServerConnection()
-        self.setMiningMode()
         self.createServerConn()
         self.authWithCentral()
         self.setRewardAddress(globally=True)  # Sync reward address with server
@@ -4926,33 +4923,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             if time.time() > restartTime:
                 self.triggerRestart()
             time.sleep(random.randint(60 * 60, 60 * 60 * 4))
-
-    def performStakeCheck(self):
-        self.stakeStatus = self.server.stakeCheck()
-        return self.stakeStatus
-
-    def setMiningMode(self, miningMode: Union[bool, None] = None):
-        miningMode = (
-            miningMode
-            if isinstance(miningMode, bool)
-            else config.get().get('mining mode', True))
-        self.miningMode = miningMode
-        config.add(data={'mining mode': self.miningMode})
-        if hasattr(self, 'server') and self.server is not None:
-            self.server.setMiningMode(miningMode)
-        return self.miningMode
-
-    # Removed setInvitedBy - central-lite doesn't use referrer system
-
-    def poolAccepting(self, status: bool):
-        success, result = self.server.poolAccepting(status)
-        if success:
-            self.poolIsAccepting = status
-        return success, result
-
-    @property
-    def stakeRequired(self) -> float:
-        return constants.stakeRequired
 
 
 def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601):

@@ -93,7 +93,6 @@ class StartupDagStruct(object):
         self.publications: list[Stream] = None
         self.subscriptions: list[Stream] = None
         self.udpQueue: Queue  # TODO: remove
-        self.stakeStatus: bool = False
 
     def cacheOf(self, streamId: StreamId):
         ''' returns the reference to the cache of a stream '''
@@ -164,9 +163,6 @@ class StartupDagStruct(object):
 
     def unpause(self):
         ''' pause the engine. '''
-
-    def performStakeCheck(self):
-        ''' check the stake status '''
 
     def addWorkingUpdate(self, data: str):
         ''' tell ui we are working on something '''
