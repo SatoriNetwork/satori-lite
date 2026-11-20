@@ -1,26 +1,14 @@
-import sys
-from pathlib import Path
+"""The neuron's local relay: the files its embedded strfry runs on, and the
+settings page that shows its state."""
+import json
+import os
+import re
+import subprocess
 from unittest.mock import patch
 
-HERE = Path(__file__).resolve()
-REPO_ROOT = HERE.parents[1]
-CANDIDATE_PATHS = [
-    REPO_ROOT,
-    REPO_ROOT / 'neuron-lite',
-    REPO_ROOT.parent / 'satorilib' / 'src',
-    Path('/Satori'),
-    Path('/Satori/Neuron'),
-    Path('/Satori/Lib'),
-    Path('/Satori/Lib/satorilib/src'),
-]
-
-for candidate in CANDIDATE_PATHS:
-    if candidate.exists():
-        sys.path.insert(0, str(candidate))
-
 from satorineuron.relay_manager import LocalRelayManager
+from web import routes
 from web.app import create_app
-from web.routes import _session_wallets, set_startup
 
 
 class DummyStartup:
@@ -73,10 +61,26 @@ def test_public_strfry_conf_has_open_write():
     assert 'port = 7777' in conf
 
 
-def test_private_strfry_conf_uses_policy_plugin():
-    manager = LocalRelayManager(DummyStartup())
-    conf = manager._render_strfry_conf('private', 'Relay', 'Desc')
-    assert 'plugin = "/app/write-policy.py"' in conf
+def test_private_relay_runs_the_policy_written_beside_its_conf(tmp_path, monkeypatch):
+    """The private relay's conf names, as strfry's write policy plugin, the
+    file the manager writes in the mode's folder; run as strfry runs it, it
+    takes the owner's events and refuses a stranger's stream."""
+    monkeypatch.setattr(LocalRelayManager, '_mode_dir', lambda self, mode: tmp_path / mode)
+    LocalRelayManager(DummyStartup())._write_mode_assets('private')
+    conf = (tmp_path / 'private' / 'strfry.conf').read_text()
+    plugin = re.search(r'plugin = "(.+)"', conf).group(1)
+    assert plugin == str(tmp_path / 'private' / 'write-policy.py')
+    assert os.access(plugin, os.X_OK)
+
+    def answer_to(pubkey):
+        event = {'id': 'e1', 'pubkey': pubkey, 'kind': 34600, 'tags': [['d', 'a-stream']]}
+        ran = subprocess.run(
+            [plugin], input=json.dumps({'type': 'new', 'event': event, 'sourceType': 'IP4'}) + '\n',
+            capture_output=True, text=True, timeout=30)
+        return json.loads(ran.stdout)['action']
+
+    assert answer_to(DummyStartup.nostrPubkey) == 'accept'
+    assert answer_to('0' * 64) == 'reject'
 
 
 def test_private_policy_contains_owner_pubkey_and_owned_stream_guard():
@@ -117,27 +121,27 @@ def test_docker_candidate_endpoints_respect_env_and_common_paths():
     assert 'unix:///var/run/docker.sock' in endpoints
 
 
-def test_settings_page_renders_for_logged_in_session():
-    set_startup(DummyStartup())
-    app = create_app(testing=True)
-    client = app.test_client()
+def test_settings_page_shows_the_local_relay_as_its_manager_reports_it():
+    """/settings shows a logged-in session the local relay's state from the
+    manager's status: the ports, the advertised hosts and the URLs made of
+    them, the last event and the last health check."""
+    client = create_app(testing=True).test_client()
     with client.session_transaction() as sess:
         sess['session_id'] = 'test-session'
         sess['wallet_open'] = True
-    _session_wallets['test-session'] = DummyWalletManager()
-    try:
+    with patch.dict(routes._session_wallets, {'test-session': DummyWalletManager()}), \
+            patch.object(routes, 'get_startup', return_value=DummyStartup()):
         resp = client.get('/settings')
-        assert resp.status_code == 200
-        assert b'Network Settings' in resp.data
-        assert b'Public Relay' in resp.data
-        assert b'Private Relay' in resp.data
-        assert b'Public Relay Port' in resp.data
-        assert b'Private Relay Port' in resp.data
-        assert b'Relay Off' in resp.data
-        assert b'changing this now requires recreating the neuron container' in resp.data
-        assert b'Advertised Host / Domain' in resp.data
-        assert b'Last Relay Event' in resp.data
-        assert b'Last Health Check' in resp.data
-        assert b'relayDockerHelpBox' in resp.data
-    finally:
-        _session_wallets.pop('test-session', None)
+    assert resp.status_code == 200
+    page = resp.get_data(as_text=True)
+    for shown in (
+            f'id="relayNostrPubkey">{DummyStartup.nostrPubkey}<',
+            'id="relayPublicPortInput" value="7777"',
+            'id="relayPrivatePortInput" value="7171"',
+            'id="relayPublicHostInput" value="testnet.satorinet.io"',
+            'id="relayPrivateHostInput" value="relay.testnet.satorinet.io"',
+            'id="relayPublicUrl">ws://testnet.satorinet.io:7777<',
+            'id="relayPrivateUrl">ws://relay.testnet.satorinet.io:7171<',
+            'id="relayLastEvent">2026-03-24T11:00:00Z<',
+            'id="relayLastHealth">2026-03-24T11:01:00Z<'):
+        assert shown in page
