@@ -62,35 +62,25 @@ def test_get_challenge_fallback_on_missing_challenge_field(client_instance, mock
 
 
 @pytest.mark.unit
-def test_make_authenticated_call_headers_generation(client_instance, mock_response, test_alias):
-    """Test _makeAuthenticatedCall() generates correct authentication headers."""
-    challenge = "test-challenge-123"
-    # NOTE: the real key class exposes 'pubkey', NOT 'publicKey'
-    expected_auth_payload = {
-        "alias-pubkey": test_alias.pubkey,
-        "message": challenge,
-        "signature": "test_signature"
-    }
-
-    # Mock the alias's authPayload method
-    test_alias.authPayload.return_value = expected_auth_payload
+def test_make_authenticated_call_headers_generation(client_instance, mock_response, test_server_url):
+    """Test _makeAuthenticatedCall() logs in once and sends the JWT it was given."""
+    mock_response.json.return_value = {
+        "access_token": "access", "refresh_token": "refresh", "expires_in": 3600}
 
     with patch('requests.post', return_value=mock_response) as mock_post:
-        client_instance._makeAuthenticatedCall(
-            function=requests.post,
-            endpoint="/test/endpoint",
-            challenge=challenge
-        )
+        for _ in range(2):
+            client_instance._makeAuthenticatedCall(
+                function=requests.post,
+                endpoint="/test/endpoint"
+            )
 
-    # Verify the call was made with correct headers
-    mock_post.assert_called_once()
-    call_kwargs = mock_post.call_args[1]
-
-    assert "headers" in call_kwargs
-    headers = call_kwargs["headers"]
-    assert "alias-pubkey" in headers
-    assert "message" in headers
-    assert "signature" in headers
+    # One login, then each call with the token alone
+    assert [call[0][0] for call in mock_post.call_args_list] == [
+        test_server_url + "/api/v1/auth/login",
+        test_server_url + "/test/endpoint",
+        test_server_url + "/test/endpoint"]
+    for call in mock_post.call_args_list[1:]:
+        assert call[1]["headers"] == {"Authorization": "Bearer access"}
 
 
 @pytest.mark.unit
@@ -105,11 +95,10 @@ def test_make_authenticated_call_with_payload(client_instance, mock_response):
             payload=payload
         )
 
-    # Verify payload was passed (as JSON string since dict is serialized)
+    # A dict payload goes out as its JSON string, declared as JSON
     call_kwargs = mock_post.call_args[1]
-    assert "json" in call_kwargs
-    # Payload is serialized to JSON string by _makeAuthenticatedCall
-    assert call_kwargs["json"] == json.dumps(payload)
+    assert call_kwargs["data"] == json.dumps(payload)
+    assert call_kwargs["headers"]["Content-Type"] == "application/json"
 
 
 @pytest.mark.unit
@@ -117,11 +106,6 @@ def test_make_authenticated_call_raises_on_error(client_instance, mock_response)
     """Test _makeAuthenticatedCall() raises exception on HTTP error."""
     mock_response.status_code = 401
     mock_response.text = "Unauthorized"
-
-    def raise_error():
-        raise requests.exceptions.HTTPError("401 Unauthorized")
-
-    mock_response.raise_for_status = raise_error
 
     with patch('requests.post', return_value=mock_response):
         with pytest.raises(requests.exceptions.HTTPError):
@@ -146,28 +130,6 @@ def test_make_authenticated_call_no_raise_when_disabled(client_instance, mock_re
         )
 
     assert response.status_code == 500
-
-
-@pytest.mark.unit
-def test_make_authenticated_call_uses_custom_challenge(client_instance, mock_response, test_alias):
-    """Test _makeAuthenticatedCall() uses provided challenge instead of fetching new one."""
-    custom_challenge = "custom-challenge-xyz"
-
-    with patch('requests.post', return_value=mock_response):
-        with patch.object(client_instance, '_getChallenge') as mock_get_challenge:
-            client_instance._makeAuthenticatedCall(
-                function=requests.post,
-                endpoint="/test",
-                challenge=custom_challenge
-            )
-
-            # Should NOT call _getChallenge since challenge was provided
-            mock_get_challenge.assert_not_called()
-
-    # Verify the alias was called with the custom challenge
-    test_alias.authPayload.assert_called()
-    call_kwargs = test_alias.authPayload.call_args[1]
-    assert call_kwargs.get('challenge') == custom_challenge
 
 
 @pytest.mark.unit

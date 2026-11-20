@@ -105,12 +105,14 @@ def mock_response():
 
     Note: Prefer using real server responses in integration tests.
     """
-    from unittest.mock import MagicMock, Mock
+    from unittest.mock import MagicMock, Mock, PropertyMock
 
     response = MagicMock()
     response.status_code = 200
     response.text = '{"message": "success"}'
     response.json.return_value = {"message": "success"}
+    # ok follows status_code, as requests.Response.ok does
+    type(response).ok = PropertyMock(side_effect=lambda: response.status_code < 400)
 
     def raise_for_status():
         if response.status_code >= 400:

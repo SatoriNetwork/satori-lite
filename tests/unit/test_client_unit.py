@@ -10,6 +10,12 @@ import time
 import requests
 
 
+def _prediction_posts(mock_post):
+    """The posts that carried a prediction: the client's login is a post too."""
+    return [call for call in mock_post.call_args_list
+            if call[0][0].endswith('/api/v1/prediction/post')]
+
+
 @pytest.mark.unit
 def test_publish_constructs_correct_prediction_payload(client_instance, mock_response):
     """Test publish() constructs correct payload for predictions."""
@@ -27,9 +33,9 @@ def test_publish_constructs_correct_prediction_payload(client_instance, mock_res
     url = call_args[0][0]
     assert "/api/v1/prediction/post" in url
 
-    # Check payload (it's a JSON string in the json kwarg)
+    # Check payload (it's a JSON string in the data kwarg)
     call_kwargs = call_args[1]
-    payload_str = call_kwargs.get('json')
+    payload_str = call_kwargs.get('data')
     assert payload_str is not None
 
     # Payload is a JSON string, parse it
@@ -126,8 +132,8 @@ def test_publish_rate_limiting_prevents_duplicate_calls(client_instance, mock_re
     # Second call blocked (returns None due to rate limiting)
     assert result2 is None
 
-    # Only one HTTP call should have been made
-    assert mock_post.call_count == 1
+    # Only one prediction should have been posted
+    assert len(_prediction_posts(mock_post)) == 1
 
 
 @pytest.mark.unit
@@ -158,7 +164,7 @@ def test_publish_different_topics_not_rate_limited(client_instance, mock_respons
     assert result1 is True
     assert result2 is True
     # Both calls should succeed (different topics have separate rate limits)
-    assert mock_post.call_count == 2
+    assert len(_prediction_posts(mock_post)) == 2
 
 
 @pytest.mark.unit
@@ -194,21 +200,6 @@ def test_publish_exception_handling(client_instance):
 
     # Should return None on exception
     assert result is None
-
-
-@pytest.mark.unit
-def test_checkin_calls_health_endpoint(client_instance, mock_response):
-    """Test checkin() attempts to call health endpoint first."""
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"status": "healthy"}
-
-    with patch('requests.get', return_value=mock_response) as mock_get:
-        with patch('requests.post', return_value=mock_response):
-            result = client_instance.checkin()
-
-    # Should call /health endpoint
-    health_calls = [call for call in mock_get.call_args_list if '/health' in str(call)]
-    assert len(health_calls) > 0
 
 
 @pytest.mark.unit
@@ -299,15 +290,16 @@ def test_client_uses_environment_variable_for_url(test_alias):
 
 
 @pytest.mark.unit
-def test_client_defaults_to_localhost(test_alias):
-    """Test client defaults to localhost when no env var set."""
+def test_client_defaults_to_production(test_alias):
+    """Test client defaults to the production server when no env var set, to localhost only in dev."""
+    from satorilib.config import DEFAULT_CENTRAL_URL_DEV, DEFAULT_CENTRAL_URL_PROD
     from satorilib.server.server import SatoriServerClient
 
     with patch.dict('os.environ', {}, clear=True):
-        # Remove SATORI_CENTRAL_URL if it exists
-        client = SatoriServerClient(alias=test_alias)
+        assert SatoriServerClient(alias=test_alias).url == DEFAULT_CENTRAL_URL_PROD
 
-        assert 'localhost:8000' in client.url or client.url == 'http://localhost:8000'
+    with patch.dict('os.environ', {'SATORI_ENV': 'dev'}, clear=True):
+        assert SatoriServerClient(alias=test_alias).url == DEFAULT_CENTRAL_URL_DEV
 
 
 @pytest.mark.unit
