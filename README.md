@@ -83,10 +83,8 @@ deployments.
 - **Concepts**: Canonical data structures for streams, observations, and
   related domain objects.
 - **Transports**: Nostr-based datastream pub/sub
-  (`satorilib.satori_nostr`), Centrifugo client, websockets, and additional
-  experimental transports.
+  (`satorilib.satori_nostr`).
 - **Persistence**: SQLite helpers, on-disk caching, and file utilities.
-- **Asynchronous**: Thread and task helpers used across the neuron.
 
 ### The alias and the wallet
 

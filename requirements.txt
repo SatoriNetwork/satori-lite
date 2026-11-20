@@ -49,7 +49,6 @@ coincurve>=20.0.0
 
 # Networking
 requests>=2.32.0
-websockets>=15.0.0
 # 0.45 is a FLOOR, not a preference: satorilib's nostr client was migrated to
 # the 0.45 API on 2026-08-18 and no longer runs on 0.44.x. Neuron reaches Nostr
 # through satorilib rather than directly, so it has no call sites of its own to
@@ -67,9 +66,6 @@ cryptography>=44.0.0
 
 # IP address validation
 ipaddress>=1.0.0
-
-# Centrifugo real-time messaging
-centrifuge-python>=0.4.1
 
 # Optional: Telemetry logging
 # Uncomment lines below to enable telemetry
