@@ -8,108 +8,36 @@ Tests _networkReconcile which handles:
 - Marking stale: streams not found anywhere get marked stale
 - Relay fallback: uses known relays when central server is unavailable
 
-Uses the same import strategy as test_network_pipeline.py: mock heavy
-dependencies, import real StartupDag, create instances via object.__new__.
+Uses the same import strategy as test_network_pipeline.py: the real
+StartupDag with only the AI engine stubbed, instances via object.__new__.
 """
 
 import asyncio
-import importlib.util
-import json
 import os
 import sys
 import tempfile
 import time
-import types
 import unittest.mock as mock
 
 import pytest
 
-# ── Import NetworkDB directly ───────────────────────────────────────
+from satorilib.satori_nostr.models import (
+    DatastreamMetadata, DatastreamObservation, InboundObservation)
+from satorineuron.network_db import NetworkDB
 
-_db_spec = importlib.util.spec_from_file_location(
-    'network_db',
-    os.path.join(os.path.dirname(__file__),
-                 '..', 'neuron-lite', 'satorineuron', 'network_db.py'))
-_db_mod = importlib.util.module_from_spec(_db_spec)
-_db_spec.loader.exec_module(_db_mod)
-NetworkDB = _db_mod.NetworkDB
+from tests.neuron_start import start
 
-# ── Import satori_nostr models directly ──────────────────────────────
-
-_models_path = os.path.join(
-    os.path.dirname(__file__),
-    '..', '..', 'satorilib', 'src', 'satorilib', 'satori_nostr', 'models.py')
-_models_spec = importlib.util.spec_from_file_location(
-    'satori_nostr_models', _models_path)
-_models_mod = importlib.util.module_from_spec(_models_spec)
-_models_spec.loader.exec_module(_models_mod)
-DatastreamMetadata = _models_mod.DatastreamMetadata
-DatastreamObservation = _models_mod.DatastreamObservation
-InboundObservation = _models_mod.InboundObservation
-
-# ── Mock heavy deps and import start.py ──────────────────────────────
-
-class _StubStartupDagStruct:
-    def __init__(self, *args, **kwargs):
-        pass
-
-_mock_satorilib = mock.MagicMock()
-_mock_satorineuron = mock.MagicMock()
-_mock_satoriengine = mock.MagicMock()
-
-_mock_satorineuron.config.get.return_value = {}
-_mock_satorineuron.config.walletPath.return_value = '/tmp/_test_reconcile'
-_mock_satorineuron.config.dataPath.return_value = '/tmp/_test_reconcile'
-_mock_satorineuron.config.add = mock.MagicMock()
-_mock_satorineuron.structs.start.StartupDagStruct = _StubStartupDagStruct
-_mock_satorineuron.structs.start.RunMode = mock.MagicMock()
-
-_MOCK_MAP = {
-    'satorilib': _mock_satorilib,
-    'satorilib.concepts': _mock_satorilib.concepts,
-    'satorilib.concepts.structs': _mock_satorilib.concepts.structs,
-    'satorilib.concepts.constants': _mock_satorilib.concepts.constants,
-    'satorilib.wallet': _mock_satorilib.wallet,
-    'satorilib.wallet.evrmore': _mock_satorilib.wallet.evrmore,
-    'satorilib.wallet.evrmore.identity': _mock_satorilib.wallet.evrmore.identity,
-    'satorilib.server': _mock_satorilib.server,
-    'satorineuron': _mock_satorineuron,
-    'satorineuron.logging': _mock_satorineuron.logging,
-    'satorineuron.config': _mock_satorineuron.config,
-    'satorineuron.relay_manager': _mock_satorineuron.relay_manager,
-    'satorineuron.init': _mock_satorineuron.init,
-    'satorineuron.init.wallet': _mock_satorineuron.init.wallet,
-    'satorineuron.structs': _mock_satorineuron.structs,
-    'satorineuron.structs.start': _mock_satorineuron.structs.start,
-    'satoriengine': _mock_satoriengine,
-    'satoriengine.veda': _mock_satoriengine.veda,
-    'satoriengine.veda.engine': _mock_satoriengine.veda.engine,
-}
-
-for _name, _mod in _MOCK_MAP.items():
-    sys.modules[_name] = _mod
-
-_satori_nostr_mod = types.ModuleType('satorilib.satori_nostr')
-_satori_nostr_mod.SatoriNostr = mock.MagicMock()
-_satori_nostr_mod.SatoriNostrConfig = mock.MagicMock()
-sys.modules['satorilib.satori_nostr'] = _satori_nostr_mod
-sys.modules['satorilib.satori_nostr.models'] = _models_mod
-_mock_satorilib.satori_nostr = _satori_nostr_mod
-
-_start_dir = os.path.join(os.path.dirname(__file__), '..', 'neuron-lite')
-_start_spec = importlib.util.spec_from_file_location(
-    'start_module_reconcile',
-    os.path.join(_start_dir, 'start.py'))
-_start_mod = importlib.util.module_from_spec(_start_spec)
-_start_spec.loader.exec_module(_start_mod)
-StartupDag = _start_mod.StartupDag
+StartupDag = start.StartupDag
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 @pytest.fixture
-def harness():
+def harness(monkeypatch):
     """StartupDag with real NetworkDB, mock server, mock clients."""
+    # An empty config, whatever neuron-lite/config holds on this box.
+    monkeypatch.setattr(
+        start, 'config', mock.MagicMock(**{'get.return_value': {}}))
     with tempfile.TemporaryDirectory() as tmpdir:
         h = object.__new__(StartupDag)
         h.networkDB = NetworkDB(os.path.join(tmpdir, 'test.db'))

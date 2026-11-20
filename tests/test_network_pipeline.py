@@ -3,13 +3,12 @@
 Tests the async methods in StartupDag that handle observation processing,
 freshness checking, data source fetching, engine, and publishing.
 
-Strategy: Mock heavy dependencies (wallet, engine, config), import StartupDag
-to get the real method implementations. Create instances via object.__new__
-to skip __init__, then manually set just the attributes needed for testing.
+Strategy: import start.py for StartupDag's real methods, with only the AI
+engine stubbed. Create instances via object.__new__ to skip __init__, then
+manually set just the attributes needed for testing.
 """
 
 import asyncio
-import importlib.util
 import json
 import os
 import sys
@@ -20,108 +19,27 @@ import unittest.mock as mock
 
 import pytest
 
-# ── Step 1: Import NetworkDB directly (skip __init__.py chain) ───────
+from satorilib.satori_nostr.models import (
+    DatastreamMetadata, DatastreamObservation, InboundObservation)
+from satorineuron.network_db import NetworkDB
 
-_db_spec = importlib.util.spec_from_file_location(
-    'network_db',
-    os.path.join(os.path.dirname(__file__),
-                 '..', 'neuron-lite', 'satorineuron', 'network_db.py'))
-_db_mod = importlib.util.module_from_spec(_db_spec)
-_db_spec.loader.exec_module(_db_mod)
-NetworkDB = _db_mod.NetworkDB
+from tests.neuron_start import start
 
-
-# ── Step 2: Import satori_nostr models directly (pure dataclasses) ───
-
-_models_path = os.path.join(
-    os.path.dirname(__file__),
-    '..', '..', 'satorilib', 'src', 'satorilib', 'satori_nostr', 'models.py')
-_models_spec = importlib.util.spec_from_file_location(
-    'satori_nostr_models', _models_path)
-_models_mod = importlib.util.module_from_spec(_models_spec)
-_models_spec.loader.exec_module(_models_mod)
-DatastreamMetadata = _models_mod.DatastreamMetadata
-DatastreamObservation = _models_mod.DatastreamObservation
-InboundObservation = _models_mod.InboundObservation
-
-
-# ── Step 3: Mock heavy deps and import start.py ─────────────────────
-
-# Stub base class (must be a real type for class inheritance)
-class _StubStartupDagStruct:
-    def __init__(self, *args, **kwargs):
-        pass
-
-
-# Create parent mock objects so attribute chains are consistent
-_mock_satorilib = mock.MagicMock()
-_mock_satorineuron = mock.MagicMock()
-_mock_satoriengine = mock.MagicMock()
-
-# Wire up config mock with needed return values
-_mock_satorineuron.config.get.return_value = {}
-_mock_satorineuron.config.walletPath.return_value = '/tmp/_test_pipeline'
-_mock_satorineuron.config.dataPath.return_value = '/tmp/_test_pipeline'
-_mock_satorineuron.config.add = mock.MagicMock()
-
-# Wire up StartupDagStruct as a real class
-_mock_satorineuron.structs.start.StartupDagStruct = _StubStartupDagStruct
-_mock_satorineuron.structs.start.RunMode = mock.MagicMock()
-
-# Install mock modules in sys.modules
-_MOCK_MAP = {
-    'satorilib': _mock_satorilib,
-    'satorilib.concepts': _mock_satorilib.concepts,
-    'satorilib.concepts.structs': _mock_satorilib.concepts.structs,
-    'satorilib.concepts.constants': _mock_satorilib.concepts.constants,
-    'satorilib.wallet': _mock_satorilib.wallet,
-    'satorilib.wallet.evrmore': _mock_satorilib.wallet.evrmore,
-    'satorilib.wallet.evrmore.identity': _mock_satorilib.wallet.evrmore.identity,
-    'satorilib.server': _mock_satorilib.server,
-    'satorineuron': _mock_satorineuron,
-    'satorineuron.logging': _mock_satorineuron.logging,
-    'satorineuron.config': _mock_satorineuron.config,
-    'satorineuron.init': _mock_satorineuron.init,
-    'satorineuron.init.wallet': _mock_satorineuron.init.wallet,
-    'satorineuron.structs': _mock_satorineuron.structs,
-    'satorineuron.structs.start': _mock_satorineuron.structs.start,
-    'satorineuron.relay_manager': mock.MagicMock(),
-    'satorineuron.lite_engine': mock.MagicMock(),
-    'satoriengine': _mock_satoriengine,
-    'satoriengine.veda': _mock_satoriengine.veda,
-    'satoriengine.veda.engine': _mock_satoriengine.veda.engine,
-}
-
-for _name, _mod in _MOCK_MAP.items():
-    sys.modules[_name] = _mod
-
-# Provide real satori_nostr models for deferred imports inside methods
-_satori_nostr_mod = types.ModuleType('satorilib.satori_nostr')
-_satori_nostr_mod.SatoriNostr = mock.MagicMock()
-_satori_nostr_mod.SatoriNostrConfig = mock.MagicMock()
-sys.modules['satorilib.satori_nostr'] = _satori_nostr_mod
-sys.modules['satorilib.satori_nostr.models'] = _models_mod
-_mock_satorilib.satori_nostr = _satori_nostr_mod
-
-# Import start.py to get the real StartupDag class
-_start_dir = os.path.join(os.path.dirname(__file__), '..', 'neuron-lite')
-_start_spec = importlib.util.spec_from_file_location(
-    'start_module',
-    os.path.join(_start_dir, 'start.py'))
-_start_mod = importlib.util.module_from_spec(_start_spec)
-_start_spec.loader.exec_module(_start_mod)
-StartupDag = _start_mod.StartupDag
+StartupDag = start.StartupDag
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 @pytest.fixture
-def harness():
+def harness(monkeypatch):
     """Create a StartupDag instance with real NetworkDB and mock clients.
 
     Uses object.__new__ to skip __init__ (which needs wallet, config, etc.),
     then manually sets just the attributes the pipeline methods need.
     """
+    # An empty config, whatever neuron-lite/config holds on this box.
+    monkeypatch.setattr(
+        start, 'config', mock.MagicMock(**{'get.return_value': {}}))
     with tempfile.TemporaryDirectory() as tmpdir:
         h = object.__new__(StartupDag)
         h.networkDB = NetworkDB(os.path.join(tmpdir, 'test.db'))
@@ -129,6 +47,9 @@ def harness():
         h._networkClients = {}
         h._networkSubscribed = {}
         h._networkListeners = {}
+        # No engine: a prediction echoes its observation (_networkRunEngine's
+        # fallback). A test of a forecast sets _relayPredict.
+        h.ensureEngine = lambda: None
         yield h
 
 
@@ -284,7 +205,7 @@ class TestRunEngine:
         assert preds[0]['published'] == 1
 
     def test_echo_engine_preserves_value(self, harness):
-        """Engine echoes exact observation value as prediction."""
+        """With no forecast, the prediction is the exact observation value."""
         self._setup_prediction(harness)
         obs_data = DatastreamObservation(
             stream_name='btc-price',
