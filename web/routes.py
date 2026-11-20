@@ -2540,7 +2540,7 @@ def register_routes(app):
     @app.route('/api/settings/relay/status', methods=['GET'])
     @login_required
     def api_settings_relay_status():
-        """Return status for the locally managed relay sidecars."""
+        """Return status for the locally managed relay."""
         return jsonify(build_local_relay_status_payload())
 
     @app.route('/api/settings/relay/mode', methods=['POST'])

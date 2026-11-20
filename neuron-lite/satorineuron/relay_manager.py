@@ -1,35 +1,17 @@
-import io
-import json
 import os
 import shutil
 import signal
 import socket
 import subprocess
-import tarfile
-import tempfile
 import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from satorineuron import config
 from satorineuron import logging
-
-try:
-    import docker
-    from docker.errors import DockerException, NotFound
-except Exception:  # pragma: no cover - handled in migration paths
-    docker = None
-
-    class DockerException(Exception):
-        pass
-
-    class NotFound(Exception):
-        pass
-
 
 RELAY_MODES = {"off", "public", "private"}
 DEFAULT_PUBLIC_PORT = 7777
@@ -37,16 +19,6 @@ DEFAULT_PRIVATE_PORT = 7171
 STARTUP_WAIT_SECONDS = 10
 STOP_WAIT_SECONDS = 8
 DEFAULT_STRFRY_BIN = '/usr/local/bin/strfry'
-
-
-@dataclass(frozen=True)
-class RelayNames:
-    mode: str
-    process_name: str
-    legacy_network: str
-    legacy_strfry: str
-    legacy_nginx: str
-    legacy_db_volume: str
 
 
 class LocalRelayManager:
@@ -90,50 +62,6 @@ class LocalRelayManager:
             return ''
         host = str(value).strip()
         return host.strip('/')
-
-    def _docker_candidate_endpoints(self) -> list[str]:
-        endpoints = []
-        docker_host = os.environ.get('DOCKER_HOST', '').strip()
-        if docker_host:
-            endpoints.append(docker_host)
-        docker_npipe = os.environ.get('SATORI_DOCKER_NPIPE', '').strip()
-        if docker_npipe:
-            endpoints.append(docker_npipe)
-        if os.name == 'nt':
-            endpoints.append('npipe:////./pipe/docker_engine')
-        for socket_path in (
-            os.environ.get('SATORI_DOCKER_SOCKET'),
-            '/var/run/docker.sock',
-            '/run/docker.sock',
-            f"/run/user/{os.getuid()}/docker.sock",
-            '/run/podman/podman.sock',
-        ):
-            if not socket_path:
-                continue
-            socket_path = str(socket_path).strip()
-            if not socket_path or not os.path.exists(socket_path):
-                continue
-            endpoints.append(f'unix://{socket_path}')
-        deduped = []
-        seen = set()
-        for endpoint in endpoints:
-            if endpoint in seen:
-                continue
-            seen.add(endpoint)
-            deduped.append(endpoint)
-        return deduped
-
-    def _docker_client_optional(self):
-        if docker is None:
-            return None
-        for endpoint in self._docker_candidate_endpoints():
-            try:
-                client = docker.DockerClient(base_url=endpoint, version='auto')
-                client.ping()
-                return client
-            except Exception:
-                continue
-        return None
 
     def desired_mode(self) -> str:
         self._refresh_ports()
@@ -265,9 +193,6 @@ class LocalRelayManager:
             color='blue')
         other_mode = 'private' if mode == 'public' else 'public'
         self._stop_mode_process(other_mode)
-        self._stop_legacy_mode(mode)
-        self._stop_legacy_mode(other_mode)
-        self._migrate_legacy_db_if_needed(mode)
         self._write_mode_assets(mode)
         self._start_mode_process(mode)
         status = self.status()
@@ -282,8 +207,6 @@ class LocalRelayManager:
         stopped_any = False
         stopped_any |= bool(self._stop_mode_process('public'))
         stopped_any |= bool(self._stop_mode_process('private'))
-        stopped_any |= bool(self._stop_legacy_mode('public'))
-        stopped_any |= bool(self._stop_legacy_mode('private'))
         self._last_status = 'off'
         self._last_error = None
         if stopped_any:
@@ -325,9 +248,6 @@ class LocalRelayManager:
 
     def _pid_path(self, mode: str) -> Path:
         return self._mode_dir(mode) / 'strfry.pid'
-
-    def _migration_marker_path(self, mode: str) -> Path:
-        return self._mode_dir(mode) / 'migration.json'
 
     def _runtime_port(self, mode: str) -> int:
         return self.default_public_port if mode == 'public' else self.default_private_port
@@ -514,137 +434,8 @@ class LocalRelayManager:
                 continue
         return None
 
-    def _names(self, mode: str) -> RelayNames:
-        return RelayNames(
-            mode=mode,
-            process_name=self._mode_process_name(mode),
-            legacy_network=f'{self._base_name}-{mode}-net',
-            legacy_strfry=f'{self._base_name}-{mode}-strfry',
-            legacy_nginx=f'{self._base_name}-{mode}-nginx',
-            legacy_db_volume=f'{self._base_name}-{mode}-db',
-        )
-
-    def _stop_legacy_mode(self, mode: str) -> bool:
-        client = self._docker_client_optional()
-        if client is None:
-            return False
-        removed_any = False
-        names = self._names(mode)
-        try:
-            for container_name in (names.legacy_nginx, names.legacy_strfry):
-                try:
-                    container = client.containers.get(container_name)
-                    container.remove(force=True)
-                    removed_any = True
-                    logging.info(
-                        f'Relay: removed legacy {mode} sidecar {container_name}',
-                        color='yellow')
-                except NotFound:
-                    pass
-            try:
-                network = client.networks.get(names.legacy_network)
-                network.remove()
-                removed_any = True
-            except NotFound:
-                pass
-            except DockerException as exc:
-                logging.warning(f'Relay: could not remove legacy network {names.legacy_network}: {exc}')
-        finally:
-            client.close()
-        return removed_any
-
-    def _migrate_legacy_db_if_needed(self, mode: str) -> bool:
-        db_dir = self._db_dir(mode)
-        marker = self._migration_marker_path(mode)
-        if marker.exists():
-            return False
-        if db_dir.exists() and any(db_dir.iterdir()):
-            marker.write_text(json.dumps({'migrated_from': 'existing-local-db'}))
-            return False
-        client = self._docker_client_optional()
-        if client is None:
-            return False
-        try:
-            for volume_name in self._legacy_volume_candidates(mode):
-                if not self._volume_exists(client, volume_name):
-                    continue
-                self._copy_volume_tree(client, volume_name, db_dir)
-                marker.write_text(json.dumps({
-                    'migrated_from': volume_name,
-                    'migrated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-                }, indent=2))
-                logging.info(
-                    f'Relay: migrated embedded {mode} DB from legacy volume {volume_name}',
-                    color='green')
-                return True
-        finally:
-            client.close()
-        return False
-
-    def _legacy_volume_candidates(self, mode: str) -> list[str]:
-        names = self._names(mode)
-        if mode == 'public':
-            candidates = [names.legacy_db_volume, 'satori-relay_strfry-db']
-        else:
-            # Prefer the long-lived dedicated 7171 relay volume over the
-            # later sidecar-private volume, which may be empty in migrated installs.
-            candidates = ['satori-relay-7171_strfry-db', names.legacy_db_volume]
-        deduped = []
-        seen = set()
-        for candidate in candidates:
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            deduped.append(candidate)
-        return deduped
-
-    @staticmethod
-    def _volume_exists(client, volume_name: str) -> bool:
-        try:
-            client.volumes.get(volume_name)
-            return True
-        except NotFound:
-            return False
-        except DockerException:
-            return False
-
-    def _copy_volume_tree(self, client, volume_name: str, target_dir: Path) -> None:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        helper = client.containers.create(
-            'alpine:latest',
-            command=['sh', '-lc', 'sleep 60'],
-            volumes={volume_name: {'bind': '/src', 'mode': 'ro'}},
-        )
-        tar_path = None
-        extract_dir = None
-        try:
-            helper.start()
-            stream, _ = helper.get_archive('/src')
-            fd, tar_path = tempfile.mkstemp(prefix='relay-volume-', suffix='.tar')
-            os.close(fd)
-            with open(tar_path, 'wb') as handle:
-                for chunk in stream:
-                    handle.write(chunk)
-            extract_dir = Path(tempfile.mkdtemp(prefix='relay-extract-'))
-            with tarfile.open(tar_path) as archive:
-                archive.extractall(path=extract_dir)
-            roots = [child for child in extract_dir.iterdir()]
-            source_root = roots[0] if len(roots) == 1 and roots[0].is_dir() else extract_dir
-            if target_dir.exists():
-                shutil.rmtree(target_dir)
-            shutil.copytree(source_root, target_dir)
-        finally:
-            try:
-                helper.remove(force=True)
-            except Exception:
-                pass
-            if tar_path and os.path.exists(tar_path):
-                os.unlink(tar_path)
-            if extract_dir and extract_dir.exists():
-                shutil.rmtree(extract_dir, ignore_errors=True)
-
     def _write_mode_assets(self, mode: str) -> None:
-        root = self._ensure_mode_dir(mode)
+        self._ensure_mode_dir(mode)
         relay_name = f'Satori {mode.capitalize()} Relay'
         relay_description = (
             'A Satori Network relay managed by Satori Lite '

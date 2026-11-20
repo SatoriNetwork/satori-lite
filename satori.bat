@@ -25,9 +25,6 @@ set BASE_PORT=24601
 if not defined SATORI_RELAY_PUBLIC_BASE_PORT set SATORI_RELAY_PUBLIC_BASE_PORT=7777
 if not defined SATORI_RELAY_PRIVATE_BASE_PORT set SATORI_RELAY_PRIVATE_BASE_PORT=7171
 
-set RELAY_DOCKER_MOUNT_ARGS=
-set RELAY_DOCKER_ENV_ARGS=
-
 :: Parse "local" flag first
 set "ARG1=%~1"
 if /i "%ARG1%"=="local" (
@@ -59,9 +56,6 @@ set PUBLIC_RELAY_PORT=%SATORI_RELAY_PUBLIC_PORT%
 set PRIVATE_RELAY_PORT=%SATORI_RELAY_PRIVATE_PORT%
 set DATA_DIR=%cd%\%INSTANCE%
 
-:: Detect Docker socket access for relay sidecars
-call :detect_relay_docker_access
-
 :: Help
 if "%CMD%"=="--help" goto :help
 if "%CMD%"=="-h" goto :help
@@ -74,26 +68,6 @@ if "%CMD%"=="logs" goto :logs
 if "%CMD%"=="status" goto :status
 if "%CMD%"=="" goto :cli
 goto :unknown
-
-:detect_relay_docker_access
-    if defined SATORI_DOCKER_SOCKET (
-        set RELAY_DOCKER_MOUNT_ARGS=-v %SATORI_DOCKER_SOCKET%:/var/run/docker.sock
-        set RELAY_DOCKER_ENV_ARGS=-e DOCKER_HOST=unix:///var/run/docker.sock
-        exit /b 0
-    )
-    if defined DOCKER_HOST (
-        set RELAY_DOCKER_ENV_ARGS=-e DOCKER_HOST=%DOCKER_HOST%
-        exit /b 0
-    )
-    :: Try default Docker Desktop named pipe
-    if exist "\\.\pipe\docker_engine" (
-        set RELAY_DOCKER_MOUNT_ARGS=-v //./pipe/docker_engine://./pipe/docker_engine
-        set RELAY_DOCKER_ENV_ARGS=-e DOCKER_HOST=npipe:////./pipe/docker_engine
-        exit /b 0
-    )
-    set RELAY_DOCKER_MOUNT_ARGS=
-    set RELAY_DOCKER_ENV_ARGS=
-    exit /b 1
 
 :create_data_dirs
     if not exist "%DATA_DIR%\config" mkdir "%DATA_DIR%\config"
@@ -125,17 +99,20 @@ goto :unknown
     set API_URL_ARG=
     if defined SATORI_API_URL set API_URL_ARG=-e SATORI_API_URL=%SATORI_API_URL%
 
+    :: The relay ran as nginx and strfry sidecar containers until 040e8dc; their
+    :: nginx would hold the public relay port, so they go before the run.
+    docker rm -f satori-local-relay-%PORT%-public-nginx satori-local-relay-%PORT%-public-strfry satori-local-relay-%PORT%-private-nginx satori-local-relay-%PORT%-private-strfry >nul 2>&1
+    docker network rm satori-local-relay-%PORT%-public-net satori-local-relay-%PORT%-private-net >nul 2>&1
+
     docker run -d --name %CONTAINER_NAME% ^
         --restart unless-stopped ^
         -p %UI_PUBLISH% ^
         -p %PUBLIC_RELAY_PORT%:%PUBLIC_RELAY_PORT% ^
         -p %PRIVATE_RELAY_PORT%:%PRIVATE_RELAY_PORT% ^
-        %RELAY_DOCKER_MOUNT_ARGS% ^
         -e SATORI_ENV=%SATORI_ENV% ^
         -e SATORI_UI_PORT=%PORT% ^
         -e SATORI_RELAY_PUBLIC_PORT=%PUBLIC_RELAY_PORT% ^
         -e SATORI_RELAY_PRIVATE_PORT=%PRIVATE_RELAY_PORT% ^
-        %RELAY_DOCKER_ENV_ARGS% ^
         %CENTRAL_URL_ARG% ^
         %API_URL_ARG% ^
         -v "%DATA_DIR%\config:/Satori/Neuron/config" ^
@@ -162,8 +139,6 @@ echo Environment overrides:
 echo   SATORI_FORCE_ENV   Force container SATORI_ENV (e.g. prod)
 echo   SATORI_CENTRAL_URL Override central URL
 echo   SATORI_API_URL     Alias override for central URL
-echo   SATORI_DOCKER_SOCKET Override Docker socket path for relay sidecars
-echo   DOCKER_HOST        Pass Docker endpoint through to the container relay manager
 echo   SATORI_UI_BIND     Address the web UI port opens on (127.0.0.1: only this
 echo                      machine and SSH tunnels reach it)
 echo.

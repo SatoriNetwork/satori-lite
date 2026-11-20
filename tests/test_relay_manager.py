@@ -84,35 +84,6 @@ def test_private_policy_contains_owner_pubkey_and_owned_stream_guard():
     assert 'foreign pubkey may not publish non-prediction streams' in policy
 
 
-def test_names_are_deterministic_per_mode():
-    manager = LocalRelayManager(DummyStartup())
-    public = manager._names('public')
-    private = manager._names('private')
-    assert public.process_name.endswith('-public-embedded-strfry')
-    assert private.legacy_strfry.endswith('-private-strfry')
-    assert public.legacy_network != private.legacy_network
-
-
-def test_docker_candidate_endpoints_respect_env_and_common_paths():
-    manager = LocalRelayManager(DummyStartup())
-    with patch.dict('os.environ', {
-        'DOCKER_HOST': 'tcp://docker.example.internal:2375',
-        'SATORI_DOCKER_SOCKET': '/custom/docker.sock',
-        'SATORI_DOCKER_NPIPE': 'npipe:////./pipe/docker_engine',
-    }, clear=False), patch(
-        'os.path.exists',
-        side_effect=lambda path: path in {
-            '/custom/docker.sock',
-            '/var/run/docker.sock',
-        },
-    ):
-        endpoints = manager._docker_candidate_endpoints()
-    assert endpoints[0] == 'tcp://docker.example.internal:2375'
-    assert 'npipe:////./pipe/docker_engine' in endpoints
-    assert 'unix:///custom/docker.sock' in endpoints
-    assert 'unix:///var/run/docker.sock' in endpoints
-
-
 def test_settings_page_shows_the_local_relay_as_its_manager_reports_it():
     """/settings shows a logged-in session the local relay's state from the
     manager's status: the ports, the advertised hosts and the URLs made of
