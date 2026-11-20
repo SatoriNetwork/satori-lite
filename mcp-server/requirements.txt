@@ -1,0 +1,4 @@
+# Dependencies for the Satori neuron MCP server (run where your AI runs, not
+# baked into the neuron runtime).
+mcp>=1.2.0
+requests>=2.31.0

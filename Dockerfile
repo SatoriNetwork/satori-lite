@@ -39,6 +39,30 @@ COPY --from=satorilib src/satorilib /Satori/Lib/satorilib
 COPY neuron-lite /Satori/Neuron
 COPY engine-lite /Satori/Engine
 COPY web /Satori/web
+# Skills served by the neuron (e.g. the self-improvement skill at /api/skill)
+COPY skills /Satori/skills
+
+# Pristine baseline in repo layout + the build commit. The neuron diffs an
+# operator's live edits against this to produce repo-relative, base-pinned
+# patches for the self-improvement flow. Purely additive — it does not affect
+# the runtime layout above. CI should pass --build-arg SATORI_GIT_SHA=$(git rev-parse HEAD).
+ARG SATORI_GIT_SHA=""
+COPY neuron-lite /Satori/src/neuron-lite
+COPY engine-lite /Satori/src/engine-lite
+COPY web /Satori/src/web
+COPY skills /Satori/src/skills
+RUN printf '%s' "${SATORI_GIT_SHA}" > /Satori/BUILD_SHA
+
+# Baseline + build commit for the shared library (a separate repo). Lets the
+# neuron diff edits to /Satori/Lib/satorilib and route them to the satorilib
+# repo. CI should pass --build-arg SATORILIB_GIT_SHA=<satorilib HEAD>.
+ARG SATORILIB_GIT_SHA=""
+COPY --from=satorilib src/satorilib /Satori/src-lib/src/satorilib
+RUN printf '%s' "${SATORILIB_GIT_SHA}" > /Satori/SATORILIB_BUILD_SHA
+
+# MCP server source. Runs client-side (where the AI runs); shipped here for
+# discovery / docker cp. Not installed into the neuron runtime.
+COPY mcp-server /Satori/mcp-server
 
 # Copy requirements and install
 COPY requirements.txt /Satori/requirements.txt
