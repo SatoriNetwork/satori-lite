@@ -1,4 +1,4 @@
-from typing import Union, Optional, Callable
+from typing import Union, Optional
 import os
 import shutil
 import yaml
@@ -8,7 +8,6 @@ from satorilib.wallet.evrmore.identity import EvrmoreIdentity
 from satorilib.wallet.link import linkIsFor, makeLink
 from satorilib.electrumx.electrumx import Electrumx
 from satorineuron import config
-from satorineuron.common.structs import ConnectionTo
 
 
 class WalletManager:
@@ -29,7 +28,6 @@ class WalletManager:
         walletPassword: Optional[str] = None,
         cachePath: Optional[str] = None,
         peersCache: Optional[str] = None,
-        updateConnectionStatus: Optional[Callable] = None,
         useConfigPassword: bool = True,
         persistent: bool = False,
     ) -> 'WalletManager':
@@ -59,7 +57,7 @@ class WalletManager:
         WalletManager.performMigrationBackup(aliasPath)
         WalletManager.performMigrationBackup(walletPath)
         manager = WalletManager()
-        manager.setup(aliasPath, walletPath, walletPassword, createWallet, cachePath, peersCache, updateConnectionStatus, persistent)
+        manager.setup(aliasPath, walletPath, walletPassword, createWallet, cachePath, peersCache, persistent)
         return manager
 
     @staticmethod
@@ -72,7 +70,6 @@ class WalletManager:
         self._alias: Optional[EvrmoreWallet] = None
         self._wallet: Optional[EvrmoreWallet] = None
         self._electrumx: Optional[Electrumx] = None
-        self._updateConnectionStatus: Optional[Callable] = None
         self._walletPath: Optional[str] = None
         self._cachePath: Optional[str] = None
         self._peersCache: Optional[str] = None
@@ -86,14 +83,12 @@ class WalletManager:
         createWallet: bool,
         cachePath: Optional[str] = None,
         peersCache: Optional[str] = None,
-        updateConnectionStatus: Optional[Callable] = None,
         persistent: bool = False,
     ):
         # Store paths for later use
         self._walletPath = walletPath
         self._cachePath = cachePath
         self._peersCache = peersCache
-        self._updateConnectionStatus = updateConnectionStatus
         self._persistent = persistent
 
         self._initializeAlias(aliasPath, cachePath, peersCache)
@@ -266,15 +261,7 @@ class WalletManager:
                     self._alias.electrumx = self._electrumx
                 if self._wallet:
                     self._wallet.electrumx = self._electrumx
-                if self._updateConnectionStatus:
-                    self._updateConnectionStatus(
-                        connTo=ConnectionTo.electrumx,
-                        status=True)
                 return True
-            if self._updateConnectionStatus:
-                self._updateConnectionStatus(
-                    connTo=ConnectionTo.electrumx,
-                    status=False)
             return False
         except Exception as e:
             logging.error(f"Failed to establish Electrumx connection: {e}")
