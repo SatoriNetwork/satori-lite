@@ -8,32 +8,11 @@ Syncing (startup, and each time the dashboard reads it): the local copy mirrors
 what central answers, which is the Base address rewards are paid at, or none.
 An old Evrmore value kept locally is dropped, never re-posted.
 """
-import importlib.util
-import sys
-from pathlib import Path
 from unittest import mock
 
 import pytest
 
-_START = Path(__file__).parent.parent.parent / 'neuron-lite' / 'start.py'
-
-# start.py pulls in the AI engine; nothing here needs it. Stub only that, and
-# only while importing (patch.dict would also drop numpy & co., which can't be
-# imported twice).
-_engine = mock.MagicMock()
-_stubs = {
-    'satoriengine': _engine,
-    'satoriengine.veda': _engine.veda,
-    'satoriengine.veda.engine': _engine.veda.engine}
-_stubbed = [name for name in _stubs if name not in sys.modules]
-sys.modules.update({name: _stubs[name] for name in _stubbed})
-try:
-    _spec = importlib.util.spec_from_file_location('_start_reward_address', _START)
-    start = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(start)
-finally:
-    for name in _stubbed:
-        sys.modules.pop(name, None)
+from tests.neuron_start import start
 
 BASE = '0x2F66D2d1DfA3cbF191dd26394d3b241C90B57E74'
 OTHER = '0x9f505692808622fc1F0fbb53324262162C788762'

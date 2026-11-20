@@ -5,34 +5,11 @@ nothing, or less than it states, is refused although the sender's signature
 on it is good; and a claim refuses such a commitment an older version kept.
 The real StartupDag channel code with real keys; no network."""
 import asyncio
-import importlib.util
-import sys
 import time
-from pathlib import Path
-from unittest import mock
 
 import pytest
 
 pytest.importorskip('evrmore')
-
-_START = Path(__file__).parent.parent / 'neuron-lite' / 'start.py'
-
-# start.py pulls in the AI engine; nothing here needs it. Stub only that, and
-# only while importing (as tests/unit/test_reward_address.py does).
-_engine = mock.MagicMock()
-_stubs = {
-    'satoriengine': _engine,
-    'satoriengine.veda': _engine.veda,
-    'satoriengine.veda.engine': _engine.veda.engine}
-_stubbed = [name for name in _stubs if name not in sys.modules]
-sys.modules.update({name: _stubs[name] for name in _stubbed})
-try:
-    _spec = importlib.util.spec_from_file_location('_start_channel_commitment', _START)
-    start = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(start)
-finally:
-    for name in _stubbed:
-        sys.modules.pop(name, None)
 
 from evrmore.core import CMutableTransaction, CMutableTxIn, COutPoint, lx  # noqa: E402
 from satorilib.satori_nostr.models import (  # noqa: E402
@@ -40,6 +17,8 @@ from satorilib.satori_nostr.models import (  # noqa: E402
 from satorilib.wallet.evrmore.identity import EvrmoreIdentity  # noqa: E402
 from satorilib.wallet.evrmore.scripts.channels.lock import paymentChannel  # noqa: E402
 from satorineuron.network_db import NetworkDB  # noqa: E402
+
+from tests.neuron_start import start  # noqa: E402
 
 LOCKED = 100_000
 PAY = 1_000
