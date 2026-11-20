@@ -750,6 +750,23 @@ def register_routes(app):
         from satorineuron import VERSION
         return render_template('local_predictions.html', version=VERSION)
 
+    @app.route('/remote-access')
+    def remote_access():
+        """How to open this page from another computer: check the neuron's
+        certificate, or come through an SSH tunnel."""
+        from urllib.parse import urlsplit
+        from satorineuron import VERSION
+        port = int(request.environ.get('SERVER_PORT') or 24601)
+        host = urlsplit('//' + request.host).hostname or ''
+        if host in ('', 'localhost', '127.0.0.1', '::1'):
+            host = 'your-machine'
+        return render_template(
+            'remote_access.html',
+            version=VERSION,
+            port=port,
+            host=host,
+            instance=port - 24600 if 24601 <= port <= 24699 else 1)
+
     @app.route('/health')
     def health():
         """Health check endpoint - checks API server connectivity."""

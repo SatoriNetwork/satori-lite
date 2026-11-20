@@ -119,12 +119,15 @@ goto :unknown
     set CENTRAL_URL_ARG=
     if defined SATORI_CENTRAL_URL set CENTRAL_URL_ARG=-e SATORI_CENTRAL_URL=%SATORI_CENTRAL_URL%
 
+    set UI_PUBLISH=%PORT%:%PORT%
+    if defined SATORI_UI_BIND set UI_PUBLISH=%SATORI_UI_BIND%:%PORT%:%PORT%
+
     set API_URL_ARG=
     if defined SATORI_API_URL set API_URL_ARG=-e SATORI_API_URL=%SATORI_API_URL%
 
     docker run -d --name %CONTAINER_NAME% ^
         --restart unless-stopped ^
-        -p %PORT%:%PORT% ^
+        -p %UI_PUBLISH% ^
         -p %PUBLIC_RELAY_PORT%:%PUBLIC_RELAY_PORT% ^
         -p %PRIVATE_RELAY_PORT%:%PRIVATE_RELAY_PORT% ^
         %RELAY_DOCKER_MOUNT_ARGS% ^
@@ -161,6 +164,8 @@ echo   SATORI_CENTRAL_URL Override central URL
 echo   SATORI_API_URL     Alias override for central URL
 echo   SATORI_DOCKER_SOCKET Override Docker socket path for relay sidecars
 echo   DOCKER_HOST        Pass Docker endpoint through to the container relay manager
+echo   SATORI_UI_BIND     Address the web UI port opens on (127.0.0.1: only this
+echo                      machine and SSH tunnels reach it; see /remote-access)
 echo.
 echo Managed relay ports:
 echo   Public relay  base port: %SATORI_RELAY_PUBLIC_BASE_PORT%
@@ -187,12 +192,16 @@ echo   satori 2 stop       # Stop instance 2
 echo   satori local restart # Restart with local latest image
 echo   satori 3 logs       # Show logs for instance 3
 echo.
+echo Web UI: https://localhost:24601 (24602 for instance 2, ...). The browser warns
+echo once about the neuron's own certificate; https://localhost:24601/remote-access
+echo says how to check it, and how to use an SSH tunnel.
+echo.
 echo Data persists in: .\^<instance^>\config, wallet, models, data
 exit /b 0
 
 :start
 docker start %CONTAINER_NAME%
-echo Satori neuron %INSTANCE% started (port %PORT%)
+echo Satori neuron %INSTANCE% started: https://localhost:%PORT%
 exit /b 0
 
 :stop
@@ -207,7 +216,7 @@ docker stop %CONTAINER_NAME% 2>nul
 docker rm %CONTAINER_NAME% 2>nul
 call :create_container
 if %errorlevel% neq 0 exit /b 1
-echo Satori neuron %INSTANCE% restarted with latest image (port %PORT%)
+echo Satori neuron %INSTANCE% restarted with latest image: https://localhost:%PORT%
 exit /b 0
 
 :logs
@@ -217,7 +226,7 @@ exit /b 0
 :status
 docker ps --format "{{.Names}}" | findstr /r "^%CONTAINER_NAME%$" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo Satori neuron %INSTANCE% is running (port %PORT%)
+    echo Satori neuron %INSTANCE% is running: https://localhost:%PORT%
     docker ps --filter "name=%CONTAINER_NAME%" --format "Container: {{.Names}}\nStatus: {{.Status}}\nCreated: {{.CreatedAt}}"
 ) else (
     echo Satori neuron %INSTANCE% is not running

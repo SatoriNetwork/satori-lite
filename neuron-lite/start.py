@@ -4956,10 +4956,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
 
 def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601):
-    """Start the Flask web UI in a background thread."""
+    """Start the Flask web UI in a background thread, over HTTPS with the
+    neuron's own certificate unless the config says `ui https: false` (for a
+    neuron behind a proxy of its own that does the HTTPS)."""
     try:
         from web.app import create_app
         from web.routes import set_wallet_manager, set_startup
+        from web import tls
 
         app = create_app()
 
@@ -4967,17 +4970,34 @@ def startWebUI(startupDag: StartupDag, host: str = '0.0.0.0', port: int = 24601)
         set_wallet_manager(startupDag.walletManager)
         set_startup(startupDag)  # Set startup immediately - initialization is complete
 
+        cert = None
+        if config.get().get('ui https', True) is not False:
+            try:
+                cert = tls.certificate(config.root('config'))
+                app.config['SESSION_COOKIE_SECURE'] = True
+            except Exception as e:
+                logging.warning(
+                    f"Web UI: no HTTPS certificate ({e}), so it is served over plain HTTP")
+
         def run_flask():
             # Suppress Flask/werkzeug logging
             import logging as stdlib_logging
             werkzeug_logger = stdlib_logging.getLogger('werkzeug')
             werkzeug_logger.setLevel(stdlib_logging.ERROR)
             # Use werkzeug server (not for production, but fine for local use)
-            app.run(host=host, port=port, debug=False, use_reloader=False)
+            if cert:
+                tls.Server(host, port, app, *cert).serve_forever()
+            else:
+                app.run(host=host, port=port, debug=False, use_reloader=False)
 
         web_thread = threading.Thread(target=run_flask, daemon=True)
         web_thread.start()
-        logging.info(f"Web UI started at http://{host}:{port}", color="green")
+        if cert:
+            logging.info(
+                f"Web UI started at https://localhost:{port} (its certificate's "
+                f"SHA-256 fingerprint: {tls.fingerprint(cert[0])})", color="green")
+        else:
+            logging.info(f"Web UI started at http://{host}:{port}", color="green")
         return web_thread
     except ImportError as e:
         logging.warning(f"Web UI not available: {e}")

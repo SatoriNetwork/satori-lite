@@ -88,6 +88,15 @@
         margin-top: 1.1rem;
     }
 
+    .login-remote {
+        display: block;
+        margin-top: 1.1rem;
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        text-align: center;
+    }
+    .login-remote + .login-version { margin-top: 0.6rem; }
+
     .login-title {
         font-size: 1.45rem;
         font-weight: 700;
@@ -489,6 +498,7 @@
         </form>
 
     </div>
+    <a class="login-remote" href="{{ url_for('remote_access') }}">Opening this from another computer?</a>
     <span class="login-version">{{ version }}</span>
 </div>
 

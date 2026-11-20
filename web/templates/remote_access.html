@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Satori - Remote Access{% endblock %}
+
+{% block extra_css %}
+<style>
+    .ra-stage {
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 3rem 1rem;
+    }
+    .ra-card {
+        width: min(100%, 680px);
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 18px;
+        padding: 2rem 2rem 1.6rem;
+        align-self: flex-start;
+    }
+    .ra-card h1 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 0.6rem;
+    }
+    .ra-card h2 {
+        font-size: 1.02rem;
+        font-weight: 650;
+        margin: 1.8rem 0 0.5rem;
+    }
+    .ra-card p, .ra-card li {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        line-height: 1.55;
+    }
+    .ra-card li { margin-bottom: 0.45rem; }
+    .ra-card strong { color: var(--text-primary); font-weight: 600; }
+    .ra-cmd {
+        display: block;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 9px;
+        padding: 0.6rem 0.8rem;
+        margin: 0.4rem 0 0.2rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.82rem;
+        color: var(--text-primary);
+        overflow-x: auto;
+        white-space: pre;
+    }
+    .ra-back {
+        display: inline-block;
+        margin-top: 1.6rem;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+    @media (max-width: 520px) {
+        .ra-stage { padding: 1.5rem 1rem; }
+        .ra-card { padding: 1.4rem 1.1rem; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ra-stage">
+    <div class="ra-card">
+        <h1>Opening your neuron from another computer</h1>
+        <p>
+            This page is served over HTTPS, so your passphrase and keys cross the network
+            encrypted. Your neuron made its own certificate for that, and no authority your
+            browser knows signed it, so the browser warns you the first time
+            (&ldquo;Your connection is not private&rdquo;). There are two safe ways past
+            the warning.
+        </p>
+
+        <h2>1. Check the certificate, then go on</h2>
+        <ol>
+            <li>
+                On the machine your neuron runs on, in the folder you run <code>satori</code> from, print your
+                neuron's certificate fingerprint:
+                <span class="ra-cmd">openssl x509 -in ./{{ instance }}/config/ui-cert.pem -noout -fingerprint -sha256</span>
+                The neuron's log has it too:
+                <span class="ra-cmd">docker logs satori-{{ instance }} 2>&amp;1 | grep fingerprint</span>
+            </li>
+            <li>
+                In the browser, click <strong>Not secure</strong> beside the address, open the
+                certificate, and find its <strong>SHA-256 fingerprint</strong>.
+            </li>
+            <li>
+                If the two match, go on (<strong>Advanced</strong>, then <strong>Proceed</strong>
+                or <strong>Accept the risk</strong>). The browser remembers your choice for this
+                address.
+            </li>
+            <li>
+                If they don't match, or the warning comes back later when you haven't reset your
+                neuron, someone may be between you and your neuron. <strong>Don't enter your
+                passphrase.</strong>
+            </li>
+        </ol>
+        <p>On the computer the neuron runs on, nothing can come between you, so you can go on without checking.</p>
+
+        <h2>2. Or come through an SSH tunnel</h2>
+        <p>
+            If you reach that machine over SSH, the tunnel carries this page inside SSH's own
+            encryption. Run this on your own computer and leave it running:
+        </p>
+        <span class="ra-cmd">ssh -N -L {{ port }}:localhost:{{ port }} you@{{ host }}</span>
+        <p>
+            Then open <strong>https://localhost:{{ port }}</strong>. The browser still warns once,
+            and through the tunnel you can go on without checking the fingerprint.
+        </p>
+        <p>
+            With the tunnel, the port needn't be open to the internet at all. Restart the neuron
+            with it closed, and only that machine itself (so your tunnel) can reach this page:
+        </p>
+        <span class="ra-cmd">SATORI_UI_BIND=127.0.0.1 ./satori {{ instance }} restart</span>
+        <p>Give it each time you restart, or the port opens again.</p>
+
+        <a class="ra-back" href="{{ url_for('index') }}">&larr; Back to your neuron</a>
+    </div>
+</div>
+{% endblock %}

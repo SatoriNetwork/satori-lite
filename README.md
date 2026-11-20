@@ -204,7 +204,43 @@ python neuron-lite/start.py
 
 The process performs wallet initialization, registers with the central
 server, starts the embedded relay, launches the engine, and serves the
-operator web interface at `http://localhost:24601`.
+operator web interface at `https://localhost:24601`.
+
+### Opening the web interface from another computer
+
+The web interface is served over HTTPS, so the passphrase and keys cross the
+network encrypted. The neuron makes its own certificate on its first start
+(`config/ui-cert.pem`, kept through restarts and updates), so a browser warns
+about it once. Plain HTTP on the same port is sent to the `https://` address.
+The page `/remote-access` (linked from the login page) walks through both of
+these:
+
+- **Check the certificate, then go on.** On the machine the neuron runs on, in
+  the folder you run
+  `satori` from (`1` is the instance number):
+
+  ```bash
+  openssl x509 -in ./1/config/ui-cert.pem -noout -fingerprint -sha256
+  ```
+
+  The neuron also logs it at start (`docker logs satori-1 2>&1 | grep
+  fingerprint`). Compare it with the SHA-256 fingerprint the browser shows for
+  the certificate; if they match, go on. If the warning comes back later
+  without the neuron's certificate having changed, don't enter the passphrase.
+- **Or come through an SSH tunnel.** On your own computer:
+
+  ```bash
+  ssh -N -L 24601:localhost:24601 you@your-machine
+  ```
+
+  then open `https://localhost:24601`. With the tunnel the port can be closed
+  to everyone else: `SATORI_UI_BIND=127.0.0.1 ./satori restart` publishes it
+  on that machine's localhost only (give it on every restart).
+
+A neuron behind a proxy of its own that already does HTTPS (nginx, Caddy) can
+either point the proxy at `https://localhost:24601` without verifying the
+certificate, or set `ui https: false` in `config/config.yaml` and restart to
+serve plain HTTP to the proxy.
 
 The interactive CLI can be used for wallet inspection and management, and
 operational commands:

@@ -135,7 +135,7 @@ start_satori_lite() {
     # Wait for web UI to be healthy
     print_status "Waiting for satori-lite to be healthy..."
     for i in {1..20}; do
-        if curl -s http://localhost:24601/health >/dev/null 2>&1; then
+        if curl -sk https://localhost:24601/health >/dev/null 2>&1; then
             print_status "satori-lite is healthy!"
             break
         fi
@@ -176,7 +176,7 @@ print_final_status() {
     echo -e "${GREEN}  DEPLOYMENT COMPLETE!${NC}"
     echo -e "${GREEN}================================================${NC}"
     echo ""
-    echo -e "  ${BLUE}Web UI:${NC}     http://localhost:24601"
+    echo -e "  ${BLUE}Web UI:${NC}     https://localhost:24601"
     echo -e "  ${BLUE}API Server:${NC} http://localhost:8000"
     echo ""
     echo -e "  ${YELLOW}IMPORTANT:${NC}"
