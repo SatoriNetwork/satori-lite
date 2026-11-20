@@ -8,6 +8,7 @@ Handles all web routes for the minimal UI:
 """
 from functools import wraps
 import asyncio
+import hmac
 import os
 import time
 import logging
@@ -203,40 +204,36 @@ def cleanup_session_wallet(session_id):
                 logger.warning(f"Error deleting session wallet {session_id}: {e}")
 
 
+# The key to the wallet password a session holds: the server's own, new each
+# start, never in the cookie (which is signed, not encrypted: anyone who sees
+# it reads it).
+_password_key = Fernet(Fernet.generate_key())
+
+
 def encrypt_wallet_password(password):
-    """Encrypt the wallet password for storage in session.
-
-    Args:
-        password: Plaintext password
-
-    Returns:
-        tuple: (encrypted_password, session_key) both as strings
-    """
-    session_key = Fernet.generate_key()
-    f = Fernet(session_key)
-    encrypted_pw = f.encrypt(password.encode())
-    return encrypted_pw.decode(), session_key.decode()
+    """The wallet password encrypted under the server's key, for the session."""
+    return _password_key.encrypt(password.encode()).decode()
 
 
 def decrypt_wallet_password_from_session():
-    """Decrypt the wallet password from current session.
-
-    Returns:
-        str: Decrypted password, or None if not available
-    """
+    """The wallet password this session unlocked with, or None."""
     try:
         encrypted_pw = session.get('encrypted_wallet_password')
-        session_key = session.get('session_key')
-
-        if not encrypted_pw or not session_key:
+        if not encrypted_pw:
             return None
-
-        f = Fernet(session_key.encode())
-        password = f.decrypt(encrypted_pw.encode()).decode()
-        return password
+        return _password_key.decrypt(encrypted_pw.encode()).decode()
     except Exception as e:
         logger.error(f"Failed to decrypt wallet password: {e}")
         return None
+
+
+def given_wallet_password() -> bool:
+    """Whether the request's {"password"} is the wallet's: the one this session
+    unlocked it with."""
+    given = (request.get_json(silent=True) or {}).get('password')
+    held = decrypt_wallet_password_from_session()
+    return isinstance(given, str) and bool(held) and hmac.compare_digest(
+        given.encode(), held.encode())
 
 
 def ensure_peer_registered(app, wallet_manager, max_retries=3):
@@ -506,10 +503,9 @@ def register_routes(app):
         session['wallet_open'] = True
         session.pop('logged_out', None)  # Clear logout flag
 
-        # Encrypt and store password in session for future use
-        encrypted_pw, session_key = encrypt_wallet_password(password)
-        session['encrypted_wallet_password'] = encrypted_pw
-        session['session_key'] = session_key
+        # The password, encrypted under the server's key, to check it again
+        # before showing a key
+        session['encrypted_wallet_password'] = encrypt_wallet_password(password)
 
         # Register peer with API server (non-blocking)
         try:
@@ -1286,12 +1282,9 @@ def register_routes(app):
         {"private_key": its 0x hex, "password": the wallet's}; an empty
         private_key hands the job back to the neuron's alias. The wallet signs
         the link, and both register at once. Stake with it again after."""
-        import hmac
         from satorineuron.init.onchain_alias import setOnchainAlias
         body = request.get_json(silent=True) or {}
-        given = body.get('password')
-        held = decrypt_wallet_password_from_session()
-        if not (isinstance(given, str) and held and hmac.compare_digest(given.encode(), held.encode())):
+        if not given_wallet_password():
             return jsonify({'error': 'Wrong passphrase'}), 403
         wm = get_or_create_session_wallet()
         if not (wm and wm.alias and wm.wallet):
@@ -1314,10 +1307,7 @@ def register_routes(app):
         """The alias's private key, for the rare case funds were sent to it: the
         0x-hex form a Base wallet imports, only for {"password": the wallet's
         password}."""
-        import hmac
-        given = (request.get_json(silent=True) or {}).get('password')
-        held = decrypt_wallet_password_from_session()
-        if not (isinstance(given, str) and held and hmac.compare_digest(given.encode(), held.encode())):
+        if not given_wallet_password():
             return jsonify({'error': 'Wrong passphrase'}), 403
         wallet_manager = get_or_create_session_wallet()
         if wallet_manager and wallet_manager.alias:
@@ -1330,24 +1320,32 @@ def register_routes(app):
     @app.route('/api/wallet/base')
     @login_required
     def api_wallet_base():
-        """The wallet key as its Base/EVM key, for import into MetaMask.
-
-        The wallet's Evrmore key and its EVM key are the same secp256k1 keypair,
-        so `ethAddress` is the address central keys the Merkle reward tree by
-        (derived from the wallet pubkey) and `private_key` is the 0x-hex form
-        MetaMask imports. Requires a decrypted wallet (login_required)."""
+        """The wallet's Base address (where rewards land: central keys the
+        Merkle reward tree by it) and the SATORI token's parameters. Never the
+        key: that is /api/wallet/private-key, with the password."""
         wallet_manager = get_or_create_session_wallet()
         if not (wallet_manager and wallet_manager.wallet):
             return jsonify({'error': 'Wallet not initialized'}), 500
         try:
-            wallet = wallet_manager.wallet
             return jsonify({
-                'base_address': wallet.ethAddress,
-                'private_key': wallet.account.key.to_0x_hex(),
+                'base_address': wallet_manager.wallet.ethAddress,
                 'token': _base_token_info(),
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/wallet/private-key', methods=['POST'])
+    @login_required
+    def api_wallet_private_key():
+        """The wallet key as its Base key (the 0x hex a wallet imports; the
+        Evrmore and EVM keys are the same secp256k1 keypair), only for
+        {"password": the wallet's password}."""
+        if not given_wallet_password():
+            return jsonify({'error': 'Wrong passphrase'}), 403
+        wallet_manager = get_or_create_session_wallet()
+        if not (wallet_manager and wallet_manager.wallet):
+            return jsonify({'error': 'Wallet not initialized'}), 500
+        return jsonify({'private_key': wallet_manager.wallet.account.key.to_0x_hex()})
 
     @app.route('/api/wallet/base/token-info')
     @login_required

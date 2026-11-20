@@ -6,6 +6,7 @@ Minimal web interface for satori-lite functionality:
 - Dashboard with balance, rewards, lending, and pool management
 """
 import os
+import secrets
 from datetime import timedelta
 from flask import Flask
 
@@ -25,7 +26,9 @@ def create_app(testing=False):
                 static_folder='static')
 
     # Configuration
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+    # Sessions are signed with SECRET_KEY when it is set, else a random secret
+    # of this start (sessions already end with a restart).
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
     app.config['TESTING'] = testing
 
     # Session configuration - sessions expire after 24 hours

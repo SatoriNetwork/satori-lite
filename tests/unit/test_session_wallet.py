@@ -115,48 +115,41 @@ class TestSessionWalletManagement:
         assert call_count == 2
 
     @pytest.mark.unit
-    def test_wallet_password_encrypted_in_session(self, client):
-        """Wallet password should be encrypted when stored in session."""
+    def test_the_cookie_holds_no_key_to_the_wallet_password(self, app, client):
+        """The session cookie is signed, not encrypted: anyone who sees it reads
+        it. After login it holds the password encrypted under the server's key,
+        and nothing in it decrypts that."""
         mock_wallet_manager = MagicMock()
-        mock_wallet = MagicMock()
-        mock_wallet.isDecrypted = True
-        mock_wallet_manager.openWallet.return_value = mock_wallet
+        mock_wallet_manager.openWallet.return_value = MagicMock(isDecrypted=True)
 
-        with patch('web.routes.check_wallet_file_exists', return_value=True):
-            with patch('web.routes.get_or_create_session_wallet', return_value=mock_wallet_manager):
-                response = client.post('/login', data={'password': 'my_secret_password'})
+        with patch('web.routes.check_wallet_file_exists', return_value=True), \
+                patch('web.routes.ensure_peer_registered', return_value=None), \
+                patch('web.routes.get_or_create_session_wallet', return_value=mock_wallet_manager):
+            response = client.post('/login', data={'password': 'my_secret_password'})
 
         assert response.status_code in [302, 303]
-
-        with client.session_transaction() as sess:
-            # Password should be encrypted in session
-            assert 'encrypted_wallet_password' in sess
-            assert 'session_key' in sess
-            # Should NOT store plaintext password
-            assert 'wallet_password' not in sess
-            # Encrypted password should not be the plaintext
-            assert sess['encrypted_wallet_password'] != 'my_secret_password'
+        cookie = response.headers['Set-Cookie'].split(';', 1)[0].split('=', 1)[1]
+        seen = app.session_interface.get_signing_serializer(app).loads(cookie)
+        encrypted = seen['encrypted_wallet_password']
+        assert 'my_secret_password' not in str(seen)
+        for value in seen.values():
+            try:
+                Fernet(value).decrypt(encrypted.encode())
+            except Exception:
+                continue
+            pytest.fail('the cookie carries the key to the wallet password')
 
     @pytest.mark.unit
     def test_decrypt_wallet_password_from_session(self, client):
-        """Should be able to decrypt wallet password from session."""
-        # Simulate encrypted password in session
-        password = 'my_secret_password'
-        session_key = Fernet.generate_key()
-        f = Fernet(session_key)
-        encrypted_pw = f.encrypt(password.encode())
+        """The server decrypts the password a session holds with its own key."""
+        from web.routes import decrypt_wallet_password_from_session, encrypt_wallet_password
 
         with client.session_transaction() as sess:
-            sess['encrypted_wallet_password'] = encrypted_pw.decode()
-            sess['session_key'] = session_key.decode()
-
-        # Function to decrypt should work
-        from web.routes import decrypt_wallet_password_from_session
+            sess['encrypted_wallet_password'] = encrypt_wallet_password('my_secret_password')
 
         with client:
             client.get('/dashboard')  # Establish session context
-            decrypted = decrypt_wallet_password_from_session()
-            assert decrypted == password
+            assert decrypt_wallet_password_from_session() == 'my_secret_password'
 
     @pytest.mark.unit
     @patch('web.routes.cleanup_session_wallet')

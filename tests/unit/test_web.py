@@ -36,9 +36,15 @@ class TestAppCreation:
         assert app is not None
 
     @pytest.mark.unit
-    def test_app_has_secret_key(self, app):
-        """App should have a secret key configured."""
-        assert app.config['SECRET_KEY'] is not None
+    def test_the_session_secret_is_random_unless_one_is_given(self, monkeypatch):
+        """Each start signs sessions with its own random secret (sessions
+        already end with a restart), or SECRET_KEY when it is set."""
+        from web.app import create_app
+        monkeypatch.delenv('SECRET_KEY', raising=False)
+        first, second = (create_app(testing=True).config['SECRET_KEY'] for _ in range(2))
+        assert first != second and len(first) >= 32
+        monkeypatch.setenv('SECRET_KEY', 'given')
+        assert create_app(testing=True).config['SECRET_KEY'] == 'given'
 
 
 class TestLoginPage:

@@ -249,6 +249,8 @@
     .keyslip-btn:hover { color: var(--text-primary); background: var(--bg-card-header); }
     .keyslip-btn:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
     .keyslip-btn.is-done { color: #22c55e; }
+    .keyslip-unlock { display: flex; gap: 0.5rem; margin-top: 0.4rem; max-width: 24rem; }
+    .keyslip-unlock[hidden] { display: none; }
     .keyslip-note {
         display: flex; align-items: center; gap: 0.35rem;
         margin: 0.45rem 0 0;
@@ -2876,8 +2878,8 @@
 
     // ── Base / browser wallets ──────────────────────────────────────────
     // The wallet key is also its Base key: `/wallet/base` returns the wallet's EVM
-    // address (where rewards land) and the 0x-hex key a wallet imports, plus
-    // the SATORI-on-Base token + network params for wallet_watchAsset.
+    // address (where rewards land) and the SATORI-on-Base token + network params
+    // for wallet_watchAsset; the key comes only with the passphrase.
     let baseTokenInfo = null;
     let _baseKeyLoaded = null;
 
@@ -2892,7 +2894,6 @@
             shortEl.textContent = a.slice(0, 6) + '…' + a.slice(-4);
             shortEl.title = a;
             baseTokenInfo = result.token || null;
-            _baseKeyLoaded = result.private_key || null;
         } else {
             addrEl.value = 'Not available';
             shortEl.textContent = 'Not available';
@@ -2900,10 +2901,32 @@
     }
 
     // Key slips (Addresses card + Base card) show the same key in groups of 8.
-    // Masked, they hold only dots: the real key enters the DOM on reveal.
-    async function getBaseKey() {
-        if (!_baseKeyLoaded) _baseKeyLoaded = ((await apiCall('/wallet/base')) || {}).private_key || null;
-        return _baseKeyLoaded;
+    // Masked, they hold only dots: the real key enters the DOM on reveal. The
+    // key comes from POST /wallet/private-key with the wallet passphrase, asked
+    // once a page in a form under the slip that wants it.
+    function askPassphrase(slip) {
+        let form = slip.nextElementSibling;
+        if (!form || !form.classList.contains('keyslip-unlock')) {
+            form = document.createElement('form');
+            form.className = 'keyslip-unlock';
+            form.innerHTML = '<input type="password" class="form-control form-control-sm" placeholder="Wallet passphrase" autocomplete="current-password" aria-label="Wallet passphrase">'
+                + '<button class="btn btn-sm btn-primary" type="submit">Show</button>';
+            form.onsubmit = (event) => unlockKeySlip(event, slip, form);
+            slip.after(form);
+        }
+        form.hidden = false;
+        form.querySelector('input').focus();
+    }
+
+    async function unlockKeySlip(event, slip, form) {
+        event.preventDefault();
+        const pw = form.querySelector('input');
+        const result = await apiCall('/wallet/private-key', 'POST', { password: pw.value });
+        pw.value = '';
+        if (!result || !result.private_key) return;  // apiCall said why
+        _baseKeyLoaded = result.private_key;
+        form.hidden = true;
+        renderKeySlip(slip, _baseKeyLoaded);
     }
 
     function renderKeySlip(slip, key) {
@@ -2928,15 +2951,13 @@
     async function toggleKeySlip(id) {
         const slip = document.getElementById(id);
         if (!slip.classList.contains('is-masked')) { renderKeySlip(slip, null); return; }
-        const key = await getBaseKey();
-        if (!key) { showToast('Could not load the private key', true); return; }
-        renderKeySlip(slip, key);
+        if (!_baseKeyLoaded) { askPassphrase(slip); return; }
+        renderKeySlip(slip, _baseKeyLoaded);
     }
 
     async function copyKeySlip(id, btn) {
-        const key = await getBaseKey();
-        if (!key) { showToast('No private key to copy', true); return; }
-        const ok = await satoriCopy(key);
+        if (!_baseKeyLoaded) { askPassphrase(document.getElementById(id)); return; }
+        const ok = await satoriCopy(_baseKeyLoaded);
         if (!ok) { showToast('Could not copy. Show the key and copy it by hand.', true); return; }
         showToast('Private key copied to clipboard');
         const icon = btn.querySelector('.material-icons');

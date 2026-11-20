@@ -13,12 +13,10 @@ def client():
     import web.routes as routes
     app = create_app(testing=True)
     client = app.test_client()
-    encrypted, session_key = routes.encrypt_wallet_password('pass1234')
     with client.session_transaction() as sess:
         sess['wallet_open'] = True
         sess['session_id'] = 'sid'
-        sess['encrypted_wallet_password'] = encrypted
-        sess['session_key'] = session_key
+        sess['encrypted_wallet_password'] = routes.encrypt_wallet_password('pass1234')
     manager = mock.MagicMock()
     manager.alias = mock.MagicMock(**{'account.key.to_0x_hex.return_value': ALIAS_KEY})
     with mock.patch.dict(routes._session_wallets, {'sid': manager}), \
