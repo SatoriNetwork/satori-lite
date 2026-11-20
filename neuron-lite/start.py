@@ -4307,7 +4307,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
     def setupWalletManager(self):
         # Never auto-decrypt the global wallet - it should remain encrypted
-        self.walletManager = WalletManager.create(useConfigPassword=False)
+        self.walletManager = WalletManager.create()
 
     def shutdownWallets(self):
         self.walletManager._electrumx = None

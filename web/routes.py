@@ -173,10 +173,7 @@ def get_or_create_session_wallet():
                 # Create NEW WalletManager instance for this session
                 # Don't auto-decrypt the wallet - user must provide password via login
                 logger.info(f"Creating new WalletManager for session: {session_id}")
-                _session_wallets[session_id] = WalletManager.create(
-                    useConfigPassword=False  # Don't auto-decrypt with config password
-                    # paths default to the install's alias and wallet files
-                )
+                _session_wallets[session_id] = WalletManager.create()
             except Exception as e:
                 logger.error(f"Failed to create session wallet: {e}")
                 return None

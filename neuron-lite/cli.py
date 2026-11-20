@@ -353,8 +353,7 @@ class NeuronCLI:
             try:
                 from satorineuron.init.wallet import WalletManager
 
-                # Create wallet manager without using config password
-                wallet_manager = WalletManager.create(useConfigPassword=False)
+                wallet_manager = WalletManager.create()
                 wallet = wallet_manager.openWallet(password=password1, create=True)
 
                 if wallet and wallet.isDecrypted:
@@ -383,8 +382,7 @@ class NeuronCLI:
         try:
             from satorineuron.init.wallet import WalletManager
 
-            # Create wallet manager without using config password
-            wallet_manager = WalletManager.create(useConfigPassword=False)
+            wallet_manager = WalletManager.create()
             wallet = wallet_manager.openWallet(password=password, create=False)
 
             if wallet and wallet.isDecrypted:
@@ -992,7 +990,7 @@ System:
         # Initialize wallet manager after wallet is unlocked
         try:
             from satorineuron.init.wallet import WalletManager
-            self.wallet_manager = WalletManager.create(useConfigPassword=False)
+            self.wallet_manager = WalletManager.create()
 
             # Unlock wallet with stored password
             if self._wallet_password:

@@ -37,7 +37,7 @@ def _pubkey(path) -> str:
 
 
 def _manager() -> WalletManager:
-    return WalletManager.create(useConfigPassword=False)
+    return WalletManager.create()
 
 
 # config.keyFiles ##########################################################
