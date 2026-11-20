@@ -1,23 +1,18 @@
-"""In-container functional test for the Commit 4 relay path.
-
-Exercises _backfillRelayHistory (the JSON-envelope parsing blocker fix),
+"""The relay path: _backfillRelayHistory (the JSON-envelope parsing),
 _relayPredict (get-or-create + predict via the real StreamModel), the sink tag,
-and the collectAndSubmitPredictions sink guard -- by calling the real StartupDag
+and the collectAndSubmitPredictions sink guard, by calling the real StartupDag
 methods against a fake self (no full StartupDag construction).
 """
 
-import sys
 import types
 import threading
 
-sys.path.insert(0, '/Satori/Engine')
-sys.path.insert(0, '/Satori/Lib')
-sys.path.insert(0, '/Satori/Neuron')
-
 import pandas as pd
 
-from start import StartupDag
 from satorilib.satori_nostr.models import DatastreamObservation
+from tests.neuron_start import start
+
+StartupDag = start.StartupDag
 
 
 class FakeStorage:
@@ -74,10 +69,12 @@ def make_fake(rows):
     fake.aiengine = engine
     fake.server = None
     fake.wallet = None
+    fake.alias = None
     fake.networkDB = FakeNetworkDB(rows)
     fake.ensureEngine = lambda: engine
     # Bind the real (unbound) methods to the fake self.
     fake._safeEpoch = StartupDag._safeEpoch
+    fake._numericObservationValue = StartupDag._numericObservationValue
     fake._backfillRelayHistory = lambda *a, **k: StartupDag._backfillRelayHistory(fake, *a, **k)
     fake._createRelayModel = lambda *a, **k: StartupDag._createRelayModel(fake, *a, **k)
     return fake, engine
@@ -162,18 +159,3 @@ def test_collect_skips_relay_models():
     assert queued == ['c'], f"only central should be queued, got {queued}"
     assert relay._pending_prediction is not None  # relay left untouched
 
-
-if __name__ == '__main__':
-    import traceback
-    failures = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith('test_') and callable(fn):
-            try:
-                fn()
-                print(f"PASS {name}")
-            except Exception:
-                failures += 1
-                print(f"FAIL {name}")
-                traceback.print_exc()
-    print(f"\n{'ALL PASSED' if failures == 0 else f'{failures} FAILED'}")
-    sys.exit(1 if failures else 0)
