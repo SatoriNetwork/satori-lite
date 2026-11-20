@@ -1,5 +1,5 @@
 """The central path through the engine, on real SQLite: the neuron's Engine
-from its streams and alias, a StreamModel that starts from the history stored,
+from its streams and server, a StreamModel that starts from the history stored,
 each observation stored once, and a new observation leaving a prediction both
 in local storage and in _pending_prediction, which the neuron's
 collectAndSubmitPredictions batches to Central. Frames are what start.py passes
@@ -48,20 +48,16 @@ def model(streams, storage):
         streamUuid=sub.streamId.uuid,
         predictionStreamUuid=pub.streamId.uuid,
         server=object(),
-        alias=object(),
         subscriptionStream=sub,
-        publicationStream=pub,
-        pauseAll=lambda: None,
-        resumeAll=lambda: None,
         storage=storage)
 
 
-def test_engine_from_neuron_holds_its_streams_and_alias(streams, storage):
+def test_engine_from_neuron_holds_its_streams_and_server(streams, storage):
     sub, pub = streams
-    server, alias = object(), object()
+    server = object()
     engine = Engine.createFromNeuron(
-        subscriptions=[sub], publications=[pub], server=server, alias=alias)
-    assert engine.server is server and engine.alias is alias
+        subscriptions=[sub], publications=[pub], server=server)
+    assert engine.server is server
     assert engine.subscriptionStreams == [sub] and engine.publicationStreams == [pub]
     assert engine.storage is storage
 

@@ -99,7 +99,6 @@ class Engine:
         subscriptions: list,
         publications: list,
         server: SatoriServerClient,
-        alias: any,
     ) -> 'Engine':
         """
         Factory method for Neuron to spawn Engine with stream assignments.
@@ -108,11 +107,9 @@ class Engine:
             subscriptions: List of Stream objects to subscribe to
             publications: List of Stream objects for predictions
             server: SatoriServerClient instance from Neuron
-            alias: the Neuron's alias (its automated signing key)
         """
         engine = cls()
         engine.server = server
-        engine.alias = alias
         engine.subscriptionStreams = subscriptions
         engine.publicationStreams = publications
         return engine
@@ -122,8 +119,6 @@ class Engine:
         self.subscriptionStreams: list = []
         self.publicationStreams: list = []
         self.server: Union[SatoriServerClient, None] = None
-        self.alias: any = None
-        self.paused: bool = False
         # SQLite storage manager for local data persistence
         self.storage: EngineStorageManager = EngineStorageManager.getInstance()
         # Prediction queue for batch submission
@@ -135,19 +130,6 @@ class Engine:
         info("Engine initializing from Neuron...", color='blue')
         self.initializeModelsFromNeuron()
         # info("Engine initialized successfully", color='green')
-
-    def pause(self, force: bool = False):
-        if force:
-            self.paused = True
-        for streamModel in self.streamModels.values():
-            streamModel.pause()
-
-    def resume(self, force: bool = False):
-        if force:
-            self.paused = False
-        if not self.paused:
-            for streamModel in self.streamModels.values():
-                streamModel.resume()
 
     def initializeModelsFromNeuron(self):
         """Initialize models when spawned from Neuron - uses server directly"""
@@ -174,11 +156,7 @@ class Engine:
                     streamUuid=subUuid,
                     predictionStreamUuid=pubUuid,
                     server=self.server,
-                    alias=self.alias,
                     subscriptionStream=sub,
-                    publicationStream=matchingPub,
-                    pauseAll=self.pause,
-                    resumeAll=self.resume,
                     storage=self.storage)
                 self.streamModels[subUuid].chooseAdapter(inplace=True)
                 self.streamModels[subUuid].run_forever()
@@ -236,11 +214,7 @@ class StreamModel:
         streamUuid: str,
         predictionStreamUuid: str,
         server: SatoriServerClient,
-        alias: any,
         subscriptionStream: Stream,
-        publicationStream: Stream,
-        pauseAll: callable,
-        resumeAll: callable,
         storage: EngineStorageManager = None,
         sink: str = 'central',
     ):
@@ -259,8 +233,6 @@ class StreamModel:
         streamModel._modelLock = threading.RLock()
         streamModel.sink = sink
         streamModel.cpu = getProcessorCount()
-        streamModel.pauseAll = pauseAll
-        streamModel.resumeAll = resumeAll
         # Config-driven: reads engine.preferred_adapter from neuron config
         # ('auto' = [ETS, XGB, Starter]; explicit key forces that adapter).
         streamModel.preferredAdapters = buildPreferredAdapters()
@@ -269,9 +241,7 @@ class StreamModel:
         streamModel.streamUuid = streamUuid
         streamModel.predictionStreamUuid = predictionStreamUuid
         streamModel.subscriptionStream = subscriptionStream
-        streamModel.publicationStream = publicationStream
         streamModel.server = server
-        streamModel.alias = alias
         # SQLite storage manager for local persistence
         streamModel.storage = storage or EngineStorageManager.getInstance()
         streamModel.trainingDelay = streamModel._loadTrainingDelay()  # Load from config
@@ -285,7 +255,6 @@ class StreamModel:
         self.pilot: ModelAdapter = self.adapter(uid=self.streamUuid)
         self.pilot.load(self.modelPath())
         self.stable: ModelAdapter = copy.deepcopy(self.pilot)
-        self.paused: bool = False
         if self.streamUuid != DEFAULT_STREAM_UUID:
             debug(f'AI Engine: stream id {self.streamUuid} using {self.adapter.__name__} (Central Server mode)', color='teal')
 
@@ -402,12 +371,6 @@ class StreamModel:
         except Exception as e:
             error(f"Relay prediction failed for stream {self.streamUuid}: {e}")
             return None
-
-    def pause(self):
-        self.paused = True
-
-    def resume(self):
-        self.paused = False
 
     def passPredictionData(self, forecast: pd.DataFrame):
         """Store the prediction locally and leave it in _pending_prediction,
@@ -611,7 +574,7 @@ class StreamModel:
         regardless); other streams are unaffected.
         """
         with self._modelLock:
-            if self.paused or len(self.data) == 0:
+            if len(self.data) == 0:
                 return
 
             self.chooseAdapter(inplace=True)

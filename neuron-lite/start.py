@@ -1300,17 +1300,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Network: relay backfill failed for {stream_name}: {e}')
 
         subscriptionStream = Stream(streamId=sub_id)
-        publicationStream = Stream(streamId=pub_id, predicting=sub_id)
         try:
             return StreamModel.createFromServer(
                 streamUuid=sub_uuid,
                 predictionStreamUuid=pub_uuid,
                 server=self.server,
-                alias=self.alias,
                 subscriptionStream=subscriptionStream,
-                publicationStream=publicationStream,
-                pauseAll=engine.pause,
-                resumeAll=engine.resume,
                 storage=engine.storage,
                 sink='relay')
         except Exception as e:
@@ -4472,16 +4467,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                                         stream=f"{stream_name}_pred",
                                         target='')
                                     subscriptionStream = Stream(streamId=sub_id)
-                                    publicationStream = Stream(streamId=pub_id, predicting=sub_id)
                                     self.aiengine.streamModels[stream_uuid] = StreamModel.createFromServer(
                                         streamUuid=stream_uuid,
                                         predictionStreamUuid=pub_id.uuid,
                                         server=self.server,
-                                        alias=self.alias,
                                         subscriptionStream=subscriptionStream,
-                                        publicationStream=publicationStream,
-                                        pauseAll=self.aiengine.pause,
-                                        resumeAll=self.aiengine.resume,
                                         storage=self.aiengine.storage)
                                     self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
                                     try:
@@ -4763,8 +4753,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self.aiengine = Engine.createFromNeuron(
                     subscriptions=self.subscriptions or [],
                     publications=self.publications or [],
-                    server=self.server,
-                    alias=self.alias)
+                    server=self.server)
                 logging.info("AI Engine created", color="green")
             except Exception as e:
                 logging.error(f"Failed to create AI Engine: {e}")
