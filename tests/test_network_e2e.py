@@ -9,9 +9,7 @@ Uses MiniRelay (no Docker), real SatoriNostr clients, real NetworkDB.
 
 import asyncio
 import importlib.util
-import json
 import os
-import sys
 import tempfile
 import time
 
@@ -32,20 +30,7 @@ NetworkDB = _db_mod.NetworkDB
 
 # ── Import satorilib components ──────────────────────────────────────
 
-# Add satorilib to path for clean imports
-_satorilib_src = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'satorilib', 'src')
-if _satorilib_src not in sys.path:
-    sys.path.insert(0, _satorilib_src)
-
-# Clear any mock versions of satorilib from sys.modules
-# (pipeline tests may mock these at module level)
-for _k in [k for k in list(sys.modules.keys())
-           if k.startswith('satorilib')]:
-    _mod = sys.modules[_k]
-    if not hasattr(_mod, '__file__') and not hasattr(_mod, '__path__'):
-        del sys.modules[_k]
-
+import satorilib
 from satorilib.satori_nostr import SatoriNostr, SatoriNostrConfig
 from satorilib.satori_nostr.models import (
     DatastreamMetadata,
@@ -54,11 +39,12 @@ from satorilib.satori_nostr.models import (
     KIND_DATASTREAM_ANNOUNCE,
     KIND_DATASTREAM_DATA,
 )
-# Import MiniRelay directly (avoid conflict with neuron's tests/ package)
+# satorilib's in-process relay, from the checkout these tests import satorilib
+# from (by path: the neuron's tests/ package shadows satorilib's)
 _relay_spec = importlib.util.spec_from_file_location(
     'mini_relay',
-    os.path.join(os.path.dirname(__file__),
-                 '..', '..', 'satorilib', 'tests', 'mini_relay.py'))
+    os.path.join(os.path.dirname(satorilib.__file__),
+                 '..', '..', 'tests', 'mini_relay.py'))
 _relay_mod = importlib.util.module_from_spec(_relay_spec)
 _relay_spec.loader.exec_module(_relay_mod)
 MiniRelay = _relay_mod.MiniRelay
