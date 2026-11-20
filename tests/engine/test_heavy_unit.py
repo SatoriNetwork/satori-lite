@@ -4,16 +4,14 @@ Tests StarterAdapter, XgbAdapter, condition-based model switching,
 and the full training pipeline with various data shapes and edge cases.
 """
 
-import sys
 import os
+from types import SimpleNamespace
+from unittest import mock
 import pytest
 import numpy as np
 import pandas as pd
-import tempfile
-import shutil
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'engine-lite'))
-
+from satoriengine.veda.engine import StreamModel
 from satoriengine.veda.adapters.starter.starter_model import StarterAdapter
 from satoriengine.veda.adapters.xgboost.xgb import XgbAdapter
 from satoriengine.veda.adapters.interface import ModelAdapter, TrainingResult
@@ -107,19 +105,25 @@ class TestStarterPrediction:
         result = adapter.predict(data=df)
         assert result['pred'].iloc[0] == pytest.approx(15.0)
 
-    def test_three_rows_mean_of_last_two(self):
-        df = _make_df([10.0, 20.0, 30.0])
-        adapter = StarterAdapter()
-        result = adapter.predict(data=df)
-        # last 2 rows: 20, 30 → mean = 25
-        assert result['pred'].iloc[0] == pytest.approx(25.0)
+    @pytest.mark.parametrize('values,k,mean', [
+        ([10.0, 20.0, 30.0], 2, 25.0),
+        ([10.0, 20.0, 30.0], 3, 20.0),
+        ([10.0, 20.0, 30.0, 40.0], 2, 35.0),
+        ([10.0, 20.0, 30.0, 40.0], 4, 25.0)])
+    def test_three_or_four_rows_mean_of_a_drawn_tail(self, values, k, mean):
+        # the mean of the last k rows, k drawn per call from 2 to all of them
+        n = len(values)
 
-    def test_four_rows_mean_of_last_two(self):
-        df = _make_df([10.0, 20.0, 30.0, 40.0])
-        adapter = StarterAdapter()
-        result = adapter.predict(data=df)
-        # last 2 rows: 30, 40 → mean = 35
-        assert result['pred'].iloc[0] == pytest.approx(35.0)
+        class Draw:
+            def integers(self, low, high):
+                assert (low, high) == (2, n + 1)
+                return k
+
+        with mock.patch(
+                'satoriengine.veda.adapters.starter.starter_model.make_rng',
+                return_value=Draw()):
+            result = StarterAdapter().predict(data=_make_df(values))
+        assert result['pred'].iloc[0] == pytest.approx(mean)
 
     def test_five_rows_uses_linear_regression(self):
         # Perfect line: [0, 1, 2, 3, 4] → predicts 5
@@ -184,19 +188,10 @@ class TestXgbCondition:
     def test_big_data_returns_1(self):
         assert XgbAdapter.condition(data=list(range(20)), availableRamGigs=2.0) == 1.0
 
-    def test_exactly_10_returns_0(self):
-        # data length 10 is NOT > 10
-        assert XgbAdapter.condition(data=list(range(10)), availableRamGigs=2.0, cpu=4) == 0.0
-
-    def test_11_points_returns_1(self):
-        assert XgbAdapter.condition(data=list(range(11)), availableRamGigs=2.0) == 1.0
-
-    def test_single_cpu_returns_1(self):
-        # cpu == 1 triggers condition even with small data
-        assert XgbAdapter.condition(data=[1, 2], availableRamGigs=2.0, cpu=1) == 1.0
-
-    def test_empty_data_multicpu_returns_0(self):
-        assert XgbAdapter.condition(data=[], availableRamGigs=2.0, cpu=4) == 0.0
+    @pytest.mark.parametrize('n', [0, 2, 10])
+    def test_enough_ram_returns_1_at_any_length(self, n):
+        # the data floor is chooseAdapter's (TestAdapterSwitching)
+        assert XgbAdapter.condition(data=list(range(n)), availableRamGigs=2.0, cpu=4) == 1.0
 
 
 class TestXgbHyperparameters:
@@ -439,9 +434,7 @@ class TestXgbSaveLoad:
 
         loaded = XgbAdapter()
         loaded.load(model_path)
-        # Need to prepare data for the loaded model
-        loaded._manageData(data)
-        pred_after = loaded.model.predict(loaded.dataset.iloc[[-1], :-1])[0]
+        pred_after = loaded.predict(data=data)['pred'].iloc[0]
 
         assert pred_before == pytest.approx(pred_after, rel=1e-5)
 
@@ -451,22 +444,28 @@ class TestXgbSaveLoad:
 # ===================================================================
 
 class TestAdapterSwitching:
-    """Test the condition-based model selection logic that the engine uses."""
+    """The engine's own choice: StreamModel.chooseAdapter on the auto order."""
 
     def _select_adapter(self, data_len, ram_gigs=2.0, cpu=4):
-        """Simulate chooseAdapter logic from engine.py lines 1133-1182."""
-        preferred = [XgbAdapter, StarterAdapter]
-        data = list(range(data_len))
-        for adapter_cls in preferred:
-            if adapter_cls.condition(data=data, cpu=cpu, availableRamGigs=ram_gigs) == 1:
-                return adapter_cls
-        return StarterAdapter  # fallback
+        m = StreamModel.__new__(StreamModel)
+        m.data = _linear_data(data_len)
+        m.cpu = cpu
+        m.preferredAdapters = [XgbAdapter, StarterAdapter]
+        m.defaultAdapters = [XgbAdapter, StarterAdapter]
+        m.failedAdapters = []
+        with mock.patch('psutil.virtual_memory', return_value=SimpleNamespace(available=ram_gigs * 1e9)), \
+                mock.patch('psutil.swap_memory', return_value=SimpleNamespace(free=0)):
+            return m.chooseAdapter()
 
     def test_small_data_selects_starter(self):
         assert self._select_adapter(5) == StarterAdapter
 
-    def test_10_points_selects_starter(self):
-        assert self._select_adapter(10) == StarterAdapter
+    def test_9_points_selects_starter(self):
+        assert self._select_adapter(9) == StarterAdapter
+
+    def test_10_points_selects_xgb(self):
+        # MIN_OBSERVATIONS_FOR_TRAINED_MODEL
+        assert self._select_adapter(10) == XgbAdapter
 
     def test_11_points_selects_xgb(self):
         assert self._select_adapter(11) == XgbAdapter
@@ -478,21 +477,17 @@ class TestAdapterSwitching:
         # XgbAdapter returns 0 for low RAM, StarterAdapter returns 1
         assert self._select_adapter(50, ram_gigs=0.01) == StarterAdapter
 
-    def test_single_cpu_selects_xgb(self):
-        # cpu == 1 makes XgbAdapter return 1 even for small data
-        assert self._select_adapter(5, cpu=1) == XgbAdapter
-
     def test_growing_dataset_switches_adapter(self):
         """Simulate data growing from small to large — adapter should switch."""
         selections = []
-        for n in [1, 5, 10, 11, 20, 50, 100]:
+        for n in [1, 5, 9, 10, 20, 50, 100]:
             selections.append((n, self._select_adapter(n)))
 
         # First few should be Starter, then switch to Xgb
         assert selections[0][1] == StarterAdapter  # n=1
         assert selections[1][1] == StarterAdapter  # n=5
-        assert selections[2][1] == StarterAdapter  # n=10
-        assert selections[3][1] == XgbAdapter      # n=11
+        assert selections[2][1] == StarterAdapter  # n=9
+        assert selections[3][1] == XgbAdapter      # n=10
         assert selections[4][1] == XgbAdapter      # n=20
         assert selections[5][1] == XgbAdapter      # n=50
         assert selections[6][1] == XgbAdapter      # n=100

@@ -9,7 +9,8 @@ setuptools>=78.1.1
 # pandas 1.5.3 (which breaks on numpy 2.x) stays compatible.
 numpy==1.26.4
 pandas==1.5.3
-pyarrow>=14.0.1
+# pyarrow 26 imports only on numpy 2; the image's Python 3.10 resolves 25 anyway.
+pyarrow>=14.0.1,<26
 fastparquet==2022.12.0
 
 # Configuration

@@ -1,16 +1,11 @@
 """Tests for the StreamModel relay entry point (`predictForRelay`).
 
-Runs inside the dev container (mirrors the /Satori path style used by the other
-engine tests). Builds a minimal StreamModel backed by a StarterAdapter and a fake
-storage, and verifies the relay entry point plus that the central
-producePrediction path is unchanged by the _ingestData/_runForecast extraction.
+Builds a minimal StreamModel backed by a StarterAdapter and a fake storage, and
+verifies the relay entry point plus that the central producePrediction path is
+unchanged by the _ingestData/_runForecast extraction.
 """
 
-import sys
 import threading
-
-sys.path.insert(0, '/Satori/Engine')
-sys.path.insert(0, '/Satori/Lib')
 
 import pandas as pd
 
