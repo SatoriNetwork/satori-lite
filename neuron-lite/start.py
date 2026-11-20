@@ -792,48 +792,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.warning(f'Bounty: score-and-pay failed: {e}')
 
-    async def _bountyScoreLateArrival(
-        self,
-        stream_name: str,
-        provider_pubkey: str,
-        seq_num: int,
-    ) -> None:
-        """Re-run scoring when a prediction arrives after its observation.
-
-        No-op if the observation hasn't been received yet (the normal
-        _networkProcessObservation path will score once it arrives) or
-        if this node isn't hosting the bounty.
-        """
-        try:
-            observation = await asyncio.to_thread(
-                self.networkDB.get_observation_by_seq,
-                stream_name, provider_pubkey, seq_num)
-        except Exception:
-            return
-        if not observation:
-            return
-        raw = observation.get('value')
-        if raw is None:
-            return
-        # Observations are stored as the JSON-serialised payload; try to
-        # extract the numeric value whether the row was saved as raw or JSON.
-        candidate = raw
-        try:
-            import json as _json
-            parsed = _json.loads(raw) if isinstance(raw, str) else raw
-            if isinstance(parsed, dict) and 'value' in parsed:
-                candidate = parsed['value']
-            else:
-                candidate = parsed
-        except (ValueError, TypeError):
-            pass
-        await self._bountyScoreAndPay(
-            stream_name=stream_name,
-            provider_pubkey=provider_pubkey,
-            seq_num=seq_num,
-            raw_value=candidate,
-        )
-
     async def _bountyPayPredictor(
         self,
         predictor_nostr_pubkey: str,
@@ -3937,8 +3895,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         DB keyed by (stream_name, stream_provider_pubkey, predictor_pubkey, seq_num).
         The scoring pipeline reads from the DB when an observation arrives.
 
-        When a prediction arrives after its target observation is already
-        in hand, it is scored immediately (late-arrival recovery).
+        A prediction's time is this host's clock as it arrives, not the time
+        its DM states, which is its sender's to write: the scorer's late
+        cutoff runs on it. So one that arrives after its observation is
+        late, and nothing scores it.
         """
         logging.info(f'Bounty: listening for predictions on {relay_url}')
         try:
@@ -3953,7 +3913,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         host_pubkey=self.nostrPubkey,
                         seq_num=p.seq_num,
                         predicted_value=str(p.predicted_value),
-                        received_at=p.timestamp,
+                        received_at=int(time.time()),
                         predictor_alias_pubkey=getattr(
                             p, 'predictor_alias_pubkey', None),
                     )
@@ -3961,13 +3921,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                         f'Bounty: received prediction from '
                         f'{p.predictor_pubkey[:12]}… for {p.stream_name} '
                         f'seq={p.seq_num}')
-                    # Late-arrival: if we already have the observation this
-                    # prediction was meant to predict, score it now.
-                    await self._bountyScoreLateArrival(
-                        stream_name=p.stream_name,
-                        provider_pubkey=p.stream_provider_pubkey,
-                        seq_num=p.seq_num,
-                    )
                 except Exception as e:
                     logging.warning(f'Bounty: failed to save prediction: {e}')
         except asyncio.CancelledError:

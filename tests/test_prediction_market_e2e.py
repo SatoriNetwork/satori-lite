@@ -14,8 +14,8 @@ real ones do and list each transfer.
 
 The stream has a clock of its own, so the scorer's submission window never
 depends on how fast the test runs: observation n is at T0 + n * CADENCE, and
-a prediction of it is sent a minute after observation n - 1 unless the test
-says when.
+a prediction of it reaches the host a minute after observation n - 1, by the
+host's clock, unless the test says when.
 """
 
 import asyncio
@@ -94,11 +94,12 @@ def _add_bounty(db, pay=1000, paid_predictors=3):
 
 
 def _predictor_submits(host, predictor_pk, alias_pk, predicted_value,
-                       seq_num=1, sent_at=None):
-    """A prediction DM arrives at the host: the real listener saves it, and
-    scores it at once when its observation is already in."""
-    if sent_at is None:
-        sent_at = T0 + (seq_num - 1) * CADENCE + 60
+                       seq_num=1, heard_at=None, stamped=None):
+    """A prediction DM reaches the host when the host's clock reads heard_at,
+    and the real listener saves it. stamped is the time the DM itself states,
+    its sender's word: the same unless the test says otherwise."""
+    if heard_at is None:
+        heard_at = T0 + (seq_num - 1) * CADENCE + 60
 
     class Relay:
         async def incoming_predictions(self):
@@ -110,10 +111,11 @@ def _predictor_submits(host, predictor_pk, alias_pk, predicted_value,
                     predictor_alias_pubkey=alias_pk,
                     seq_num=seq_num,
                     predicted_value=predicted_value,
-                    timestamp=sent_at),
+                    timestamp=heard_at if stamped is None else stamped),
                 event_id=f'pred-{predictor_pk}-{seq_num}')
 
-    asyncio.run(host._incomingPredictionsLoop(Relay(), 'relay'))
+    with mock.patch.object(start.time, 'time', return_value=heard_at):
+        asyncio.run(host._incomingPredictionsLoop(Relay(), 'relay'))
 
 
 def _observation_arrives(host, value, seq_num=1):
@@ -287,10 +289,10 @@ class TestJoinedBounties:
 
 
 class TestLateArrival:
-    """BUG #6 — a prediction sent in time whose DM arrives after its
-    observation is scored when it arrives, while the observation's pot is
-    unpaid. BUG #9 — an observation is scored once: its pot is not paid
-    again to whoever arrives after."""
+    """A prediction's time is the host's clock when its DM first reached the
+    host, whatever time the DM states: past the cutoff it is not paid, and
+    one that arrives after its observation never is. BUG #9 — an
+    observation's pot is paid once."""
 
     def test_observation_by_seq_round_trip(self, db):
         db.save_observation(
@@ -308,31 +310,48 @@ class TestLateArrival:
     def test_observation_missing_returns_none(self, db):
         assert db.get_observation_by_seq(STREAM, PROVIDER_PK, 999) is None
 
-    def test_late_prediction_gets_scored_when_it_arrives(self, db, host):
+    def test_prediction_heard_after_the_cutoff_is_not_paid(self, db, host):
+        """The scorer's window, from the trigger observation to the one
+        predicted, runs on the host's clock: a DM that states a time early
+        in it and reaches the host in its last tenth, when the answer is
+        nearly known, is late."""
         _add_bounty(db, pay=1000, paid_predictors=2)
-        # Both observations arrive before any prediction: nobody to pay
         _observation_arrives(host, 100.0, seq_num=1)
+
+        _predictor_submits(host, 'bob', 'bob_alias', 200.0, seq_num=2,
+                           heard_at=T0 + 2 * CADENCE - 30,
+                           stamped=T0 + CADENCE + 60)
         _observation_arrives(host, 200.0, seq_num=2)
+
+        assert host.transfers == []
         assert db.get_bounty_payments(STREAM, PROVIDER_PK) == []
 
-        # Bob's prediction of seq 2, sent a minute into its window, shows up
-        _predictor_submits(host, 'bob', 'bob_alias', 195.0, seq_num=2)
+    def test_prediction_heard_again_keeps_its_first_time(self, db, host):
+        """A predictor sends its prediction through each relay it is on: the
+        copy a slow relay hands over in the last tenth does not make late
+        the one the host already has."""
+        _add_bounty(db, pay=1000, paid_predictors=2)
+        _observation_arrives(host, 100.0, seq_num=1)
 
-        pays = db.get_bounty_payments(STREAM, PROVIDER_PK)
-        assert [(p['predictor_pubkey'], p['seq_num']) for p in pays] == [
-            ('bob', 2)]
+        _predictor_submits(host, 'bob', 'bob_alias', 195.0, seq_num=2)
+        _predictor_submits(host, 'bob', 'bob_alias', 195.0, seq_num=2,
+                           heard_at=T0 + 2 * CADENCE - 30)
+        _observation_arrives(host, 200.0, seq_num=2)
+
         assert host.transfers == [('bob_alias', 1000)]
 
-    def test_prediction_sent_after_the_cutoff_is_not_paid(self, db, host):
-        """The scorer's window, from the trigger observation to the one
-        predicted, reaches it from the host's saved observations."""
+    def test_prediction_heard_after_its_observation_is_not_paid(self, db, host):
+        """Whatever time it states, and with no window to judge it by too:
+        observation 1 has none before it."""
         _add_bounty(db, pay=1000, paid_predictors=2)
         _observation_arrives(host, 100.0, seq_num=1)
         _observation_arrives(host, 200.0, seq_num=2)
 
-        # Sent in the window's last tenth, when the answer is nearly known
-        _predictor_submits(host, 'bob', 'bob_alias', 200.0, seq_num=2,
-                           sent_at=T0 + 2 * CADENCE - 30)
+        for seq_num, value in ((1, 100.0), (2, 200.0)):
+            _predictor_submits(host, 'bob', 'bob_alias', value,
+                               seq_num=seq_num,
+                               heard_at=T0 + 2 * CADENCE + 5,
+                               stamped=T0 + (seq_num - 1) * CADENCE + 60)
 
         assert host.transfers == []
         assert db.get_bounty_payments(STREAM, PROVIDER_PK) == []
@@ -344,10 +363,8 @@ class TestLateArrival:
         _observation_arrives(host, 100.0)
         assert host.transfers == [('alice_alias', 1000)]
 
-        # Bob's prediction shows up after the pot is paid, and Alice's
-        # again by a second relay: neither is paid from it
-        _predictor_submits(host, 'bob', 'bob_alias', 99.0)
-        _predictor_submits(host, 'alice', 'alice_alias', 98.0)
+        # The observation's scoring runs again: nobody is paid from it
+        asyncio.run(host._bountyScoreAndPay(STREAM, PROVIDER_PK, 1, 100.0))
 
         assert host.transfers == [('alice_alias', 1000)]
         pays = db.get_bounty_payments(STREAM, PROVIDER_PK)

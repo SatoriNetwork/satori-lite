@@ -1272,7 +1272,10 @@ class NetworkDB:
         received_at: int,
         predictor_alias_pubkey: Optional[str] = None,
     ) -> None:
-        """Save a received prediction, replacing any earlier one for this predictor+seq.
+        """Save a received prediction, unless this predictor already has one
+        for this seq: its first stands, the value and the time the host got
+        it, so a copy from a second relay or a second try changes neither
+        (Central's scorer credits a peer's first prediction too).
 
         predictor_alias_pubkey is recorded so the host can open a payment
         channel to pay the predictor without needing a separate lookup.
@@ -1285,13 +1288,7 @@ class NetworkDB:
                 predicted_value, received_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(stream_name, stream_provider_pubkey, predictor_pubkey, seq_num)
-            DO UPDATE SET
-                predicted_value         = excluded.predicted_value,
-                predictor_alias_pubkey = COALESCE(
-                    excluded.predictor_alias_pubkey,
-                    bounty_predictions.predictor_alias_pubkey),
-                received_at             = excluded.received_at
-            WHERE excluded.received_at > bounty_predictions.received_at
+            DO NOTHING
         """, (stream_name, stream_provider_pubkey, predictor_pubkey,
               predictor_alias_pubkey, host_pubkey, seq_num,
               predicted_value, received_at))

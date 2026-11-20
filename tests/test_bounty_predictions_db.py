@@ -70,18 +70,20 @@ class TestSaveBountyPrediction:
         rows = db.get_bounty_predictions('x', 'y', 99)
         assert rows == []
 
-    def test_get_latest_per_predictor(self, db, sample):
-        """If a predictor submits twice for same seq, latest wins."""
+    def test_first_prediction_per_predictor_stands(self, db, sample):
+        """If a predictor submits twice for same seq, the first stands: its
+        value, and when it was received."""
         db.save_bounty_prediction(**sample)
-        updated = {**sample, 'predicted_value': '68000.00',
-                   'received_at': sample['received_at'] + 1}
-        db.save_bounty_prediction(**updated)
+        second = {**sample, 'predicted_value': '68000.00',
+                  'received_at': sample['received_at'] + 1}
+        db.save_bounty_prediction(**second)
         rows = db.get_bounty_predictions(
             sample['stream_name'],
             sample['stream_provider_pubkey'],
             sample['seq_num'])
         assert len(rows) == 1
-        assert rows[0]['predicted_value'] == '68000.00'
+        assert rows[0]['predicted_value'] == '67450.25'
+        assert rows[0]['received_at'] == sample['received_at']
 
     def test_different_seq_nums_separate(self, db, sample):
         db.save_bounty_prediction(**sample)
