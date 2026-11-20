@@ -43,7 +43,7 @@ satori-lite/
   engine-lite/         Forecasting engine, adapters, storage, model code
   lib-lite/            Vendored subset of satorilib used by the neuron
   web/                 Operator web interface (Flask application)
-  docs/                Architecture, guides, and implementation notes
+  docs/                Architecture, guides, and plans
   migrations/          Schema migrations for local persistence
   tests/               Unit, integration, and performance test suites
   Dockerfile           Container build for the full neuron
@@ -294,7 +294,6 @@ In-tree documentation is organized under `docs/`:
 - `docs/architecture/` — system design and component interactions.
 - `docs/engine/` — forecasting engine internals and training pipeline.
 - `docs/guides/` — operator and developer guides.
-- `docs/implementation/` — implementation notes for specific subsystems.
 - `docs/plans/` — design and test plans.
 
 ## Contributing

@@ -48,7 +48,6 @@ class MockServerClient:
 
     def __init__(self):
         self.published_predictions = []
-        self.observations = []
 
     def publish(self, topic, data, observationTime, observationHash, isPrediction=False, useAuthorizedCall=True):
         self.published_predictions.append({
@@ -58,16 +57,6 @@ class MockServerClient:
             'hash': observationHash
         })
         return True
-
-    def getObservations(self, streamId: str) -> list:
-        return self.observations
-
-    def addObservation(self, ts, value, hash_val):
-        self.observations.append({
-            'ts': ts,
-            'value': value,
-            'hash': hash_val
-        })
 
 
 class MockWallet:
