@@ -11,7 +11,6 @@ import pandas as pd
 import pytest
 
 from satorilib.concepts.structs import Stream, StreamId
-from satoriengine.veda import engine as engineModule
 from satoriengine.veda.engine import Engine, StreamModel
 from satoriengine.veda.storage import EngineStorageManager
 
@@ -38,8 +37,6 @@ def streams():
 def storage(tmp_path, monkeypatch):
     s = EngineStorageManager(data_dir=str(tmp_path), dbname='engine.db')
     monkeypatch.setattr(EngineStorageManager, '_instance', s)  # what Engine() takes
-    # Engine() opens the alias file, making one if none: here, not in the checkout
-    monkeypatch.setattr(engineModule, '_aliasPath', lambda: str(tmp_path / 'alias.yaml'))
     yield s
     s.close()
     s.stream_store.close()
@@ -66,8 +63,6 @@ def test_engine_from_neuron_holds_its_streams_and_alias(streams, storage):
         subscriptions=[sub], publications=[pub], server=server, alias=alias)
     assert engine.server is server and engine.alias is alias
     assert engine.subscriptionStreams == [sub] and engine.publicationStreams == [pub]
-    assert list(engine.subscriptions) == [sub.streamId.uuid]
-    assert list(engine.publications) == [pub.streamId.uuid]
     assert engine.storage is storage
 
 
@@ -75,7 +70,7 @@ def test_model_starts_from_the_stored_history(streams, storage):
     storage.storeStreamData(streams[0].streamId.uuid, pd.DataFrame(
         {'epoch': [BASE, BASE + HOUR], 'value': [1.0, 2.0], 'id': ['a', 'b']}))
     m = model(streams, storage)
-    assert m.useServer and m.sink == 'central' and m.storage is storage
+    assert m.sink == 'central' and m.storage is storage
     assert list(m.data['value']) == [1.0, 2.0]
 
 

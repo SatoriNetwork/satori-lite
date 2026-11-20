@@ -155,9 +155,9 @@ def producePrediction(self, updatedModel=None):
     forecast = model.predict(data=self.data)
 
     # 5. Pass to server (batched)
-    self.passPredictionData(forecast, passToCentralServer=True)
+    self.passPredictionData(forecast)
 
-def publishPredictionToServer(self, forecast, useBatch=True):
+def passPredictionData(self, forecast):
     # 6. Store prediction locally
     self.storage.storePrediction(...)
 
@@ -688,7 +688,7 @@ Submitting batch of 40 predictions to server...
 3. Model Prediction (immediately after data received)
    ├─ onDataReceived(df) → Store data
    ├─ producePrediction() → Generate forecast
-   └─ publishPredictionToServer() → Queue prediction
+   └─ passPredictionData() → Queue prediction
 
 4. Batch Submission (after all models predict)
    ├─ collectAndSubmitPredictions() → Collect from all models

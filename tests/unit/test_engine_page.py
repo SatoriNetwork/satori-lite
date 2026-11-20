@@ -23,7 +23,7 @@ OBSERVED = [(NOW - 3 * HOUR, 100.0), (NOW - 2 * HOUR, 110.0), (NOW - HOUR, 120.0
 @pytest.fixture
 def storage(tmp_path):
     s = EngineStorageManager(data_dir=str(tmp_path), dbname='engine.db')
-    # as the engine stores them (engine.py: storeStreamData, publishPredictionToServer)
+    # as the engine stores them (engine.py: storeStreamData, passPredictionData)
     s.storeStreamData(OBS, pd.DataFrame({
         'epoch': [e for e, _ in OBSERVED],
         'value': [v for _, v in OBSERVED],

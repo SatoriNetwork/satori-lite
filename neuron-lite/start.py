@@ -4703,14 +4703,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         """filter down to prediciton publications"""
         return [s for s in streams if s.predicting is None]
 
-    def removePair(self, pub: StreamId, sub: StreamId):
-        self.publications = [p for p in self.publications if p.streamId != pub]
-        self.subscriptions = [s for s in self.subscriptions if s.streamId != sub]
-
-    def addToEngine(self, stream: Stream, publication: Stream):
-        if self.aiengine is not None:
-            self.aiengine.addStream(stream, publication)
-
     def getMatchingStream(self, streamId: StreamId) -> Union[StreamId, None]:
         for stream in self.publications:
             if stream.streamId == streamId:

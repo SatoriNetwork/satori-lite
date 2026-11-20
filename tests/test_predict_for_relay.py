@@ -83,11 +83,9 @@ def test_central_producePrediction_still_routes_to_sink():
     m = make_model(_frame(10, 8))
     captured = {}
 
-    def fake_pass(df, passToCentral=False):
+    def fake_pass(df):
         captured['value'] = float(df['value'].iloc[0])
-        captured['passToCentral'] = passToCentral
 
     m.passPredictionData = fake_pass
     m.producePrediction()  # updatedModel=None -> central live path
     assert 'value' in captured
-    assert captured['passToCentral'] is True
