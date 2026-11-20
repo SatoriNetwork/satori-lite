@@ -1922,13 +1922,8 @@ def register_routes(app):
                 now_utc = pd.Timestamp.utcnow()
                 # Add stored prediction tables from local DB.
                 for table_name in storage.listAllStreams():
-                    if table_name in ('streams', 'sqlite_sequence'):
-                        continue
                     if table_name in known_prediction_ids:
                         continue
-                    if storage.getStreamRowCount(table_name) <= 0:
-                        continue
-
                     table_df = storage.getPredictions(table_name)
                     if table_df.empty or 'provider' not in table_df.columns:
                         continue
@@ -1990,58 +1985,20 @@ def register_routes(app):
                     except Exception:
                         continue
 
-            # Find most recent observation across all active models so the UI
-            # can distinguish "engine idle waiting for data" from "engine
-            # actively receiving observations".
-            def _parse_ts_series(ts_series):
-                """Parse a ts column/index, auto-detecting s/ms/ns from magnitude.
-                Mirrors the normalize_ts_column logic in the performance endpoint."""
-                parsed = pd.to_datetime(ts_series, errors='coerce', utc=True)
-                numeric = pd.to_numeric(ts_series, errors='coerce')
-                numeric_mask = numeric.notna()
-                if numeric_mask.any():
-                    median_abs = float(numeric[numeric_mask].abs().median())
-                    if median_abs < 1e11:
-                        unit = 's'
-                    elif median_abs < 1e14:
-                        unit = 'ms'
-                    else:
-                        unit = 'ns'
-                    parsed.loc[numeric_mask] = pd.to_datetime(
-                        numeric[numeric_mask], errors='coerce', utc=True, unit=unit
-                    )
-                return parsed
-
-            last_obs_ts = None
-            try:
-                import pandas as pd  # ensure available even if storage is None
-                for obs_uuid, model in stream_models.items():
-                    model_storage = getattr(model, 'storage', None)
-                    if model_storage is None:
-                        continue
-                    try:
-                        df = model_storage.getStreamData(obs_uuid)
-                    except Exception:
-                        df = None
-                    if df is None or df.empty:
-                        continue
-                    try:
-                        ts_series = df['ts'] if 'ts' in df.columns else df.index.to_series()
-                        parsed = _parse_ts_series(ts_series)
-                        max_ts = parsed.max()
-                        if pd.notna(max_ts) and (last_obs_ts is None or max_ts > last_obs_ts):
-                            last_obs_ts = max_ts
-                    except Exception:
-                        continue
-            except Exception:
-                last_obs_ts = None
+            # The newest observation across the active models, so the UI can tell
+            # "engine idle waiting for data" from "engine receiving observations".
+            latest = [e for e in (
+                model.storage.getLatestStreamTimestamp(obs_uuid)
+                for obs_uuid, model in stream_models.items()
+                if getattr(model, 'storage', None) is not None) if e is not None]
 
             return jsonify({
                 'streams': sorted(streams, key=lambda x: (x.get('stream_name') or '').lower()),
                 'count': len(streams),
                 'active_model_count': len(stream_models),
                 'predictions_24h_total': predictions_24h_total,
-                'last_observation_ts': last_obs_ts.isoformat() if last_obs_ts is not None else None,
+                'last_observation_ts': datetime.datetime.fromtimestamp(
+                    max(latest), datetime.timezone.utc).isoformat() if latest else None,
             })
         except Exception as e:
             logger.error(f"Error getting engine streams: {e}")

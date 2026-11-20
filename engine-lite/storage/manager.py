@@ -71,16 +71,9 @@ class EngineStorageManager:
         return self.db.insertRow(streamUuid, timestamp, value, hash_val, provider)
 
     def getStreamData(self, streamUuid: str) -> pd.DataFrame:
-        """
-        Get all data for a stream.
-
-        Args:
-            streamUuid: The stream UUID
-
-        Returns:
-            DataFrame with columns: value, hash, provider (index: ts)
-        """
-        return self.db.getTableData(streamUuid)
+        """A stream's observations from the StreamStore, oldest first: column
+        value, index ts (epoch seconds), as the web routes chart them."""
+        return self.stream_store.observations(streamUuid).set_index('epoch').rename_axis('ts')[['value']]
 
     def getStreamDataForEngine(self, streamUuid: str) -> pd.DataFrame:
         """
@@ -98,9 +91,9 @@ class EngineStorageManager:
         """Get number of rows for a stream."""
         return self.stream_store.row_count(streamUuid)
 
-    def getLatestStreamTimestamp(self, streamUuid: str) -> Optional[str]:
-        """Get the latest timestamp for a stream."""
-        return self.db.getLatestTimestamp(streamUuid)
+    def getLatestStreamTimestamp(self, streamUuid: str) -> Optional[float]:
+        """The newest observation's epoch seconds, None if it has none."""
+        return self.stream_store.latest_epoch(streamUuid)
 
     # ==================== Prediction Data Methods ====================
 
@@ -190,8 +183,10 @@ class EngineStorageManager:
         return self.getStreamDataForEngine(streamUuid)
 
     def listAllStreams(self) -> list:
-        """List all stream UUIDs stored in the database."""
-        return self.db.listTables()
+        """The per-stream tables: each prediction stream's, and the observations
+        from before the StreamStore (whose tables are not streams)."""
+        return [t for t in self.db.listTables()
+                if t not in ('streams', 'sqlite_sequence', 'observations', '_satori_migrations')]
 
     def deleteStreamData(self, streamUuid: str):
         """Delete all data for a stream."""

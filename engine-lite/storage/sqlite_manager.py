@@ -282,23 +282,6 @@ class EngineSqliteDatabase:
                 error(f"Engine DB: Error getting row count for {table_uuid}: {e}")
                 return 0
 
-    def getLatestTimestamp(self, table_uuid: str) -> Optional[str]:
-        """Get the latest timestamp from a table."""
-        with self._lock:
-            try:
-                if not self._tableExistsLocked(table_uuid):
-                    return None
-                cur = self.conn.cursor()
-                cur.execute(
-                    f'''SELECT ts FROM "{table_uuid}"
-                    ORDER BY ts DESC
-                    LIMIT 1''')
-                result = cur.fetchone()
-                return result[0] if result else None
-            except Exception as e:
-                error(f"Engine DB: Error getting latest timestamp from {table_uuid}: {e}")
-                return None
-
     def deleteTable(self, table_uuid: str):
         """Delete a table from the database."""
         with self._lock:

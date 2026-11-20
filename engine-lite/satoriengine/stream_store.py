@@ -169,22 +169,34 @@ class StreamStore:
             self._conn.commit()
             return self._conn.total_changes - before
 
+    def observations(self, stream_uuid: str) -> pd.DataFrame:
+        """A stream's stored rows as stored, oldest first: columns
+        ``[epoch, value, id]``."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT epoch, value, id FROM observations "
+                "WHERE stream_uuid = ? ORDER BY epoch",
+                (stream_uuid,)).fetchall()
+        return pd.DataFrame(rows, columns=['epoch', 'value', 'id'])
+
     def history(self, stream_uuid: str) -> pd.DataFrame:
         """Return a stream's full history as the engine-ready frame —
         columns ``[date_time, value, id]``, sorted oldest-first.
 
         This is the single epoch -> datetime64 conversion point.
         """
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT epoch, value, id FROM observations "
-                "WHERE stream_uuid = ? ORDER BY epoch",
-                (stream_uuid,)).fetchall()
-        if not rows:
+        df = self.observations(stream_uuid)
+        if df.empty:
             return pd.DataFrame(columns=ENGINE_COLUMNS)
-        df = pd.DataFrame(rows, columns=['epoch', 'value', 'id'])
         df['date_time'] = pd.to_datetime(df['epoch'], unit='s', utc=True)
         return df[ENGINE_COLUMNS]
+
+    def latest_epoch(self, stream_uuid: str) -> float | None:
+        """The newest stored observation's epoch, None if it has none."""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT MAX(epoch) FROM observations WHERE stream_uuid = ?",
+                (stream_uuid,)).fetchone()[0]
 
     def row_count(self, stream_uuid: str) -> int:
         """Number of stored observations for a stream."""
