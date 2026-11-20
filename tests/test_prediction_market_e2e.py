@@ -1,163 +1,80 @@
-"""End-to-end wiring test for the prediction market.
+"""End-to-end wiring test for the prediction market, on the host's real code.
 
-Exercises the full predictor→host→payment path without mocking the pieces
-under test:
+  1. A predictor's submission (with its alias pubkey) reaches the host
+     through the real listener, _incomingPredictionsLoop, which saves it.
+  2. An observation reaches the host through _networkProcessObservation,
+     which saves it and runs the real pay loop: _bountyScoreAndPay scores
+     with the bounty's metric, _bountyPayPredictor records each payment and
+     pays it over a channel to the alias read from the prediction's row.
+  3. The leaderboard and host stats reflect the real numbers.
 
-  1. A predictor builds a PredictionSubmission (with alias pubkey) and
-     delivers it to the host via the same save path the real listener uses.
-  2. The host's scoring pipeline runs on a new observation using
-     compute_payouts + the MAE scorer.
-  3. The alias pubkey is read from the bounty_predictions table
-     (not from subscriptions) — this is the fix for the alias-lookup bug.
-  4. A simulated channel payment is recorded in bounty_payments.
-  5. The leaderboard and host stats reflect the real numbers.
+Only openChannel and sendChannelPayment are stand-ins, because the real ones
+need a funded alias and a relay. They keep the host's channel rows as the
+real ones do and list each transfer.
 
-The payment primitives (openChannel, sendChannelPayment) are replaced with
-deterministic stubs because they otherwise require a live alias + relay.
-Everything else — DB writes, scoring, alias-pubkey propagation — is real.
+The stream has a clock of its own, so the scorer's submission window never
+depends on how fast the test runs: observation n is at T0 + n * CADENCE, and
+a prediction of it is sent a minute after observation n - 1 unless the test
+says when.
 """
 
-import importlib.util
-import os
-import sys
-import tempfile
-import time
+import asyncio
+import unittest.mock as mock
+
 import pytest
 
-_NEURON_LITE = os.path.join(os.path.dirname(__file__), '..', 'neuron-lite')
+from satorilib.satori_nostr.models import (
+    DatastreamObservation, InboundObservation, InboundPrediction,
+    PredictionSubmission)
+from satorineuron.network_db import NetworkDB
 
-# Load network_db
-_db_spec = importlib.util.spec_from_file_location(
-    'network_db',
-    os.path.join(_NEURON_LITE, 'satorineuron', 'network_db.py'))
-_db_mod = importlib.util.module_from_spec(_db_spec)
-_db_spec.loader.exec_module(_db_mod)
-NetworkDB = _db_mod.NetworkDB
+from tests.neuron_start import start
 
-# Load bounty_scoring
-_cs_spec = importlib.util.spec_from_file_location(
-    'bounty_scoring',
-    os.path.join(_NEURON_LITE, 'satorineuron', 'bounty_scoring.py'))
-_cs_mod = importlib.util.module_from_spec(_cs_spec)
-_cs_spec.loader.exec_module(_cs_mod)
-compute_payouts = _cs_mod.compute_payouts
-
-
-# ── Fake payment adapter ─────────────────────────────────────────────────────
-
-class FakePaymentAdapter:
-    """Stand-in for the host's channel layer.
-
-    Mirrors what _bountyPayPredictor does: opens a channel if needed,
-    then sends a payment. Here we just record the calls so the test can
-    assert the correct alias pubkey was resolved and routed to.
-    """
-    def __init__(self):
-        self.channels: dict[str, dict] = {}  # receiver_alias -> channel dict
-        self.payments: list[dict] = []  # list of {receiver_alias, sats, stream}
-
-    def open_channel(self, receiver_alias_pubkey: str, amount_sats: int) -> str:
-        p2sh = f'p2sh_for_{receiver_alias_pubkey}'
-        self.channels[receiver_alias_pubkey] = {
-            'p2sh_address': p2sh,
-            'receiver_pubkey': receiver_alias_pubkey,
-            'remainder_sats': amount_sats,
-        }
-        return p2sh
-
-    def send_payment(self, p2sh_address: str, sats: int, stream_name: str):
-        # Deduct from channel balance
-        for ch in self.channels.values():
-            if ch['p2sh_address'] == p2sh_address:
-                ch['remainder_sats'] -= sats
-                break
-        self.payments.append({
-            'p2sh_address': p2sh_address,
-            'sats': sats,
-            'stream_name': stream_name,
-        })
-
-    def get_channel_for(self, receiver_alias_pubkey: str, min_sats: int):
-        ch = self.channels.get(receiver_alias_pubkey)
-        if ch and ch['remainder_sats'] >= min_sats:
-            return ch
-        return None
-
-
-def score_and_pay(
-    db: NetworkDB,
-    payment_adapter: FakePaymentAdapter,
-    stream_name: str,
-    stream_provider_pubkey: str,
-    host_pubkey: str,
-    seq_num: int,
-    observed_value,
-):
-    """Host-side pipeline that mirrors _bountyScoreAndPay +
-    _bountyPayPredictor without async/network concerns.
-
-    The purpose is to hit the exact same alias-lookup-from-predictions
-    path that the real code uses, so the test exercises the bug fix.
-    """
-    bounty = db.get_bounty(
-        stream_name, stream_provider_pubkey, host_pubkey)
-    if not bounty or not bounty.get('active'):
-        return
-    try:
-        observed = float(observed_value)
-    except (TypeError, ValueError):
-        return
-
-    predictions = db.get_bounty_predictions(
-        stream_name, stream_provider_pubkey, seq_num)
-    if not predictions:
-        return
-
-    payouts = compute_payouts(bounty, predictions, observed)
-    preds_by_pubkey = {row['predictor_pubkey']: row for row in predictions}
-
-    for predictor_pubkey, sats in payouts.items():
-        row = preds_by_pubkey.get(predictor_pubkey) or {}
-        alias_pubkey = row.get('predictor_alias_pubkey')
-        if not alias_pubkey:
-            # This is the bug-fix gate: if alias pubkey wasn't carried
-            # through, we skip. In the broken code this was always the
-            # outcome — the test asserts it is NOT the outcome here.
-            continue
-
-        channel = payment_adapter.get_channel_for(alias_pubkey, sats)
-        if not channel:
-            p2sh = payment_adapter.open_channel(alias_pubkey, 1_000_000)
-            channel = payment_adapter.get_channel_for(alias_pubkey, sats)
-            assert channel is not None
-
-        payment_adapter.send_payment(channel['p2sh_address'], sats, stream_name)
-        db.record_bounty_payment(
-            stream_name=stream_name,
-            stream_provider_pubkey=stream_provider_pubkey,
-            predictor_pubkey=predictor_pubkey,
-            seq_num=seq_num,
-            sats_paid=sats,
-            paid_at=int(time.time()),
-        )
+HOST_PK = 'host_nostr_pk'
+PROVIDER_PK = 'provider_nostr_pk'
+STREAM = 'btc-price-usd'
+T0 = 1_700_000_000
+CADENCE = 600
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def db():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield NetworkDB(os.path.join(tmpdir, 'e2e.db'))
+def db(tmp_path):
+    return NetworkDB(str(tmp_path / 'e2e.db'))
 
 
 @pytest.fixture
-def adapter():
-    return FakePaymentAdapter()
+def host(db, monkeypatch):
+    """A StartupDag hosting bounties on a real NetworkDB (object.__new__
+    skips __init__, which needs a wallet). host.transfers lists each channel
+    transfer as (receiver's alias pubkey, sats)."""
+    # An empty config, whatever neuron-lite/config holds on this box.
+    monkeypatch.setattr(
+        start, 'config', mock.MagicMock(**{'get.return_value': {}}))
+    h = object.__new__(start.StartupDag)
+    h.networkDB = db
+    h.nostrPubkey = HOST_PK
+    h.transfers = []
 
+    async def openChannel(receiver_pubkey, amount_sats, minutes=None,
+                          blocks=None, receiver_nostr_pubkey=None):
+        p2sh = f'p2sh_for_{receiver_pubkey}'
+        db.save_channel(
+            p2sh, 'host_alias', receiver_pubkey, 'redeem', 'funding', 0,
+            amount_sats, amount_sats, True, blocks, minutes,
+            receiver_nostr_pubkey=receiver_nostr_pubkey)
+        return p2sh
 
-HOST_PK = 'host_nostr_pk'
-PROVIDER_PK = 'provider_nostr_pk'
-STREAM = 'btc-price-usd'
+    async def sendChannelPayment(p2sh_address, pay_amount_sats, stream_name=''):
+        channel = db.get_channel(p2sh_address)
+        db.update_channel_remainder(
+            p2sh_address, channel['remainder_sats'] - pay_amount_sats)
+        h.transfers.append((channel['receiver_pubkey'], pay_amount_sats))
+
+    h.openChannel = openChannel
+    h.sendChannelPayment = sendChannelPayment
+    return h
 
 
 def _add_bounty(db, pay=1000, paid_predictors=3):
@@ -172,24 +89,49 @@ def _add_bounty(db, pay=1000, paid_predictors=3):
         scoring_params='{}',
         horizon=1,
         active=True,
-        timestamp=int(time.time()),
+        timestamp=T0,
     )
 
 
-def _predictor_submits(db, predictor_pk, alias_pk, predicted_value,
-                       seq_num=1):
-    """Simulate a prediction DM arriving at the host: save to DB with
-    alias pubkey, the same way _incomingPredictionsLoop does."""
-    db.save_bounty_prediction(
+def _predictor_submits(host, predictor_pk, alias_pk, predicted_value,
+                       seq_num=1, sent_at=None):
+    """A prediction DM arrives at the host: the real listener saves it, and
+    scores it at once when its observation is already in."""
+    if sent_at is None:
+        sent_at = T0 + (seq_num - 1) * CADENCE + 60
+
+    class Relay:
+        async def incoming_predictions(self):
+            yield InboundPrediction(
+                prediction=PredictionSubmission(
+                    stream_name=STREAM,
+                    stream_provider_pubkey=PROVIDER_PK,
+                    predictor_pubkey=predictor_pk,
+                    predictor_alias_pubkey=alias_pk,
+                    seq_num=seq_num,
+                    predicted_value=predicted_value,
+                    timestamp=sent_at),
+                event_id=f'pred-{predictor_pk}-{seq_num}')
+
+    asyncio.run(host._incomingPredictionsLoop(Relay(), 'relay'))
+
+
+def _observation_arrives(host, value, seq_num=1):
+    """An observation of the stream arrives at the host: saved, then scored
+    and paid."""
+    asyncio.run(host._networkProcessObservation(InboundObservation(
         stream_name=STREAM,
-        stream_provider_pubkey=PROVIDER_PK,
-        predictor_pubkey=predictor_pk,
-        host_pubkey=HOST_PK,
-        seq_num=seq_num,
-        predicted_value=str(predicted_value),
-        received_at=int(time.time()),
-        predictor_alias_pubkey=alias_pk,
-    )
+        nostr_pubkey=PROVIDER_PK,
+        observation=DatastreamObservation(
+            stream_name=STREAM,
+            timestamp=T0 + seq_num * CADENCE,
+            value=value,
+            seq_num=seq_num),
+        event_id=f'obs-{seq_num}')))
+
+
+def _paid_channels(db):
+    return {c['receiver_pubkey'] for c in db.get_channels_as_sender()}
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
@@ -198,67 +140,58 @@ class TestAliasPubkeyPropagation:
     """BUG #1 — alias pubkey must be read from the predictions table,
     not looked up via subscriptions/get_active."""
 
-    def test_alias_pubkey_stored_with_prediction(self, db):
+    def test_alias_pubkey_stored_with_prediction(self, db, host):
         _add_bounty(db)
-        _predictor_submits(db, 'alice_nostr', 'alice_alias', 100.0)
+        _predictor_submits(host, 'alice_nostr', 'alice_alias', 100.0)
 
         rows = db.get_bounty_predictions(STREAM, PROVIDER_PK, 1)
         assert len(rows) == 1
         assert rows[0]['predictor_alias_pubkey'] == 'alice_alias'
 
-    def test_payment_flows_to_alias_from_prediction_row(self, db, adapter):
+    def test_payment_flows_to_alias_from_prediction_row(self, db, host):
         _add_bounty(db)
-        _predictor_submits(db, 'alice_nostr', 'alice_alias', 100.0)
+        _predictor_submits(host, 'alice_nostr', 'alice_alias', 100.0)
 
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value=100.0)
+        _observation_arrives(host, 100.0)
 
-        assert len(adapter.payments) == 1
-        assert adapter.payments[0]['sats'] == 1000
-        assert 'alice_alias' in adapter.channels
+        assert host.transfers == [('alice_alias', 1000)]
+        assert _paid_channels(db) == {'alice_alias'}
 
-    def test_predictor_with_no_alias_pubkey_is_skipped(self, db, adapter):
-        """Safety: if (somehow) the prediction row has no alias, skip the
-        payment rather than crashing or paying the wrong person."""
+    def test_predictor_with_no_alias_pubkey_gets_no_transfer(self, db, host):
+        """Safety: if (somehow) the prediction row has no alias, the score
+        is recorded (the leaderboard's and the dedup's) and the transfer is
+        skipped rather than crashing or paying the wrong person."""
         _add_bounty(db)
-        db.save_bounty_prediction(
-            stream_name=STREAM,
-            stream_provider_pubkey=PROVIDER_PK,
-            predictor_pubkey='alice_nostr',
-            host_pubkey=HOST_PK,
-            seq_num=1,
-            predicted_value='100.0',
-            received_at=int(time.time()),
-            predictor_alias_pubkey=None,
-        )
+        _predictor_submits(host, 'alice_nostr', None, 100.0)
 
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value=100.0)
-        assert adapter.payments == []
-        assert db.get_bounty_payments(STREAM, PROVIDER_PK) == []
+        _observation_arrives(host, 100.0)
+
+        assert host.transfers == []
+        assert _paid_channels(db) == set()
+        pays = db.get_bounty_payments(STREAM, PROVIDER_PK)
+        assert [(p['predictor_pubkey'], p['sats_paid']) for p in pays] == [
+            ('alice_nostr', 1000)]
 
 
 class TestEndToEndScoringRun:
-    """Full predictor → host → payment round trip with multiple predictors."""
+    """Full predictor → host → payment round trip with multiple predictors.
 
-    def test_three_predictors_one_observation(self, db, adapter):
+    Each error is non-zero: under inverse-error weighting an exact
+    prediction takes the whole pot and the others get nothing."""
+
+    def test_three_predictors_one_observation(self, db, host):
         _add_bounty(db, pay=1000, paid_predictors=3)
-        # Use non-zero errors so inverse-error weighting splits between all three
-        _predictor_submits(db, 'alice', 'alice_alias', 98.0)    # err=2
-        _predictor_submits(db, 'bob',   'bob_alias',   95.0)    # err=5
-        _predictor_submits(db, 'carol', 'carol_alias', 80.0)    # err=20
+        _predictor_submits(host, 'alice', 'alice_alias', 98.0)    # err=2
+        _predictor_submits(host, 'bob',   'bob_alias',   95.0)    # err=5
+        _predictor_submits(host, 'carol', 'carol_alias', 80.0)    # err=20
 
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value=100.0)
+        _observation_arrives(host, 100.0)
 
-        # All three paid (non-zero errors mean none dominates)
-        assert len(adapter.payments) == 3
+        # All three paid, each over a channel to its own alias
+        assert len(host.transfers) == 3
+        assert _paid_channels(db) == {'alice_alias', 'bob_alias', 'carol_alias'}
         # Total pot respected
-        assert sum(p['sats'] for p in adapter.payments) <= 1000
-        # All three aliases had channels opened
-        assert 'alice_alias' in adapter.channels
-        assert 'bob_alias' in adapter.channels
-        assert 'carol_alias' in adapter.channels
+        assert sum(sats for _, sats in host.transfers) <= 1000
 
         # bounty_payments table populated
         pays = db.get_bounty_payments(STREAM, PROVIDER_PK)
@@ -268,36 +201,32 @@ class TestEndToEndScoringRun:
         assert by_pk['alice']['sats_paid'] >= by_pk['bob']['sats_paid']
         assert by_pk['bob']['sats_paid'] >= by_pk['carol']['sats_paid']
 
-    def test_paid_predictors_cap_honoured(self, db, adapter):
+    def test_paid_predictors_cap_honoured(self, db, host):
         """paid_predictors=2 means only the top 2 get paid even with 3 submissions."""
         _add_bounty(db, pay=1000, paid_predictors=2)
-        _predictor_submits(db, 'alice', 'alice_alias', 100.0)
-        _predictor_submits(db, 'bob',   'bob_alias',    95.0)
-        _predictor_submits(db, 'carol', 'carol_alias',  50.0)
+        _predictor_submits(host, 'alice', 'alice_alias', 98.0)
+        _predictor_submits(host, 'bob',   'bob_alias',   95.0)
+        _predictor_submits(host, 'carol', 'carol_alias', 50.0)
 
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value=100.0)
+        _observation_arrives(host, 100.0)
 
-        assert len(adapter.payments) == 2
-        paid_aliases = set(adapter.channels.keys())
-        assert paid_aliases == {'alice_alias', 'bob_alias'}
+        assert len(host.transfers) == 2
+        assert _paid_channels(db) == {'alice_alias', 'bob_alias'}
 
-    def test_leaderboard_aggregates_multiple_observations(self, db, adapter):
+    def test_leaderboard_aggregates_multiple_observations(self, db, host):
         _add_bounty(db, pay=1000, paid_predictors=2)
         # seq 1
-        _predictor_submits(db, 'alice', 'alice_alias', 100.0, seq_num=1)
-        _predictor_submits(db, 'bob',   'bob_alias',    50.0, seq_num=1)
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value=100.0)
+        _predictor_submits(host, 'alice', 'alice_alias', 99.0, seq_num=1)
+        _predictor_submits(host, 'bob',   'bob_alias',   50.0, seq_num=1)
+        _observation_arrives(host, 100.0, seq_num=1)
         # seq 2
-        _predictor_submits(db, 'alice', 'alice_alias', 200.0, seq_num=2)
-        _predictor_submits(db, 'bob',   'bob_alias',   150.0, seq_num=2)
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=2, observed_value=200.0)
+        _predictor_submits(host, 'alice', 'alice_alias', 199.0, seq_num=2)
+        _predictor_submits(host, 'bob',   'bob_alias',   150.0, seq_num=2)
+        _observation_arrives(host, 200.0, seq_num=2)
 
         board = db.get_bounty_leaderboard(STREAM, PROVIDER_PK)
         by_pk = {r['predictor_pubkey']: r for r in board}
-        # Alice predicted exactly both times and should outrank Bob
+        # Alice was the closer both times and should outrank Bob
         assert by_pk['alice']['total_sats'] > by_pk['bob']['total_sats']
         assert by_pk['alice']['prediction_count'] == 2
         assert by_pk['bob']['prediction_count'] == 2
@@ -312,14 +241,13 @@ class TestEndToEndScoringRun:
 class TestNonNumericObservation:
     """BUG #5 — scoring pipeline must not crash on non-numeric observations."""
 
-    def test_non_numeric_value_does_not_crash(self, db, adapter):
+    def test_non_numeric_value_does_not_crash(self, db, host):
         _add_bounty(db)
-        _predictor_submits(db, 'alice', 'alice_alias', 100.0)
+        _predictor_submits(host, 'alice', 'alice_alias', 100.0)
 
         # Should silently skip rather than raise
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value='not-a-number')
-        assert adapter.payments == []
+        _observation_arrives(host, 'not-a-number')
+        assert host.transfers == []
         assert db.get_bounty_payments(STREAM, PROVIDER_PK) == []
 
 
@@ -359,10 +287,10 @@ class TestJoinedBounties:
 
 
 class TestLateArrival:
-    """BUG #6 — if a prediction arrives after its observation, a second
-    scoring pass should still pay the predictor. Here we verify the
-    idempotent building blocks (observation by seq, re-scoring the same
-    seq adds more predictions)."""
+    """BUG #6 — a prediction sent in time whose DM arrives after its
+    observation is scored when it arrives, while the observation's pot is
+    unpaid. BUG #9 — an observation is scored once: its pot is not paid
+    again to whoever arrives after."""
 
     def test_observation_by_seq_round_trip(self, db):
         db.save_observation(
@@ -371,7 +299,7 @@ class TestLateArrival:
             value='100.0',
             event_id='evt-1',
             seq_num=42,
-            observed_at=int(time.time()))
+            observed_at=T0)
         row = db.get_observation_by_seq(STREAM, PROVIDER_PK, 42)
         assert row is not None
         assert row['seq_num'] == 42
@@ -380,19 +308,47 @@ class TestLateArrival:
     def test_observation_missing_returns_none(self, db):
         assert db.get_observation_by_seq(STREAM, PROVIDER_PK, 999) is None
 
-    def test_late_prediction_gets_scored_on_second_pass(self, db, adapter):
+    def test_late_prediction_gets_scored_when_it_arrives(self, db, host):
         _add_bounty(db, pay=1000, paid_predictors=2)
-        # Alice predicts early, observation arrives, she gets paid
-        _predictor_submits(db, 'alice', 'alice_alias', 100.0)
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value=100.0)
-        assert len(db.get_bounty_payments(STREAM, PROVIDER_PK)) == 1
+        # Both observations arrive before any prediction: nobody to pay
+        _observation_arrives(host, 100.0, seq_num=1)
+        _observation_arrives(host, 200.0, seq_num=2)
+        assert db.get_bounty_payments(STREAM, PROVIDER_PK) == []
 
-        # Bob's prediction shows up late (after scoring already ran)
-        _predictor_submits(db, 'bob', 'bob_alias', 95.0)
-        # Re-running the pipeline picks Bob up and pays him too
-        score_and_pay(db, adapter, STREAM, PROVIDER_PK, HOST_PK,
-                      seq_num=1, observed_value=100.0)
+        # Bob's prediction of seq 2, sent a minute into its window, shows up
+        _predictor_submits(host, 'bob', 'bob_alias', 195.0, seq_num=2)
+
         pays = db.get_bounty_payments(STREAM, PROVIDER_PK)
-        payees = {p['predictor_pubkey'] for p in pays}
-        assert 'bob' in payees
+        assert [(p['predictor_pubkey'], p['seq_num']) for p in pays] == [
+            ('bob', 2)]
+        assert host.transfers == [('bob_alias', 1000)]
+
+    def test_prediction_sent_after_the_cutoff_is_not_paid(self, db, host):
+        """The scorer's window, from the trigger observation to the one
+        predicted, reaches it from the host's saved observations."""
+        _add_bounty(db, pay=1000, paid_predictors=2)
+        _observation_arrives(host, 100.0, seq_num=1)
+        _observation_arrives(host, 200.0, seq_num=2)
+
+        # Sent in the window's last tenth, when the answer is nearly known
+        _predictor_submits(host, 'bob', 'bob_alias', 200.0, seq_num=2,
+                           sent_at=T0 + 2 * CADENCE - 30)
+
+        assert host.transfers == []
+        assert db.get_bounty_payments(STREAM, PROVIDER_PK) == []
+
+    def test_scored_observation_is_not_scored_again(self, db, host):
+        _add_bounty(db, pay=1000, paid_predictors=2)
+        # Alice predicts early, observation arrives, she gets the pot
+        _predictor_submits(host, 'alice', 'alice_alias', 98.0)
+        _observation_arrives(host, 100.0)
+        assert host.transfers == [('alice_alias', 1000)]
+
+        # Bob's prediction shows up after the pot is paid, and Alice's
+        # again by a second relay: neither is paid from it
+        _predictor_submits(host, 'bob', 'bob_alias', 99.0)
+        _predictor_submits(host, 'alice', 'alice_alias', 98.0)
+
+        assert host.transfers == [('alice_alias', 1000)]
+        pays = db.get_bounty_payments(STREAM, PROVIDER_PK)
+        assert {p['predictor_pubkey'] for p in pays} == {'alice'}
