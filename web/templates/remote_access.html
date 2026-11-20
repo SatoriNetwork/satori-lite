@@ -115,7 +115,13 @@
             with it closed, and only that machine itself (so your tunnel) can reach this page:
         </p>
         <span class="ra-cmd">SATORI_UI_BIND=127.0.0.1 ./satori {{ instance }} restart</span>
-        <p>Give it each time you restart, or the port opens again.</p>
+        <p>Give it each time you restart, or the port opens again. To check it took:</p>
+        <span class="ra-cmd">docker port satori-{{ instance }}</span>
+        <p>
+            It should show <strong>127.0.0.1:{{ port }}</strong>. If it shows 0.0.0.0, your
+            <code>satori</code> script is older than the setting: download it again from
+            satorinet.io/download.
+        </p>
 
         <a class="ra-back" href="{{ url_for('index') }}">&larr; Back to your neuron</a>
     </div>

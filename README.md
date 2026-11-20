@@ -235,7 +235,9 @@ these:
 
   then open `https://localhost:24601`. With the tunnel the port can be closed
   to everyone else: `SATORI_UI_BIND=127.0.0.1 ./satori restart` publishes it
-  on that machine's localhost only (give it on every restart).
+  on that machine's localhost only (give it on every restart). `docker port
+  satori-1` then shows `127.0.0.1:24601`; a `satori` script older than the
+  setting ignores it and shows `0.0.0.0`.
 
 A neuron behind a proxy of its own that already does HTTPS (nginx, Caddy) can
 either point the proxy at `https://localhost:24601` without verifying the

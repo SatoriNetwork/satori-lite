@@ -140,6 +140,7 @@ def test_the_remote_access_page_needs_no_login_and_fits_this_neuron():
     assert 'ssh -N -L 24603:localhost:24603 you@203.0.113.5' in page
     assert 'openssl x509 -in ./3/config/ui-cert.pem' in page
     assert 'docker logs satori-3' in page
+    assert 'docker port satori-3' in page and '127.0.0.1:24603' in page
     import web.routes as routes
     with mock.patch.object(routes, 'check_wallet_file_exists', return_value=True):
         login = client.get('/login', base_url='https://203.0.113.5:24603')
