@@ -5,40 +5,21 @@ The Merkle reward drop (claimMerkle) goes to the merkle contract and the airdrop
 rewards. No network: web3 contract objects build calldata offline.
 """
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
 pytest.importorskip("web3")
 
-_PKG = Path(__file__).parent.parent / "neuron-lite" / "satorineuron"
+from satorineuron import base_config as bc  # noqa: E402
+from satorineuron.base_claim import BaseClaimer  # noqa: E402
 
-
-_EVM = Path(__file__).parent.parent.parent / "satorilib" / "src" / "satorilib" / "chain" / "evm.py"
-
-
-def _load(name, path=None):
-    # By file path: the satorineuron package __init__ pulls heavy deps, and
-    # other tests replace `satorilib` in sys.modules with a mock.
-    spec = importlib.util.spec_from_file_location(f"_t_{name}", path or _PKG / f"{name}.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-bc = _load("base_config")
-BaseClaimer = _load("base_claim").BaseClaimer
-
-MERKLE = "0x78C83AE275e9659Bc8490fa33943e22ec7c5A7e7"
-AIRDROP = "0xF15CEAec0e29A0B6551180F8617850bc5356938C"
+# The claimer's addresses are the config's own defaults, what a neuron that cannot reach Central
+# claims on (web/routes.py, _base_claimer): a copy of a deployment here went stale at each redeploy.
+MERKLE, AIRDROP, HUB, LENS, TOKEN = (bc.DEFAULTS[k] for k in ("merkle", "airdrop", "hub", "lens", "token"))
 USER = "0x9f505692808622fc1F0fbb53324262162C788762"
 
 
 @pytest.fixture
-def claimer(monkeypatch):
-    monkeypatch.setitem(sys.modules, "satorilib.chain.evm", _load("evm", _EVM))
+def claimer():
     return BaseClaimer(rpc_url="http://127.0.0.1:1", merkle_address=MERKLE,
                        airdrop_address=AIRDROP)
 
@@ -79,8 +60,8 @@ def test_claim_merkle_sends_to_merkle(claimer, monkeypatch):
 
 
 def test_base_config_defaults_include_airdrop():
-    assert bc.DEFAULTS["airdrop"] == AIRDROP
-    assert bc.DEFAULTS["merkle"] == MERKLE
+    # Its own contract: on the merkle's or the rewards' address the binding tests above prove nothing.
+    assert AIRDROP not in (MERKLE, bc.DEFAULTS["rewards"])
     assert bc._ENV["airdrop"] == "BASE_SATORI_AIRDROP"
 
 
@@ -88,20 +69,14 @@ def test_base_config_airdrop_env_override(monkeypatch):
     monkeypatch.setenv("SATORI_API_URL", "")
     monkeypatch.setattr(bc, "_central_url", lambda: None)
     monkeypatch.setenv("BASE_SATORI_AIRDROP", USER)
-    cfg = bc.base_config(force=True)
-    assert cfg["airdrop"] == USER
-    bc._cache["data"] = None
+    monkeypatch.setattr(bc, "_cache", {"data": None, "ts": 0.0})  # the module is every test's now
+    assert bc.base_config()["airdrop"] == USER
 
 
 # ── On-chain prediction rewards: read on the Lens, claim through the Hub ──
 
-HUB = "0x1eec7E1443C1065ab78180A14326e5Ac8284f143"
-LENS = "0x9BF5266F60092F1bFbd5F16d21d0bE9673c0F91F"
-
-
 @pytest.fixture
-def full_claimer(monkeypatch):
-    monkeypatch.setitem(sys.modules, "satorilib.chain.evm", _load("evm", _EVM))
+def full_claimer():
     return BaseClaimer(rpc_url="http://127.0.0.1:1", merkle_address=MERKLE,
                        airdrop_address=AIRDROP, hub_address=HUB, lens_address=LENS)
 
@@ -141,7 +116,7 @@ def test_hub_and_lens_optional(claimer):
 
 
 def test_base_config_defaults_include_lens():
-    assert bc.DEFAULTS["lens"] == LENS
+    assert LENS not in (HUB, bc.DEFAULTS["rewards"])
     assert bc._ENV["lens"] == "BASE_SATORI_LENS"
 
 
@@ -162,11 +137,7 @@ def test_eth_balance_reads_the_address(claimer):
 
 # ── Balances: SATORI on the token contract ──
 
-TOKEN = "0x4dee947383d5C9c8E421F55Fe3518a29324aE469"
-
-
 def test_token_balance_reads_balance_of(monkeypatch):
-    monkeypatch.setitem(sys.modules, "satorilib.chain.evm", _load("evm", _EVM))
     claimer = BaseClaimer(rpc_url="http://127.0.0.1:1", merkle_address=MERKLE,
                           airdrop_address=AIRDROP, token_address=TOKEN)
     assert claimer.token.address == TOKEN
