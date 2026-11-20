@@ -111,7 +111,8 @@ def make_mock_client(streams=None, observations=None):
 
     Args:
         streams: list of DatastreamMetadata to return from discover
-        observations: dict of stream_name -> InboundObservation for get_last_observation
+        observations: dict of stream_name -> InboundObservation, its
+            provider's latest on the relay
     """
     client = mock.AsyncMock()
     streams = streams or []
@@ -138,10 +139,6 @@ def make_mock_client(streams=None, observations=None):
     client.get_last_observation_events.side_effect = latest_events
     client.parse_observation_event = mock.MagicMock(
         side_effect=lambda event: event.obs)
-
-    async def get_obs(name):
-        return observations.get(name)
-    client.get_last_observation.side_effect = get_obs
     return client
 
 

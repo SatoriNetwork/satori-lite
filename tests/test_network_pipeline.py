@@ -287,17 +287,36 @@ class TestPublishObservation:
 
 # ── TestCheckFreshness ───────────────────────────────────────────────
 
+def check_freshness(harness, metadata, obs=None, created_at=None,
+                    error=None):
+    """What the freshness check says of one stream: (last_obs_time, active).
+
+    The relay's latest event for it reads as `obs`; with only `created_at`
+    it is one this neuron can't read (a paid stream's), stamped then; with
+    neither the relay has none. `error` is what asking the relay raises.
+    """
+    key = (metadata.nostr_pubkey, metadata.stream_name)
+    client = mock.AsyncMock()
+    event = mock.MagicMock()
+    event.created_at.return_value.as_secs.return_value = created_at
+    client.get_last_observation_events.return_value = (
+        {key: event} if obs or created_at else {})
+    client.get_last_observation_events.side_effect = error
+    client.parse_observation_event = mock.MagicMock(return_value=obs)
+    fresh = asyncio.run(
+        harness._networkCheckFreshnessBatch(client, [metadata]))
+    client.get_last_observation_events.assert_called_once_with([key])
+    return fresh[key]
+
+
 class TestCheckFreshness:
 
     def test_active_stream(self, harness):
         now = int(time.time())
         obs = make_observation(event_id='evt_fresh', timestamp=now - 100)
-        mock_client = mock.AsyncMock()
-        mock_client.get_last_observation.return_value = obs
-        metadata = make_metadata(cadence_seconds=3600)
 
-        last_obs, active = asyncio.run(
-            harness._networkCheckFreshness(mock_client, 'btc-price', metadata))
+        last_obs, active = check_freshness(
+            harness, make_metadata(cadence_seconds=3600), obs)
 
         assert active is True
         assert last_obs == now - 100
@@ -305,35 +324,23 @@ class TestCheckFreshness:
     def test_stale_stream(self, harness):
         now = int(time.time())
         obs = make_observation(event_id='evt_stale', timestamp=now - 7200)
-        mock_client = mock.AsyncMock()
-        mock_client.get_last_observation.return_value = obs
-        metadata = make_metadata(cadence_seconds=3600)
 
-        last_obs, active = asyncio.run(
-            harness._networkCheckFreshness(mock_client, 'btc-price', metadata))
+        last_obs, active = check_freshness(
+            harness, make_metadata(cadence_seconds=3600), obs)
 
         assert active is False
         assert last_obs == now - 7200
 
     def test_no_observation_returns_false(self, harness):
-        mock_client = mock.AsyncMock()
-        mock_client.get_last_observation.return_value = None
-        metadata = make_metadata()
-
-        last_obs, active = asyncio.run(
-            harness._networkCheckFreshness(mock_client, 'btc-price', metadata))
+        last_obs, active = check_freshness(harness, make_metadata())
 
         assert active is False
         assert last_obs is None
 
     def test_saves_observation_during_check(self, harness):
         obs = make_observation(event_id='evt_disc')
-        mock_client = mock.AsyncMock()
-        mock_client.get_last_observation.return_value = obs
-        metadata = make_metadata()
 
-        asyncio.run(
-            harness._networkCheckFreshness(mock_client, 'btc-price', metadata))
+        check_freshness(harness, make_metadata(), obs)
 
         rows = harness.networkDB.get_observations('btc-price', 'pub123')
         assert len(rows) == 1
@@ -341,25 +348,30 @@ class TestCheckFreshness:
     def test_no_cadence_always_active(self, harness):
         now = int(time.time())
         obs = make_observation(event_id='evt_nocad', timestamp=now - 86400)
-        mock_client = mock.AsyncMock()
-        mock_client.get_last_observation.return_value = obs
-        metadata = make_metadata(cadence_seconds=None)
 
-        _, active = asyncio.run(
-            harness._networkCheckFreshness(mock_client, 'btc-price', metadata))
+        _, active = check_freshness(
+            harness, make_metadata(cadence_seconds=None), obs)
 
         assert active is True
 
     def test_client_error_returns_false(self, harness):
-        mock_client = mock.AsyncMock()
-        mock_client.get_last_observation.side_effect = Exception('timeout')
-        metadata = make_metadata()
-
-        last_obs, active = asyncio.run(
-            harness._networkCheckFreshness(mock_client, 'btc-price', metadata))
+        last_obs, active = check_freshness(
+            harness, make_metadata(), error=Exception('timeout'))
 
         assert active is False
         assert last_obs is None
+
+    def test_unreadable_observation_is_as_fresh_as_its_event(self, harness):
+        """A paid stream's observation, which only its buyers can read."""
+        now = int(time.time())
+
+        last_obs, active = check_freshness(
+            harness, make_metadata(cadence_seconds=3600),
+            created_at=now - 100)
+
+        assert active is True
+        assert last_obs == now - 100
+        assert harness.networkDB.get_observations('btc-price', 'pub123') == []
 
 
 # ── TestFetchDataSources ─────────────────────────────────────────────
@@ -604,13 +616,8 @@ class TestEndToEnd:
         now = int(time.time())
         obs = make_observation(event_id='evt_disc', value='48000',
                                seq_num=5, timestamp=now - 60)
-        mock_relay_for_discovery = mock.AsyncMock()
-        mock_relay_for_discovery.get_last_observation.return_value = obs
-        metadata = make_metadata(cadence_seconds=3600)
-
-        last_obs, active = asyncio.run(
-            harness._networkCheckFreshness(
-                mock_relay_for_discovery, 'btc-price', metadata))
+        last_obs, active = check_freshness(
+            harness, make_metadata(cadence_seconds=3600), obs)
 
         assert active is True
 

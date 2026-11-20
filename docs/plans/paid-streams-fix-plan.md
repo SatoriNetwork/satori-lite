@@ -217,7 +217,7 @@ which means no more events are published, which means the relay stays stale.
 24-hour lockout. The active channel sits untouched.
 
 Fix: for subscriptions with `price_per_obs > 0 and active = 1`, skip the
-`_networkCheckFreshness` gate in reconcile. We already have a signed channel
+`_networkCheckFreshnessBatch` gate in reconcile. We already have a signed channel
 and a declared intent; freshness is circular for paid streams. Reserve the
 check for discovering new streams.
 

@@ -881,44 +881,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'{predictor_nostr_pubkey[:12]}… (payment recorded, '
                 f'transfer pending): {e}')
 
-    async def _networkCheckFreshness(self, client, stream_name, metadata):
-        """Check if a stream is actively publishing. Returns (last_obs_time, is_active).
-
-        Also saves the latest observation to the DB if it's new (only when
-        the observation content can be decrypted, i.e. for free streams or
-        paid streams to which we are a paying subscriber).
-
-        For paid streams we are NOT a subscriber to, decryption fails — but
-        we can still infer freshness from the public event header timestamp.
-        """
-        # First try a full parse. Successful for free streams; also gives us
-        # the observation to cache for streams we're a subscriber to.
-        try:
-            obs = await client.get_last_observation(stream_name)
-            if obs and obs.observation:
-                last_obs = obs.observation.timestamp
-                await self._networkProcessObservation(obs)
-                return last_obs, metadata.is_likely_active(last_obs)
-        except Exception:
-            pass
-        # Fallback: read just the event header timestamp. Works for paid
-        # streams as long as the publisher has at least one paying subscriber
-        # — the relay still holds the (encrypted) event whose created_at we
-        # can read without any key.
-        try:
-            ts = await client.get_last_observation_event_time(stream_name)
-            if ts:
-                return ts, metadata.is_likely_active(ts)
-        except Exception:
-            pass
-        return None, False
-
     async def _networkCheckFreshnessBatch(self, client, streams) -> dict:
-        """Batched _networkCheckFreshness for many streams on one relay.
+        """Whether each of a relay's streams is publishing, by its latest
+        observation there, which is saved when this neuron can read it.
 
-        One relay round trip per 200 providers instead of one or two REQs
-        per stream. Returns {(nostr_pubkey, stream_name): (last_obs_time,
-        is_active)}.
+        One relay round trip per 200 providers. Returns {(nostr_pubkey,
+        stream_name): (last_obs_time, is_active)}.
         """
         pairs = [(s.nostr_pubkey, s.stream_name) for s in streams]
         try:

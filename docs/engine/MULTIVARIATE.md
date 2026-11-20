@@ -250,7 +250,7 @@ Big picture (renders in GitHub / IDE markdown preview):
 ```mermaid
 flowchart TB
     subgraph ACQ["1 · Acquisition"]
-        DISC["discover_active_datastreams<br/>(thousands of relay streams)"]
+        DISC["discover_datastreams<br/>(thousands of relay streams)"]
         WARM["warm pool: auto-subscribe top-N<br/>free, non-gated streams"]
         LIVE["live observations<br/>(_networkListen, per event)"]
         HIST["history backfill: kind 34610 request<br/>publisher serves ~1,000 recent rows<br/>as ephemeral 24610 chunks"]
@@ -370,8 +370,9 @@ publish overwrites the previous event. Consequences:
 - The live subscription filter (`client.py:1547`) has no `since`/`limit`; a
   fresh subscriber receives the current latest observation plus everything
   published from that moment forward. Nothing older exists on the relay.
-- `get_last_observation(stream_name)` (`client.py:809`) is the only one-shot
-  query, and it returns a single event.
+- `get_last_observation_events(pairs)` (satorilib `satori_nostr/client.py`)
+  is the only one-shot query, and it returns a single event a (publisher,
+  stream).
 - `_backfillRelayHistory` (`start.py:1146`), despite the name, reads the
   neuron's own local `networkDB` SQLite (history captured live while
   subscribed), not relays.
@@ -415,9 +416,10 @@ max-pairwise-correlation filter can dedupe later).
 **Closing the history gap (future mechanisms, in rough order of leverage):**
 
 1. **Auto-subscribe warm pool**: the reconcile loop subscribes to the top-N
-   active, free, non-gated streams from `discover_active_datastreams`,
-   accumulating history in the background so features are ready when a target
-   wants them. Cheap, uses only existing primitives.
+   active, free, non-gated streams from `discover_datastreams` (active by
+   `_networkCheckFreshnessBatch`), accumulating history in the background so
+   features are ready when a target wants them. Cheap, uses only existing
+   primitives.
 2. **Publisher history protocol**: a new request/response over the relays
    where the producer serves observation ranges from its own networkDB (it
    has full history of everything it published). The only producer-initiated
@@ -673,9 +675,10 @@ opt-in until it proves itself.
    predictions ship end-to-end to `{stream}_pred`, clean fallback to XGB when
    the store is thin or RAM-gated.
 5. **Peer acquisition (the warm pool).** Auto-subscribe to top-N active,
-   free, non-approval-gated streams from `discover_active_datastreams` in the
-   reconcile loop, respecting `getMaxTotalStreams()`, so feature candidates
-   are not limited to what the user happened to subscribe to. This is the
+   free, non-approval-gated streams from `discover_datastreams` (active by
+   `_networkCheckFreshnessBatch`) in the reconcile loop, respecting
+   `getMaxTotalStreams()`, so feature candidates are not limited to what the
+   user happened to subscribe to. This is the
    "cycle through the relay streams" part at full scale; see section 5.1 for
    why history cannot be fetched retroactively and must be accumulated.
 6. **Future work.**

@@ -121,6 +121,14 @@ def make_metadata(keys: Keys, stream_name: str,
     )
 
 
+async def last_observation(client: SatoriNostr, provider: Keys,
+                           stream_name: str) -> InboundObservation | None:
+    """A provider's latest observation of its stream on the relay."""
+    key = (provider.public_key().to_hex(), stream_name)
+    events = await client.get_last_observation_events([key])
+    return client.parse_observation_event(events[key]) if key in events else None
+
+
 # ── Tests ────────────────────────────────────────────────────────────
 
 class TestDiscovery:
@@ -210,7 +218,8 @@ class TestFreshnessCheck:
             await asyncio.sleep(0.5)
 
             # Subscriber fetches latest observation
-            last_obs = await subscriber.get_last_observation(stream_name)
+            last_obs = await last_observation(
+                subscriber, provider_keys, stream_name)
             assert last_obs is not None
             assert last_obs.observation.value == '42000'
             assert last_obs.observation.seq_num == 1
@@ -257,7 +266,8 @@ class TestFreshnessCheck:
 
             # Fetch and save twice
             for _ in range(2):
-                last_obs = await subscriber.get_last_observation(stream_name)
+                last_obs = await last_observation(
+                    subscriber, provider_keys, stream_name)
                 subscriber_db.save_observation(
                     last_obs.stream_name,
                     last_obs.nostr_pubkey,
@@ -462,7 +472,8 @@ class TestPredictionPublishing:
             assert len(pred_streams) == 1
 
             # 8. Provider can fetch the prediction value
-            last_pred = await provider.get_last_observation(pred_stream)
+            last_pred = await last_observation(
+                provider, subscriber_keys, pred_stream)
             assert last_pred is not None
             assert last_pred.observation.value == '60000'
 
@@ -514,7 +525,8 @@ class TestFullNeuronCycle:
             assert found.nostr_pubkey == pub_hex
 
             # ── Neuron B: check freshness (no obs yet) ──
-            last = await neuron_b.get_last_observation(stream_name)
+            last = await last_observation(
+                neuron_b, provider_keys, stream_name)
             assert last is None  # nothing published yet
 
             # ── Neuron A: publish first observation ──
@@ -528,7 +540,8 @@ class TestFullNeuronCycle:
 
             # ── Neuron B: check freshness again (should find obs) ──
             await asyncio.sleep(0.5)
-            last = await neuron_b.get_last_observation(stream_name)
+            last = await last_observation(
+                neuron_b, provider_keys, stream_name)
             assert last is not None
             assert last.observation.value == '100'
             assert metadata_a.is_likely_active(last.observation.timestamp)
@@ -598,7 +611,8 @@ class TestFullNeuronCycle:
 
             # ── Neuron A: fetch prediction ──
             await asyncio.sleep(0.5)
-            pred_result = await neuron_a.get_last_observation(pred_stream)
+            pred_result = await last_observation(
+                neuron_a, subscriber_keys, pred_stream)
             assert pred_result is not None
             assert pred_result.observation.value == '200'
             assert pred_result.nostr_pubkey == sub_hex
