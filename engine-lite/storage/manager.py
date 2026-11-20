@@ -4,10 +4,10 @@ Provides simple API for storing/retrieving stream and prediction data.
 """
 import os
 import pandas as pd
-from typing import Optional, Union
+from typing import Optional
 from .sqlite_manager import EngineSqliteDatabase
 from satoriengine.stream_store import StreamStore
-from satorilib.logging import INFO, setup, debug, info, warning, error
+from satorilib.logging import INFO, setup
 
 setup(level=INFO)
 
@@ -47,29 +47,6 @@ class EngineStorageManager:
         """
         return self.stream_store.append(streamUuid, df)
 
-    def storeStreamObservation(
-        self,
-        streamUuid: str,
-        timestamp: str,
-        value: float,
-        hash_val: str,
-        provider: str = 'central'
-    ) -> bool:
-        """
-        Store a single observation for a stream.
-
-        Args:
-            streamUuid: The stream UUID (table name)
-            timestamp: Observation timestamp
-            value: Observation value
-            hash_val: Hash for data integrity
-            provider: Data provider
-
-        Returns:
-            True if inserted successfully
-        """
-        return self.db.insertRow(streamUuid, timestamp, value, hash_val, provider)
-
     def getStreamData(self, streamUuid: str) -> pd.DataFrame:
         """A stream's observations from the StreamStore, oldest first: column
         value, index ts (epoch seconds), as the web routes chart them."""
@@ -82,10 +59,6 @@ class EngineStorageManager:
         Epoch -> datetime64 conversion happens once here via StreamStore.history().
         """
         return self.stream_store.history(streamUuid)
-
-    def hasStreamData(self, streamUuid: str) -> bool:
-        """Check if we have local data for a stream."""
-        return self.stream_store.row_count(streamUuid) > 0
 
     def getStreamRowCount(self, streamUuid: str) -> int:
         """Get number of rows for a stream."""
@@ -120,77 +93,17 @@ class EngineStorageManager:
         """
         return self.db.insertRow(predictionStreamUuid, timestamp, value, hash_val, provider)
 
-    def storePredictionDf(self, predictionStreamUuid: str, df: pd.DataFrame) -> int:
-        """
-        Store predictions from DataFrame.
-
-        Args:
-            predictionStreamUuid: The prediction stream UUID
-            df: DataFrame with 'value' column, index as timestamp
-
-        Returns:
-            Number of rows inserted
-        """
-        return self.db.insertDataframe(predictionStreamUuid, df, provider='engine')
-
     def getPredictions(self, predictionStreamUuid: str) -> pd.DataFrame:
         """Get all predictions for a prediction stream."""
         return self.db.getTableData(predictionStreamUuid)
 
-    def getLatestPrediction(self, predictionStreamUuid: str) -> Optional[dict]:
-        """
-        Get the latest prediction for a stream.
-
-        Returns:
-            Dict with keys: ts, value, hash, provider or None
-        """
-        df = self.db.getTableData(predictionStreamUuid)
-        if df.empty:
-            return None
-        last_row = df.iloc[-1]
-        return {
-            'ts': df.index[-1],
-            'value': last_row['value'],
-            'hash': last_row['hash'],
-            'provider': last_row['provider']
-        }
-
     # ==================== Utility Methods ====================
-
-    def mergeServerDataWithLocal(
-        self,
-        streamUuid: str,
-        serverDf: pd.DataFrame,
-        provider: str = 'central'
-    ) -> pd.DataFrame:
-        """
-        Merge server data with local data, preferring newer data.
-        Returns the combined data formatted for engine use.
-
-        Args:
-            streamUuid: The stream UUID
-            serverDf: DataFrame from server (should have 'value' column)
-            provider: Data provider identifier
-
-        Returns:
-            Combined DataFrame formatted for engine (date_time, value, id)
-        """
-        # Store server data (will skip duplicates)
-        if not serverDf.empty:
-            self.storeStreamData(streamUuid, serverDf, provider)
-
-        # Return combined data in engine format
-        return self.getStreamDataForEngine(streamUuid)
 
     def listAllStreams(self) -> list:
         """The per-stream tables: each prediction stream's, and the observations
         from before the StreamStore (whose tables are not streams)."""
         return [t for t in self.db.listTables()
                 if t not in ('streams', 'sqlite_sequence', 'observations', '_satori_migrations')]
-
-    def deleteStreamData(self, streamUuid: str):
-        """Delete all data for a stream."""
-        self.db.deleteTable(streamUuid)
 
     def close(self):
         """Close database connection."""

@@ -69,51 +69,31 @@ The Satori Neuron is a client-side application that receives multi-cryptocurrenc
 ```python
 def pollObservationsForever(self):
     while True:
-        # 1. Fetch batch of observations from server
+        # 1. Fetch batch of observations from server; satorilib's
+        #    getObservationsBatch stores each stream's metadata as it comes
+        #    (storage.db.upsertStream, the streams table)
         observations = self.server.getObservationsBatch(storage=storage)
 
         # 2. Process each observation
         for observation in observations:
             stream_uuid = observation.get('stream_uuid')  # Server-provided UUID
             stream_name = observation.get('stream', {}).get('name')  # e.g., "btc", "eth"
-            value = observation.get('value')
 
-            # 3. Store stream metadata
-            storage.db.upsertStream(
-                uuid=stream_uuid,
-                name=stream_name,
-                author=stream_info.get('author'),
-                ...
-            )
-
-            # 4. Store observation in stream-specific table
-            storage.storeStreamObservation(
-                streamUuid=stream_uuid,  # Used as table name
-                timestamp=observation.get('observed_at'),
-                value=str(value),
-                hash_val=str(hash_val),
-                provider='central'
-            )
-
-            # 5. Create model if doesn't exist
+            # 3. Create model if doesn't exist
             if stream_uuid not in self.aiengine.streamModels:
-                streamId = StreamId(
-                    source='central',
-                    author='satori',
-                    stream=stream_name,
-                    target=''
-                )
-                self.aiengine.streamModels[stream_uuid] = StreamModel(
-                    streamId=streamId,
-                    predictionStreamId=None,
-                    predictionProduced=None
-                )
+                self.aiengine.streamModels[stream_uuid] = StreamModel.createFromServer(
+                    streamUuid=stream_uuid,
+                    predictionStreamUuid=pub_id.uuid,  # "<name>_pred"
+                    server=self.server,
+                    subscriptionStream=Stream(streamId=sub_id),
+                    storage=self.aiengine.storage)
                 self.aiengine.streamModels[stream_uuid].chooseAdapter(inplace=True)
 
-            # 6. Pass data to model for prediction
+            # 4. Pass data to model: it stores the new rows in the StreamStore
+            #    (storage.storeStreamData) and predicts
             self.aiengine.streamModels[stream_uuid].onDataReceived(df)
 
-        # 7. Collect predictions and submit batch
+        # 5. Collect predictions and submit batch
         self.collectAndSubmitPredictions()
 
         # Wait 11 hours
