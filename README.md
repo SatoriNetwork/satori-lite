@@ -268,26 +268,14 @@ references.
 
 ## Testing
 
-The repository ships with a layered test suite covering unit, integration,
-and performance scenarios.
-
 ```bash
-pytest tests/                  # full suite
-pytest tests/unit/             # fast, isolated tests
-pytest tests/integration/      # require a running local server
-pytest tests/performance/      # load and benchmark tests
+pytest tests/                  # the suite
+pytest tests/unit/             # fast, isolated tests (also `-m unit`)
 ```
 
-Markers are available for selective runs (`-m unit`, `-m integration`,
-`-m slow`). Coverage can be measured against the bundled library subset:
-
-```bash
-pytest tests/ --cov=lib-lite/satorilib --cov-report=term-missing
-```
-
-Integration and performance tests expect the local API to be reachable on
-`http://localhost:8000`. See `tests/README` and `docs/plans/` for detailed
-instructions.
+The tests import satorilib, the neuron and the engine as the image does
+(`PYTHONPATH` in `Dockerfile`): `../satorilib/src`, `neuron-lite` and
+`engine-lite` on the path. Central's own suite tests its API in process.
 
 ## Documentation
 

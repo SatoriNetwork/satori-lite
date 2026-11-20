@@ -94,9 +94,3 @@ def test_client_instance_fixture(client_instance):
 def test_unit_marker():
     """Verify unit test marker works."""
     assert True
-
-
-@pytest.mark.integration
-def test_integration_marker():
-    """Verify integration test marker works."""
-    assert True
