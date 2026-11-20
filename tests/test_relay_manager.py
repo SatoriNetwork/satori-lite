@@ -19,14 +19,6 @@ class DummyStartup:
         @staticmethod
         def status():
             return {
-                'docker_available': True,
-                'docker_error': None,
-                'docker_endpoint': 'embedded strfry runtime',
-                'docker_help': {
-                    'cause': 'embedded_runtime',
-                    'summary': 'Relay runs as an embedded strfry process inside the neuron container.',
-                    'details': ['Nginx sidecars are no longer required.'],
-                },
                 'desired_mode': 'off',
                 'running_mode': 'off',
                 'running': False,
@@ -145,3 +137,13 @@ def test_settings_page_shows_the_local_relay_as_its_manager_reports_it():
             'id="relayLastEvent">2026-03-24T11:00:00Z<',
             'id="relayLastHealth">2026-03-24T11:01:00Z<'):
         assert shown in page
+    assert 'Docker' not in page
+
+
+def test_status_names_no_docker(tmp_path, monkeypatch):
+    """The relay is a strfry process inside the neuron, so the status the
+    settings page reads says nothing of Docker."""
+    monkeypatch.setattr(LocalRelayManager, '_mode_dir', lambda self, mode: tmp_path / mode)
+    status = LocalRelayManager(DummyStartup()).status()
+    assert status['running'] is False
+    assert [key for key in status if 'docker' in key] == []

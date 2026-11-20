@@ -460,14 +460,7 @@ def register_routes(app):
         startup = get_startup()
         if startup is None or not hasattr(startup, 'localRelay'):
             return {
-                'docker_available': False,
-                'docker_error': 'startup relay manager unavailable',
-                'docker_endpoint': None,
-                'docker_help': {
-                    'cause': 'startup_unavailable',
-                    'summary': 'Relay manager is not available in this runtime.',
-                    'details': [],
-                },
+                'last_error': 'Relay manager is not available in this runtime.',
                 'desired_mode': 'off',
                 'running_mode': 'off',
                 'running': False,

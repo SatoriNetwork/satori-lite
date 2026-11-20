@@ -845,26 +845,11 @@
                         </div>
                     </div>
                     <div class="set-alert set-alert-warning d-none mb-3" id="relayWarningBox"></div>
-                    <div class="set-alert set-alert-danger d-none mb-3" id="relayDockerHelpBox">
-                        <i class="material-icons">error_outline</i>
-                        <div>
-                            <div class="fw-semibold mb-1" id="relayDockerHelpSummary"></div>
-                            <div id="relayDockerHelpDetails"></div>
-                        </div>
-                    </div>
 
                     <div class="settings-grid">
                         <div class="settings-stat">
                             <div class="settings-stat-label">Nostr pubkey</div>
                             <div class="settings-stat-value font-mono-small" id="relayNostrPubkey">{{ relay_status.nostr_pubkey or 'Not generated' }}</div>
-                        </div>
-                        <div class="settings-stat">
-                            <div class="settings-stat-label">Docker</div>
-                            <div class="settings-stat-value" id="relayDockerStatus">{{ 'Available' if relay_status.docker_available else 'Unavailable' }}</div>
-                        </div>
-                        <div class="settings-stat">
-                            <div class="settings-stat-label">Docker endpoint</div>
-                            <div class="settings-stat-value font-mono-small" id="relayDockerEndpoint">{{ relay_status.docker_endpoint or '-' }}</div>
                         </div>
                         <div class="settings-stat">
                             <div class="settings-stat-label">Public relay URL</div>
@@ -1177,8 +1162,6 @@
     function renderRelayStatus(status) {
         currentRelayStatus = status;
         document.getElementById('relayNostrPubkey').textContent = status.nostr_pubkey || 'Not generated';
-        document.getElementById('relayDockerStatus').textContent = status.docker_available ? 'Embedded' : ('Unavailable' + (status.docker_error ? ' - ' + status.docker_error : ''));
-        document.getElementById('relayDockerEndpoint').textContent = status.docker_endpoint || '-';
         document.getElementById('relayPublicUrl').textContent = status.public_url_hint || '-';
         document.getElementById('relayPrivateUrl').textContent = status.private_url_hint || '-';
         document.getElementById('relayPublicPort').textContent = status.public_port ?? '-';
@@ -1196,9 +1179,6 @@
         updateModeCards(status.desired_mode || 'off');
         updateHeroPill(status);
         const warningBox = document.getElementById('relayWarningBox');
-        const dockerHelpBox = document.getElementById('relayDockerHelpBox');
-        const dockerHelpSummary = document.getElementById('relayDockerHelpSummary');
-        const dockerHelpDetails = document.getElementById('relayDockerHelpDetails');
         const warnings = [];
         if (status.last_error) {
             warnings.push(status.last_error);
@@ -1206,7 +1186,6 @@
         const conflicts = status.port_conflicts || {};
         ['public', 'private'].forEach((mode) => {
             if (conflicts[mode]) {
-                const port = mode === 'public' ? status.public_port : status.private_port;
                 warnings.push(conflicts[mode]);
             }
         });
@@ -1228,20 +1207,6 @@
             warningBox.classList.add('d-none');
             warningBox.textContent = '';
         }
-        const dockerHelp = status.docker_help || {};
-        if ((dockerHelp.summary || status.docker_error) && dockerHelp.cause !== 'embedded_runtime') {
-            dockerHelpBox.classList.remove('d-none');
-            dockerHelpSummary.textContent = dockerHelp.summary || status.docker_error || 'Docker is unavailable';
-            const details = Array.isArray(dockerHelp.details) ? dockerHelp.details : [];
-            dockerHelpDetails.innerHTML = details.length > 0
-                ? `<ul class="mb-0 small" style="padding-left: 1rem; color: var(--text-secondary);">${details.map((item) => `<li>${item}</li>`).join('')}</ul>`
-                : '';
-        } else {
-            dockerHelpBox.classList.add('d-none');
-            dockerHelpSummary.textContent = '';
-            dockerHelpDetails.innerHTML = '';
-        }
-
         const tbody = document.getElementById('relayStatusTableBody');
         tbody.innerHTML = '';
         ['public', 'private'].forEach((mode) => {
@@ -1258,13 +1223,7 @@
                 tbody.appendChild(tr);
             });
         });
-        const applyBtn = document.getElementById('relayApplyBtn');
-        const relayReady = !status.last_error || !(status.last_error || '').includes('requires recreating the neuron container');
-        applyBtn.disabled = false;
-        if (status.docker_error && !status.docker_available) {
-            document.getElementById('relayApplyStatus').className = 'text-danger';
-            document.getElementById('relayApplyStatus').textContent = status.docker_error || 'Docker is unavailable';
-        }
+        document.getElementById('relayApplyBtn').disabled = false;
     }
 
     async function refreshRelayStatus() {

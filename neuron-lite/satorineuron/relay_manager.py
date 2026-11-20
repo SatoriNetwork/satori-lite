@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from satorineuron import config
 from satorineuron import logging
@@ -56,7 +55,6 @@ class LocalRelayManager:
         self._lock = threading.Lock()
         self._last_error = None
         self._last_status = 'idle'
-        self._docker_base_url = None
         self.default_public_port = int(os.environ.get(
             'SATORI_RELAY_PUBLIC_PORT', DEFAULT_PUBLIC_PORT))
         self.default_private_port = int(os.environ.get(
@@ -125,17 +123,6 @@ class LocalRelayManager:
             deduped.append(endpoint)
         return deduped
 
-    @staticmethod
-    def _describe_endpoint(endpoint: str | None) -> str:
-        if not endpoint:
-            return 'embedded-runtime'
-        parsed = urlparse(endpoint)
-        if parsed.scheme == 'unix':
-            return parsed.path or endpoint
-        if parsed.scheme == 'npipe':
-            return endpoint
-        return endpoint
-
     def _docker_client_optional(self):
         if docker is None:
             return None
@@ -143,7 +130,6 @@ class LocalRelayManager:
             try:
                 client = docker.DockerClient(base_url=endpoint, version='auto')
                 client.ping()
-                self._docker_base_url = endpoint
                 return client
             except Exception:
                 continue
@@ -234,17 +220,6 @@ class LocalRelayManager:
             running_mode = 'public'
             running = True
         status = {
-            'docker_available': True,
-            'docker_error': None,
-            'docker_endpoint': 'embedded strfry runtime',
-            'docker_help': {
-                'cause': 'embedded_runtime',
-                'summary': 'Relay runs as an embedded strfry process inside the neuron container.',
-                'details': [
-                    'Nginx sidecars are no longer required.',
-                    f'This container publishes public relay port {self.default_public_port} and private relay port {self.default_private_port}.',
-                ],
-            },
             'last_error': self._last_error,
             'last_status': self._last_status,
             'desired_mode': desired_mode,
