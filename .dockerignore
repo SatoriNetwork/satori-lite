@@ -37,3 +37,7 @@ me-guide/
 *.md
 *.bak
 .env
+
+# Always ship served skills — /api/skill reads skills/satori-self-improve/SKILL.md
+!skills/
+!skills/**
