@@ -133,33 +133,44 @@ Known Nostr relays.
 
 ## Running a Relay
 
-Relay operators earn rewards for running reliable relays on the Satori
-network. Rewards are sent to an Evrmore address derived from the relay's
-Nostr public key — no neuron or wallet setup is required to start earning.
+Relay operators earn a share of each day's reward for keeping a relay up.
+The reward goes to the Base address of the relay's own Nostr public key, so
+you need no central account and no registration, only a Nostr keypair.
 
-1. **Clone and run the relay**
+1. **Run the relay** (any Linux VPS with Docker):
    ```bash
    git clone https://github.com/SatoriNetwork/satori-relay.git
    cd satori-relay
+   cp .env.example .env    # set NOSTR_PUBKEY to your relay's public key
    docker compose up -d
    ```
-   The relay will be available at `wss://your-relay.example.com`. Make sure
-   port 443 is open and your domain points to the server.
+   It listens on port 7777 (`RELAY_PORT`). Plain `ws://your-ip:7777` works;
+   put Caddy or nginx in front for `wss://`. The URL must resolve to a public
+   address: central does not dial private ones.
 
-2. **Discovery is automatic** — neurons publish NIP-65 relay list events
-   (kind 10002) advertising which relays they connect to. The central server
-   subscribes to these events and builds its relay directory. Once any neuron
-   connects to your relay, the server discovers it automatically.
+2. **Get it discovered.** Central builds its relay list from the NIP-65 relay
+   lists (kind 10002) that registered neurons publish. On a neuron that
+   predicts, add your relay URL under **Settings > External Relay
+   Connections**: a predicting neuron stays connected to every relay it knows,
+   announces its prediction streams there, and lists them all in its relay list
+   (republished daily). Central picks the relay up at its next daily reload
+   (up to 100 relays, ranked by how many neurons list them).
 
-3. **Add your relay to a neuron** (optional) — to speed up discovery, go to
-   **Settings > External Relay Connections** on any neuron and add your relay
-   URL. The neuron will connect and publish it in its NIP-65 relay list.
+3. **What is measured.** Central keeps one connection to each relay. Time
+   counts only while the relay holds at least one Satori stream announcement
+   (kind 34600), and messages count only when written by registered neurons.
 
-4. **Claim your rewards** — the server derives your Evrmore reward address
-   from your relay's Nostr pubkey using the even-y (0x02) convention. Use the
-   **Key Normalization Tool** on the neuron Settings page to convert your
-   relay's Nostr private key into an Evrmore-compatible key, then import it
-   into any Evrmore wallet to spend your rewards.
+4. **How pay is split.** Every relay connected 20 hours or more on a UTC day
+   shares that day's relay pool (0.1% of the daily off-chain reward pool)
+   equally. Message
+   counts are recorded in the public audit (`/api/v1/audit/relays/latest`) but
+   do not change the amount today.
+
+5. **Claim.** The address is the Base address of `02 || your pubkey` (the
+   even-y convention). Use the **Key Normalization Tool** on the neuron
+   Settings page to turn your relay's Nostr private key into the matching key,
+   then import it into Satori GO, MetaMask or any Base wallet. Rewards are
+   added to the daily Merkle drop, claimable from that address.
 
 ## Features
 

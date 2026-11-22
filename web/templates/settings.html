@@ -782,10 +782,10 @@
             </div>
         </div>
 
-        <!-- ── Relay Registration ────────────────────────── -->
+        <!-- ── Run your own relay ────────────────────────── -->
         <div class="card">
             <div class="card-header set-card-head">
-                <h5><i class="material-icons">cell_tower</i>Relay registration</h5>
+                <h5><i class="material-icons">cell_tower</i>Run your own relay</h5>
             </div>
             <div class="card-body">
                 <div class="mb-3 set-mono-field">
@@ -798,26 +798,12 @@
                         </button>
                     </div>
                     <div class="set-help">
-                        Set this as <code style="padding:0; background: none; color: var(--accent-primary);">NOSTR_PUBKEY</code>
-                        in your relay's <code style="padding:0; background:none; color: var(--accent-primary);">.env</code>
-                        file so NIP-11 can announce your Nostr key.
+                        To run a relay on a server, set this as <code style="padding:0; background: none; color: var(--accent-primary);">NOSTR_PUBKEY</code>
+                        in the relay's <code style="padding:0; background:none; color: var(--accent-primary);">.env</code>
+                        (any Nostr key you hold works). Relay rewards go to the Base address of that key, shown under
+                        Relay Reward Address below. There is nothing to register: add the relay's URL under
+                        External Relay Connections, and central finds it from the relay list this neuron publishes.
                     </div>
-                </div>
-                <div class="mb-3 set-mono-field">
-                    <label class="set-label" for="relayUrl">Relay URL</label>
-                    <input type="text" class="form-control" id="relayUrl"
-                           value="{{ relay_url or '' }}"
-                           placeholder="wss://your-relay.example.com">
-                    <div class="set-help">
-                        WebSocket URL of your Nostr relay. Must have NIP-11 configured to expose your pubkey.
-                    </div>
-                </div>
-                <div class="d-flex align-items-center gap-3 flex-wrap">
-                    <button class="set-btn set-btn-primary" onclick="registerRelay()" type="button">
-                        <i class="material-icons">check_circle</i>
-                        Register relay
-                    </button>
-                    <span id="relayStatus" style="display: none; font-size: 0.82rem;"></span>
                 </div>
             </div>
         </div>
@@ -1429,46 +1415,6 @@
         }
     }
 
-    async function registerRelay() {
-        const relayUrl = document.getElementById('relayUrl').value.trim();
-        const statusEl = document.getElementById('relayStatus');
-
-        if (!relayUrl) {
-            statusEl.style.display = 'inline';
-            statusEl.className = 'text-danger';
-            statusEl.textContent = 'Please enter a relay URL';
-            return;
-        }
-        if (!relayUrl.startsWith('wss://') && !relayUrl.startsWith('ws://')) {
-            statusEl.style.display = 'inline';
-            statusEl.className = 'text-danger';
-            statusEl.textContent = 'URL must start with wss:// or ws://';
-            return;
-        }
-
-        statusEl.style.display = 'inline';
-        statusEl.className = 'text-info';
-        statusEl.textContent = 'Verifying relay…';
-
-        try {
-            const resp = await fetch('/api/relay', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({relay_url: relayUrl})
-            });
-            const data = await resp.json();
-            if (resp.ok && (data.success || data.relay_url)) {
-                statusEl.className = 'text-success';
-                statusEl.textContent = 'Relay verified and registered';
-            } else {
-                statusEl.className = 'text-danger';
-                statusEl.textContent = data.error || data.detail || 'Verification failed';
-            }
-        } catch (err) {
-            statusEl.className = 'text-danger';
-            statusEl.textContent = 'Connection error: ' + err.message;
-        }
-    }
 
     // ── Connected Relays ─────────────────────────────────
     const RELAYS_PAGE_SIZE = 10;
