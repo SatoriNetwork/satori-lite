@@ -3677,6 +3677,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.info(
                 f'Network discover: falling back to {len(relay_urls)} '
                 f'known relays', color='yellow')
+        # Relays the operator added in Settings are searched too: central
+        # lists only relays that already carry neuron traffic, so a new relay
+        # is reachable from here first.
+        try:
+            added = await asyncio.to_thread(self.networkDB.get_relays)
+            relay_urls += [r['relay_url'] for r in added
+                           if r.get('user_added') and r['relay_url'] not in relay_urls]
+        except Exception as e:
+            logging.warning(f'Network discover: could not read added relays: {e}')
 
         all_streams = []
         for relay_url in relay_urls:

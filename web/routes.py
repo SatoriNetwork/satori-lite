@@ -3255,7 +3255,7 @@ def register_routes(app):
         relay_url = data['relay_url'].strip()
         if not relay_url.startswith(('wss://', 'ws://')):
             return jsonify({'error': 'Relay URL must start with wss:// or ws://'}), 400
-        startup.networkDB.upsert_relay(relay_url)
+        startup.networkDB.upsert_relay(relay_url, user_added=True)
         return jsonify({'success': True})
 
     @app.route('/api/network/relay', methods=['DELETE'])
