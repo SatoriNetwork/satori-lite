@@ -321,6 +321,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
         fetch_task = None
         next_relay_publish_at = 0.0
+        published_relays = None
         try:
             while True:
                 try:
@@ -351,9 +352,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._channelExpiryCheck()
                 except Exception as e:
                     logging.error(f'Channel expiry check error: {e}')
-                if time.monotonic() >= next_relay_publish_at:
+                # Daily, and whenever the relays that answer change: a relay
+                # added since the last list is how central finds it.
+                connected = await self._networkConnectedRelays()
+                if (time.monotonic() >= next_relay_publish_at
+                        or set(connected) != published_relays):
                     try:
-                        await self._networkPublishRelayList()
+                        await self._networkPublishRelayList(connected)
+                        published_relays = set(connected)
                     except Exception as e:
                         logging.error(f'NIP-65 relay list publish error: {e}')
                     next_relay_publish_at = time.monotonic() + 86400
@@ -401,7 +407,19 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self._networkEnsurePredictionListener(relay_url)
                 self._networkEnsureAccessRequestListener(relay_url)
 
-    async def _networkPublishRelayList(self):
+    async def _networkConnectedRelays(self) -> list:
+        """The relays that answer. A client exists for every relay tried,
+        reachable or not (it keeps retrying), so having one is not enough."""
+        urls = []
+        for relay_url, client in list(self._networkClients.items()):
+            try:
+                if await client.is_connected():
+                    urls.append(relay_url)
+            except Exception:
+                pass
+        return urls
+
+    async def _networkPublishRelayList(self, relay_urls: list):
         """Publish a NIP-65 relay list (kind 10002) to all connected relays.
 
         Advertises every relay URL this node is currently connected to.
@@ -409,10 +427,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         pubkeys to build its relay directory — replacing the old
         neuron-claims-relay model.
         """
-        relay_urls = list(self._networkClients.keys())
         if not relay_urls:
             return
-        for client in list(self._networkClients.values()):
+        for relay_url in relay_urls:
+            client = self._networkClients.get(relay_url)
+            if not client:
+                continue
             try:
                 await client.publish_relay_list(relay_urls)
             except Exception as e:
@@ -443,7 +463,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     f'Network: follow setup failed on {relay_url}: {e}')
             self._networkClients[relay_url] = client
             self._networkSubscribed[relay_url] = set()
-            logging.info(f'Network: connected to {relay_url}', color='green')
+            # start() does not fail on a relay it cannot reach; the client
+            # stays and keeps retrying, so a relay that is down now is used
+            # once it is back.
+            if await client.is_connected():
+                logging.info(f'Network: connected to {relay_url}', color='green')
+            else:
+                logging.warning(f'Network: no answer from {relay_url} yet')
             # Start channel-related listeners immediately on connect — they
             # must run for pure publishers (no stream subscriptions) too, so
             # senders can receive settlement/tombstone notifications from
@@ -3177,10 +3203,14 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
                     metadata=meta_dict or None,
                 )
-                await client.announce_datastream(metadata)
-                logging.info(
-                    f'Network: announced {pub["stream_name"]} on '
-                    f'{relay_url}', color='green')
+                if await client.announce_datastream(metadata):
+                    logging.info(
+                        f'Network: announced {pub["stream_name"]} on '
+                        f'{relay_url}', color='green')
+                else:
+                    logging.warning(
+                        f'Network: {relay_url} did not take the announcement '
+                        f'of {pub["stream_name"]}')
             except Exception as e:
                 logging.warning(
                     f'Network: announce failed {pub["stream_name"]}: {e}')
@@ -3232,11 +3262,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         delivered = 0
         for relay_url, client in list(self._networkClients.items()):
             try:
-                await client.publish_observation(observation, metadata)
-                delivered += 1
-                logging.info(
-                    f'Network: published {stream_name} seq={seq_num} '
-                    f'value={value} to {relay_url}', color='green')
+                if await client.publish_observation(observation, metadata):
+                    delivered += 1
+                    logging.info(
+                        f'Network: published {stream_name} seq={seq_num} '
+                        f'value={value} to {relay_url}', color='green')
+                else:
+                    logging.warning(
+                        f'Network: {relay_url} did not take {stream_name} '
+                        f'seq={seq_num}')
             except Exception as e:
                 logging.warning(
                     f'Network: publish failed on {relay_url}: {e}')

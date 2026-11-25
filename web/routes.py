@@ -2773,6 +2773,9 @@ def register_routes(app):
             cadence_seconds=sub.get('cadence_seconds') if sub else None,
             source_stream_name=stream_name,
             source_provider_pubkey=provider_pubkey)
+        # Announce it now: the hourly pass announces only on a relay it newly
+        # connects to, so on one already connected it waited for a restart.
+        startup.announceNowSync()
         return jsonify({'success': True, 'publication': pred_name})
 
     @app.route('/api/network/stop-predict', methods=['POST'])
