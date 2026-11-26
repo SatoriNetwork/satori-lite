@@ -144,6 +144,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.localRelay = LocalRelayManager(self)
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
+        self._networkLastSeq: dict = {}  # (stream_name, provider_pubkey) -> seq of the value last taken
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
         self._baseNoGame: dict = {}  # base stream_id -> last time it had no game
         self._basePredictThread = None
@@ -448,16 +449,18 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         if relay_url in self._networkClients:
             return self._networkClients[relay_url]
         try:
+            # follow_public off: the connection asks the relay for nothing
+            # public until it is told which streams, so it never pulls the
+            # relay's whole observation firehose, not even for a moment.
             cfg = ConfigClass(
                 keys=self._networkSecretHex,
-                relay_urls=[relay_url])
+                relay_urls=[relay_url],
+                follow_public=False)
             client = SatoriNostr(cfg)
             await client.start()
-            # Narrow the public-event subscription to authors we follow so
-            # this connection doesn't pull the relay's observation firehose.
             try:
-                await client.set_followed_authors(
-                    await self._networkFollowedAuthors())
+                await client.set_followed_streams(
+                    *await self._networkFollowed())
             except Exception as e:
                 logging.warning(
                     f'Network: follow setup failed on {relay_url}: {e}')
@@ -490,24 +493,25 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.warning(f'Network: failed to connect to {relay_url}: {e}')
             return None
 
-    async def _networkFollowedAuthors(self) -> list:
-        """Nostr pubkeys whose public events we need: providers we subscribe
-        to (observations) and receivers of channels we fund (commitment
-        tombstones)."""
+    async def _networkFollowed(self) -> tuple:
+        """The public events we need from a relay: the streams we subscribe
+        to, as (provider pubkey, stream name), so a relay sends those and
+        not every stream of their provider; and the receivers of channels we
+        fund (their commitment tombstones)."""
         subs = await asyncio.to_thread(self.networkDB.get_active)
         channels = await asyncio.to_thread(
             self.networkDB.get_channels_as_sender)
-        authors = {s['provider_pubkey'] for s in subs}
-        authors.update(c['receiver_nostr_pubkey'] for c in channels
-                       if c.get('receiver_nostr_pubkey'))
-        return sorted(authors)
+        streams = sorted({(s['provider_pubkey'], s['stream_name']) for s in subs})
+        receivers = sorted({c['receiver_nostr_pubkey'] for c in channels
+                            if c.get('receiver_nostr_pubkey')})
+        return streams, receivers
 
     async def _networkRefreshFollowed(self) -> None:
-        """Push the current followed-author set to every connected relay."""
-        authors = await self._networkFollowedAuthors()
+        """Push the current followed streams to every connected relay."""
+        followed = await self._networkFollowed()
         for relay_url, client in list(self._networkClients.items()):
             try:
-                await client.set_followed_authors(authors)
+                await client.set_followed_streams(*followed)
             except Exception as e:
                 logging.warning(
                     f'Network: follow update failed on {relay_url}: {e}')
@@ -956,6 +960,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     obs.stream_name, obs.nostr_pubkey)
                 if not subscribed:
                     continue
+                # The same value comes from every relay we hold. This check
+                # and its record run with no await between them, so one copy
+                # gets through; save_observation's own check runs in a thread,
+                # where two copies arriving together could both look new and
+                # the engine would predict twice.
+                if obs.observation is not None:
+                    key = (obs.stream_name, obs.nostr_pubkey)
+                    if self._networkLastSeq.get(key) == obs.observation.seq_num:
+                        continue
+                    self._networkLastSeq[key] = obs.observation.seq_num
                 logging.info(
                     f'Network: received data from {relay_url} '
                     f'stream={obs.stream_name} value={obs.observation.value if obs.observation else None}',

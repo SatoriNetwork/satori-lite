@@ -47,6 +47,7 @@ def harness(monkeypatch):
         h._networkClients = {}
         h._networkSubscribed = {}
         h._networkListeners = {}
+        h._networkLastSeq = {}
         # No engine: a prediction echoes its observation (_networkRunEngine's
         # fallback). A test of a forecast sets _relayPredict.
         h.ensureEngine = lambda: None
@@ -859,3 +860,66 @@ class TestBridgeObservationValues:
         assert len(calls) == 1, 'the replayed round must not re-run the engine'
         obs = harness.networkDB.get_observations('satori-84532-1', 'bridgepub')
         assert len(obs) == 1
+
+
+# ── What a relay is asked for, and copies from several relays ────────
+
+class _RelayOf:
+    """A relay client that delivers these observations, then goes quiet."""
+
+    def __init__(self, observations):
+        self._observations = observations
+
+    async def observations(self):
+        for obs in self._observations:
+            await asyncio.sleep(0)  # let the other relay's listener run in between
+            yield obs
+
+
+class TestFollowedStreams:
+
+    def _subscribe(self, harness, name, pubkey='pub123'):
+        harness.networkDB.subscribe({
+            'stream_name': name, 'nostr_pubkey': pubkey,
+            'name': name, 'cadence_seconds': 3600}, 'ws://relay-a')
+
+    def test_a_relay_is_asked_for_the_subscribed_streams_by_name(self, harness):
+        self._subscribe(harness, 'gold')
+        self._subscribe(harness, 'bitcoin')
+        self._subscribe(harness, 'gold', 'otherpub')
+        streams, receivers = asyncio.run(harness._networkFollowed())
+        assert streams == [('otherpub', 'gold'), ('pub123', 'bitcoin'), ('pub123', 'gold')]
+        assert receivers == []
+
+    def test_the_same_value_from_three_relays_is_processed_once(self, harness):
+        self._subscribe(harness, 'gold')
+        processed = []
+
+        async def process(obs):
+            processed.append((obs.stream_name, obs.observation.seq_num))
+            await asyncio.sleep(0.01)  # a real save and prediction take a while
+        harness._networkProcessObservation = process
+
+        def copy(seq, event_id):
+            return make_observation(stream_name='gold', seq_num=seq, event_id=event_id)
+        # Each relay's copy is its own event (its own id), with the value's seq.
+        for n in ('a', 'b', 'c'):
+            harness._networkClients[f'ws://relay-{n}'] = _RelayOf(
+                [copy(7, f'evt7-{n}'), copy(8, f'evt8-{n}')])
+
+        async def listen_on_all():
+            await asyncio.gather(*(harness._networkListen(url) for url in harness._networkClients))
+        asyncio.run(listen_on_all())
+        assert processed == [('gold', 7), ('gold', 8)]
+
+    def test_a_stream_not_subscribed_is_dropped(self, harness):
+        self._subscribe(harness, 'gold')
+        processed = []
+
+        async def process(obs):
+            processed.append(obs.stream_name)
+        harness._networkProcessObservation = process
+        harness._networkClients['ws://relay-a'] = _RelayOf(
+            [make_observation(stream_name='eth'), make_observation(stream_name='gold')])
+        asyncio.run(harness._networkListen('ws://relay-a'))
+        assert processed == ['gold']
