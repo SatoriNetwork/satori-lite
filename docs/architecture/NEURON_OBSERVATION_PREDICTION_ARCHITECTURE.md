@@ -31,7 +31,7 @@ The Satori Neuron is a client-side application that receives multi-cryptocurrenc
 │                                                                       │
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │  NEURON (start.py)                                             │ │
-│  │  - Polls observations at each contest open                     │ │
+│  │  - Polls observations every 11 hours                           │ │
 │  │  - Coordinates AI Engine                                       │ │
 │  │  - Collects and batches predictions                            │ │
 │  └────────────────────────────────────────────────────────────────┘ │
@@ -62,7 +62,7 @@ The Satori Neuron is a client-side application that receives multi-cryptocurrenc
 
 ## Data Flow
 
-### 1. Observation Reception (At Each Contest Open)
+### 1. Observation Reception (Every 11 Hours)
 
 **File:** `neuron-lite/start.py:271-364`
 
@@ -96,8 +96,8 @@ def pollObservationsForever(self):
         # 5. Collect predictions and submit batch
         self.collectAndSubmitPredictions()
 
-        # Wait for the next contest open (11 hours from a Central without contests)
-        self.waitForContestOpen()
+        # Wait 11 hours
+        time.sleep(60 * 60 * 11)
 ```
 
 **Key Points:**
@@ -657,7 +657,7 @@ Submitting batch of 40 predictions to server...
    ├─ Fetch ETH: $3,000
    └─ Save to streams table with UUIDs
 
-2. Neuron Poll (0 to 15 minutes after a contest opens)
+2. Neuron Poll (11 hours later)
    ├─ GET /api/v1/observations/batch
    ├─ Receive 40 observations with stream metadata
    ├─ Store in SQLite:

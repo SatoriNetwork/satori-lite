@@ -253,7 +253,7 @@ flowchart TB
         WARM["warm pool: auto-subscribe top-N<br/>free, non-gated streams"]
         LIVE["live observations<br/>(_networkListen, per event)"]
         HIST["history backfill: kind 34610 request<br/>publisher serves ~1,000 recent rows<br/>as ephemeral 24610 chunks"]
-        CPOLL["central poll<br/>(~74 streams, at each contest open)"]
+        CPOLL["central poll<br/>(~74 streams, every 11h)"]
         DISC --> WARM
         WARM --> LIVE
         WARM -. "thin history?" .-> HIST
@@ -302,7 +302,7 @@ Detailed version with code entry points:
    per stream (kind 34601, replaceable)
             |                                              |
    subscribe_datastream + live listen             pollObservationsForever
-   (_networkListen, per observation)              (one thread, at each contest open,
+   (_networkListen, per observation)              (one thread, every 11h,
             |                                      ~74 streams sequentially)
             v                                              |
    _networkProcessObservation                              |

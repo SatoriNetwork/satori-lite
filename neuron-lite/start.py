@@ -164,7 +164,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.latestObservationTime: float = 0
         self.configRewardAddress: str = None
         self.setupWalletManager()
-        # Health check thread: monitors observations and restarts if none received in 48 hours
+        # Health check thread: monitors observations and restarts if none received in 24 hours
         self.checkinCheckThread = threading.Thread(
             target=self.checkinCheck,
             daemon=True)
@@ -4402,62 +4402,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         except Exception as e:
             logging.error(f"Error logging training queue status: {e}", color='red')
 
-    def waitForContestOpen(self):
-        """Wait for Central's next contest open, then 0 to 15 minutes at random.
-
-        A prediction counts only if Central receives it within an hour of its
-        contest's open (GET /api/v1/contests/open), which Central's daily run
-        (00:01 UTC) writes. So: check now, then every 5 minutes from 00:05 to
-        01:05 UTC, for an open newer than the one last acted on ('contest last
-        open' in the config, so a restart does not act on one open twice); an
-        open whose hour has passed (the neuron was down) is acted on too. The
-        day's first check comes 0 to 5 minutes after 00:05 and the poll 0 to
-        15 after the open is seen, both at random: thousands of neurons wait
-        for the same moment and must not ask Central in the same second. Both
-        stay well inside the hour. A Central without contests (404) or one
-        that keeps failing: the 11 hours of before.
-        """
-        import random
-        import requests
-        from datetime import datetime
-        failures = 0
-        while True:
-            try:
-                r = requests.get(self.server.url + '/api/v1/contests/open', timeout=15)
-                if r.status_code == 404:
-                    break
-                r.raise_for_status()
-                newest = max((
-                    datetime.fromisoformat(c['opened_at'].replace('Z', '+00:00')).timestamp()
-                    for c in r.json()), default=0)
-                if newest > float(config.get().get('contest last open', 0)):
-                    config.add(data={'contest last open': newest})
-                    spread = random.randint(0, 60 * 15)
-                    logging.info(f'Contest open, observation poll in {spread / 60:.1f} minutes', color='blue')
-                    time.sleep(spread)
-                    return
-                failures = 0
-            except Exception as e:
-                failures += 1
-                logging.warning(f'Open contests check failed: {e}', color='yellow')
-                if failures == 3:
-                    break
-                time.sleep(60 * 5)
-                continue
-            sinceCheckStart = (time.time() - 60 * 5) % (60 * 60 * 24)  # since 00:05 UTC
-            if sinceCheckStart < 60 * 60:
-                time.sleep(60 * 5)
-            else:  # to 00:05 UTC, plus this neuron's own 0 to 5 minutes
-                time.sleep(60 * 60 * 24 - sinceCheckStart + random.uniform(0, 60 * 5))
-        logging.info('No open contests from Central, next observation poll in 11 hours', color='blue')
-        time.sleep(60 * 60 * 11)
-
     def pollObservationsForever(self):
         """
         Poll the central server for new observations.
         Initial delay: random (5-30 minutes) to distribute load.
-        Subsequent polls: at each contest open (waitForContestOpen), or every
-        11 hours from a Central without contests.
+        Subsequent polls: every 11 hours.
         """
         import pandas as pd
         import random
@@ -4485,7 +4434,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
 
                     if observations is None or len(observations) == 0:
                         logging.info("No new observations available", color='blue')
-                        self.waitForContestOpen()
+                        time.sleep(60 * 60 * 11)
                         continue
 
                     logging.info(f"Received {len(observations)} observations from server", color='cyan')
@@ -4558,7 +4507,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 except Exception as e:
                     logging.error(f"Error polling observations: {e}", color='red')
 
-                self.waitForContestOpen()
+                time.sleep(60 * 60 * 11)
 
         self.pollObservationsThread = threading.Thread(
             target=pollForever,
@@ -4569,9 +4518,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         while True:
             time.sleep(60 * 60 * 6)  # Check every 6 hours
             current_time = time.time()
-            # two polls missed: they come a day apart (each contest open)
-            if self.latestObservationTime and (current_time - self.latestObservationTime > 60*60*48):
-                logging.warning("No observations in 48 hours, restarting", print=True)
+            if self.latestObservationTime and (current_time - self.latestObservationTime > 60*60*24):
+                logging.warning("No observations in 24 hours, restarting", print=True)
                 self.triggerRestart()
             if hasattr(self, 'server') and hasattr(self.server, 'checkinCheck') and self.server.checkinCheck():
                 logging.warning("Server check failed, restarting", print=True)

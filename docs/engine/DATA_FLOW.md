@@ -19,7 +19,7 @@ time. They share no code, no dataframe, and no model state.
 | Engine class | `LiteEngine` | `veda.Engine` / `StreamModel` |
 | File | `engine-lite/satoriengine/lite/lite_engine.py` | `engine-lite/engine.py` + `adapters/` |
 | Data source | Nostr relay subscriptions | `server.getObservationsBatch()` from central-lite |
-| Trigger | Every observation, as it arrives | Poll loop, at each contest open |
+| Trigger | Every observation, as it arrives | Poll loop, every 11 hours |
 | Method | Simple stats (mean / linear regression) | XGBoost or Starter adapter, with training |
 | Uses XGB? | **No** | **Yes**, when a stream has >10 rows |
 | Model files / training | None (stateless) | Yes — joblib model files, training queue |
@@ -109,12 +109,7 @@ delayedEngine()        # sleeps 6h, then buildEngine()
 `pollObservationsForever` runs on a daemon thread:
 
 - **First poll**: random 5–30 minute delay after startup (to distribute load across nodes).
-- **Subsequent polls**: at each contest open (`waitForContestOpen`). A prediction
-  counts only if Central receives it within an hour of its contest's open, so from
-  00:05 UTC the neuron checks `GET /api/v1/contests/open` every 5 minutes and polls
-  0 to 15 minutes after an open newer than the one it last acted on (`contest last
-  open` in the config); every 11 hours from a Central without contests (404) or
-  one that keeps failing.
+- **Subsequent polls**: every 11 hours.
 - `observations = server.getObservationsBatch(storage=...)` — one observation per
   stream, the latest snapshot. ~74 streams in a typical batch.
 
@@ -359,7 +354,7 @@ in `EngineSqliteDatabase`.
 `engine-lite/storage/sqlite_manager.py` → `engine-lite/db/engine.db`
 
 Per-stream tables (`provider='engine'`). Used for prediction audit log only.
-Not performance-critical (one write per stream per poll).
+Not performance-critical (one write per stream per 11h poll).
 
 ### Relay-path stores
 
