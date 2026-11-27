@@ -146,6 +146,13 @@ def get_startup():
     return _startup_instance
 
 
+def _is_central_stream(startup, provider_pubkey: str) -> bool:
+    """A stream is the Satori Network's own only if its publisher key signed
+    it; a name or a tag anyone can copy."""
+    publisher = (getattr(startup, '_networkPlan', None) or {}).get('publisher')
+    return bool(publisher) and provider_pubkey == publisher
+
+
 def get_or_create_session_wallet():
     """Get or create WalletManager for current session.
 
@@ -2608,6 +2615,7 @@ def register_routes(app):
             s_copy['subscribed'] = startup.networkDB.is_subscribed(
                 s['stream_name'], s['nostr_pubkey'])
             s_copy['is_mine'] = s['stream_name'] in my_pub_names
+            s_copy['central'] = _is_central_stream(startup, s['nostr_pubkey'])
             streams.append(s_copy)
         return jsonify({
             'connected': connected,
@@ -2915,6 +2923,7 @@ def register_routes(app):
         for sub in subs:
             sub['predicting'] = startup.networkDB.is_predicting(
                 sub['stream_name'], sub['provider_pubkey'])
+            sub['central'] = _is_central_stream(startup, sub['provider_pubkey'])
         return jsonify({'subscriptions': subs})
 
     @app.route('/api/network/observations', methods=['GET'])

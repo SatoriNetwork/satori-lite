@@ -3334,7 +3334,8 @@
             p => p.active && !p.stream_name.endsWith('_pred')).length;
     }
     function activeSubCount() {
-        return subsAllItems.filter(s => s.active).length;
+        // Streams the Satori Network assigned do not count against the cap.
+        return subsAllItems.filter(s => s.active && !s.assigned).length;
     }
     function combinedStreamCount() {
         return activeUserPubCount() + activeSubCount();
@@ -3713,7 +3714,9 @@
                 openObsDrawer(s.stream_name, s.provider_pubkey);
             };
             row.innerHTML =
-                '<td><strong>' + (s.name || s.stream_name) + '</strong></td>' +
+                '<td><strong>' + (s.name || s.stream_name) + '</strong>' +
+                (s.central ? ' <span class="badge bg-info text-dark" title="Signed with the Satori Network\'s own key">Satori Network</span>' : '') +
+                '</td>' +
                 '<td><small class="text-muted">' + (s.relay_url || '-') + '</small></td>' +
                 '<td>' + formatCadence(s.cadence_seconds) + '</td>' +
                 '<td>' + statusBadge + '</td>' +

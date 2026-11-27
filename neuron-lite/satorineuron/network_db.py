@@ -134,6 +134,13 @@ class NetworkDB:
                 user_added INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # Migration: subscriptions central assigned (existing DBs)
+        try:
+            conn.execute(
+                "ALTER TABLE subscriptions ADD COLUMN assigned "
+                "INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass  # column already exists
         # Migration: add user_added column if missing (existing DBs)
         try:
             conn.execute(
@@ -450,8 +457,14 @@ class NetworkDB:
 
     # ── Subscriptions ──────────────────────────────────────────────
 
-    def subscribe(self, stream: dict, relay_url: str) -> int:
-        """Subscribe to a stream. Returns row id."""
+    def subscribe(self, stream: dict, relay_url: str,
+                  assigned: bool = False) -> int:
+        """Subscribe to a stream. Returns row id.
+
+        assigned: central told this neuron to predict the stream. Such a
+        subscription comes and goes with central's list and does not count
+        against the neuron's stream cap. Subscribing by hand makes it the
+        user's own."""
         conn = self._get_conn()
         tags = ','.join(stream.get('tags', []))
         alias_pubkey = announcedAliasPubkey(stream.get('metadata'))
@@ -459,10 +472,11 @@ class NetworkDB:
             INSERT INTO subscriptions
                 (stream_name, relay_url, provider_pubkey, provider_alias_pubkey,
                  name, description, cadence_seconds, price_per_obs, encrypted,
-                 tags, active, subscribed_at, stale_since)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL)
+                 tags, active, subscribed_at, stale_since, assigned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, ?)
             ON CONFLICT(stream_name, provider_pubkey) DO UPDATE SET
                 active = 1,
+                assigned = excluded.assigned,
                 relay_url = excluded.relay_url,
                 provider_alias_pubkey = COALESCE(excluded.provider_alias_pubkey,
                                                    provider_alias_pubkey),
@@ -487,6 +501,7 @@ class NetworkDB:
             1 if stream.get('encrypted') else 0,
             tags,
             int(time.time()),
+            1 if assigned else 0,
         ))
         conn.commit()
         self.upsert_relay(relay_url)
@@ -513,9 +528,12 @@ class NetworkDB:
         return [dict(r) for r in rows]
 
     def count_active_subscriptions(self) -> int:
+        """Active subscriptions the user made; those central assigned do not
+        count against the stream cap."""
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT COUNT(*) AS c FROM subscriptions WHERE active = 1"
+            "SELECT COUNT(*) AS c FROM subscriptions "
+            "WHERE active = 1 AND assigned = 0"
         ).fetchone()
         return row['c']
 

@@ -1807,6 +1807,7 @@
                     <div class="mkt-card-name" title="${escapeHtml(s.name || s.stream_name)}">${escapeHtml(s.name || s.stream_name)}</div>
                     <div class="mkt-card-stream" title="${escapeHtml(s.stream_name)}">${escapeHtml(s.stream_name)}</div>
                 </div>
+                ${s.central ? '<span class="mkt-card-class" title="Signed with the Satori Network\'s own key">Satori Network</span>' : ''}
                 ${classBadge}
             </div>
             <div class="mkt-card-desc">${escapeHtml(s.description || 'No description provided.')}</div>

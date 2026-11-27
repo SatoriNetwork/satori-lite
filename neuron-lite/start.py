@@ -326,6 +326,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 try:
                     async with self._networkPlanLock:
                         await self._networkRefreshPlan()
+                        await self._networkFollowAssigned()
                         await self._networkHoldPlan(SatoriNostrConfig)
                 except Exception as e:
                     logging.error(f'Network relay plan error: {e}')
@@ -429,7 +430,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             except Exception:
                 plan = {}
         try:
-            cfg = await asyncio.to_thread(self.server.getRelayConfig)
+            cfg = await asyncio.to_thread(
+                self.server.getRelayConfig, self.nostrPubkey)
         except Exception:
             cfg = {}
         if isinstance(cfg, dict) and cfg:
@@ -438,6 +440,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 _ndb.setMaxTotalStreams(cfg['max_streams'])
             plan['keep'] = cfg.get('keep')
             plan['publisher'] = cfg.get('stream_publisher_pubkey')
+            # The streams of central's to predict; None when central has no
+            # list for this neuron (an older central, or not in the rollout).
+            plan['streams'] = cfg.get('streams')
         try:
             rows = await asyncio.to_thread(
                 self.server.getRelays, self.nostrPubkey)
@@ -452,6 +457,59 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkPlan = plan
         await asyncio.to_thread(
             self.networkDB.set_meta, self.PLAN_META_KEY, json.dumps(plan))
+
+    async def _networkFollowAssigned(self) -> None:
+        """Make the subscriptions to central's streams match central's list.
+
+        Central decides which of its streams this neuron predicts
+        (`streams` in /peer/relay-config). Each is subscribed with its
+        prediction stream; one that left the list is unsubscribed (its model
+        stays on disk). A subscription the user made by hand is the user's:
+        it is never unsubscribed here, only predicted if central lists it.
+        With no list from central, or no relay plan to receive the streams
+        on, nothing is touched.
+        """
+        streams = self._networkPlan.get('streams')
+        publisher = self._networkPlan.get('publisher')
+        plan = self._networkPlanRelays()
+        if not isinstance(streams, list) or not publisher or not plan:
+            return
+        wanted = {s['name']: s.get('cadence_seconds') for s in streams
+                  if isinstance(s, dict) and s.get('name')}
+        db = self.networkDB
+        mine = {s['stream_name']: s
+                for s in await asyncio.to_thread(db.get_active)
+                if s['provider_pubkey'] == publisher}
+        added, left = [], []
+        for name, cadence in wanted.items():
+            sub = mine.get(name)
+            if sub is None or (sub.get('assigned')
+                               and sub.get('cadence_seconds') != cadence):
+                await asyncio.to_thread(db.subscribe, {
+                    'stream_name': name, 'nostr_pubkey': publisher,
+                    'name': name, 'cadence_seconds': cadence,
+                }, plan[0], True)
+                if sub is None:
+                    added.append(name)
+            if not await asyncio.to_thread(db.is_predicting, name, publisher):
+                await asyncio.to_thread(
+                    db.add_publication,
+                    stream_name=name + '_pred',
+                    name=f'Predictions for {name}',
+                    cadence_seconds=cadence,
+                    source_stream_name=name,
+                    source_provider_pubkey=publisher)
+        for name, sub in mine.items():
+            if sub.get('assigned') and name not in wanted:
+                await asyncio.to_thread(db.unsubscribe, name, publisher)
+                await asyncio.to_thread(db.remove_publication, name + '_pred')
+                left.append(name)
+        if added or left:
+            logging.info(
+                f"Network: central's stream list: {len(wanted)} streams"
+                + (f", new: {', '.join(sorted(added))}" if added else '')
+                + (f", left: {', '.join(sorted(left))}" if left else ''),
+                color='green')
 
     async def _networkTake(self, relay_url: str, ConfigClass) -> bool:
         """Connect to a relay of the plan and announce our streams there.
@@ -3444,6 +3502,12 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             return
         pubs = await asyncio.to_thread(
             self.networkDB.get_active_publications)
+        # Predictions of central's streams are not announced: every neuron
+        # predicts some, and nobody subscribes to them one by one (central
+        # reads them from the relays by name).
+        publisher = self._networkPlan.get('publisher')
+        pubs = [p for p in pubs
+                if not (publisher and p.get('source_provider_pubkey') == publisher)]
         if not pubs:
             return
         for pub in pubs:

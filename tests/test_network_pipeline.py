@@ -960,7 +960,8 @@ class _Central:
         self.down = down
         self.asked = []
 
-    def getRelayConfig(self):
+    def getRelayConfig(self, forPubkey=None):
+        self.config_asked_for = forPubkey
         return {} if self.down else self.config
 
     def getRelays(self, forPubkey=None):
@@ -1343,3 +1344,128 @@ class TestSending:
         began = time.monotonic()
         assert self._publish(harness) == 2
         assert time.monotonic() - began < 0.5    # together, not one after the other
+
+
+class TestAssignedStreams:
+    """Central decides which of its streams a neuron predicts; the neuron makes its subscriptions match."""
+
+    def _central_lists(self, h, *names, cadence=3600):
+        h.server.config = {'max_streams': 60, 'stream_publisher_pubkey': CENTRAL, 'keep': 2,
+                           'streams': [{'name': n, 'cadence_seconds': cadence} for n in names]}
+
+    def _pass(self, h):
+        async def run():
+            await h._networkRefreshPlan()
+            await h._networkFollowAssigned()
+        asyncio.run(run())
+
+    def _subs(self, h):
+        return sorted(s['stream_name'] for s in h.networkDB.get_active() if s['provider_pubkey'] == CENTRAL)
+
+    def _predicted(self, h):
+        return sorted(p['source_stream_name'] for p in h.networkDB.get_active_publications())
+
+    def test_a_neuron_with_nothing_subscribed_ends_up_predicting_its_streams(self, planned):
+        self._central_lists(planned, 'bitcoin', 'safetrade_sat', 'gold')
+        self._pass(planned)
+        assert planned.server.asked == ['a' * 64] and planned.server.config_asked_for == 'a' * 64
+        assert self._subs(planned) == ['bitcoin', 'gold', 'safetrade_sat'] == self._predicted(planned)
+        gold = next(s for s in planned.networkDB.get_active() if s['stream_name'] == 'gold')
+        assert gold['assigned'] == 1 and gold['cadence_seconds'] == 3600 and gold['relay_url'] == 'ws://relay-a'
+        pred = next(p for p in planned.networkDB.get_active_publications() if p['stream_name'] == 'gold_pred')
+        assert pred['source_provider_pubkey'] == CENTRAL
+        # The relays are asked for exactly these streams.
+        streams, _ = asyncio.run(planned._networkFollowed())
+        assert streams == [(CENTRAL, 'bitcoin'), (CENTRAL, 'gold'), (CENTRAL, 'safetrade_sat')]
+
+    def test_a_stream_that_leaves_the_list_is_unsubscribed_and_a_new_one_is_taken(self, planned):
+        self._central_lists(planned, 'bitcoin', 'gold')
+        self._pass(planned)
+        self._central_lists(planned, 'bitcoin', 'eth')
+        self._pass(planned)
+        assert self._subs(planned) == ['bitcoin', 'eth'] == self._predicted(planned)
+        left = next(s for s in planned.networkDB.get_all() if s['stream_name'] == 'gold')
+        assert left['active'] == 0
+        # And back: the same subscription row is taken up again.
+        self._central_lists(planned, 'bitcoin', 'gold')
+        self._pass(planned)
+        assert self._subs(planned) == ['bitcoin', 'gold'] == self._predicted(planned)
+
+    def test_an_empty_list_unsubscribes_them_all_but_no_list_touches_nothing(self, planned):
+        self._central_lists(planned, 'bitcoin', 'gold')
+        self._pass(planned)
+        planned.server.config = {'stream_publisher_pubkey': CENTRAL, 'keep': 2, 'streams': None}
+        self._pass(planned)
+        assert self._subs(planned) == ['bitcoin', 'gold']          # not in the rollout any more: left as it is
+        planned.server.config = {'stream_publisher_pubkey': CENTRAL, 'keep': 2}
+        self._pass(planned)
+        assert self._subs(planned) == ['bitcoin', 'gold']          # an older central
+        planned.server.down = True
+        self._pass(planned)
+        assert self._subs(planned) == ['bitcoin', 'gold']          # central does not answer
+        planned.server.down = False
+        self._central_lists(planned)
+        self._pass(planned)
+        assert self._subs(planned) == [] == self._predicted(planned)
+
+    def test_a_subscription_the_user_made_is_theirs(self, planned):
+        planned.networkDB.subscribe({'stream_name': 'crypto_fear_greed', 'nostr_pubkey': CENTRAL,
+                                     'name': 'Fear and greed', 'cadence_seconds': 3600}, 'ws://relay-a')
+        planned.networkDB.subscribe({'stream_name': 'gold', 'nostr_pubkey': CENTRAL,
+                                     'name': 'Gold', 'cadence_seconds': 3600}, 'ws://relay-a')
+        self._central_lists(planned, 'bitcoin', 'gold')
+        self._pass(planned)
+        # gold was the user's and central lists it: kept as the user's, and predicted.
+        assert self._subs(planned) == ['bitcoin', 'crypto_fear_greed', 'gold']
+        assert self._predicted(planned) == ['bitcoin', 'gold']
+        self._central_lists(planned, 'bitcoin')
+        self._pass(planned)
+        assert self._subs(planned) == ['bitcoin', 'crypto_fear_greed', 'gold']     # neither is unsubscribed
+
+    def test_assigned_streams_do_not_count_against_the_stream_cap(self, planned):
+        self._central_lists(planned, *[f'coin{i}' for i in range(12)])
+        self._pass(planned)
+        assert len(self._subs(planned)) == 12
+        assert planned.networkDB.count_active_subscriptions() == 0
+        planned.networkDB.subscribe({'stream_name': 'weather', 'nostr_pubkey': 'pub123',
+                                     'name': 'weather', 'cadence_seconds': 3600}, 'ws://community')
+        assert planned.networkDB.count_active_subscriptions() == 1
+
+    def test_a_changed_cadence_is_taken_over(self, planned):
+        self._central_lists(planned, 'gold')
+        self._pass(planned)
+        self._central_lists(planned, 'gold', cadence=600)
+        self._pass(planned)
+        gold = next(s for s in planned.networkDB.get_active() if s['stream_name'] == 'gold')
+        assert gold['cadence_seconds'] == 600 and gold['assigned'] == 1
+
+    def test_without_a_relay_plan_the_list_is_not_followed(self, planned):
+        planned.server.relays = []
+        self._central_lists(planned, 'bitcoin')
+        self._pass(planned)
+        assert self._subs(planned) == []
+
+    def test_the_stored_list_is_followed_when_central_is_down_after_a_restart(self, planned):
+        self._central_lists(planned, 'bitcoin', 'gold')
+        self._pass(planned)
+        planned._networkPlan = {}
+        planned.server.down = True
+        self._pass(planned)
+        assert planned._networkPlan['streams'] == [{'name': 'bitcoin', 'cadence_seconds': 3600},
+                                                   {'name': 'gold', 'cadence_seconds': 3600}]
+        assert self._subs(planned) == ['bitcoin', 'gold']
+
+    def test_predictions_of_centrals_streams_are_not_announced(self, harness):
+        announced = []
+
+        class _Announces:
+            async def announce_datastream(self, metadata, **kwargs):
+                announced.append(metadata.stream_name)
+        harness._networkClients['ws://relay-a'] = _Announces()
+        harness._networkPlan = {'publisher': CENTRAL}
+        harness.market = None
+        harness.networkDB.add_publication('gold_pred', source_stream_name='gold', source_provider_pubkey=CENTRAL)
+        harness.networkDB.add_publication('weather_pred', source_stream_name='weather', source_provider_pubkey='pub123')
+        harness.networkDB.add_publication('my-stream')
+        asyncio.run(harness._networkAnnouncePublications('ws://relay-a'))
+        assert sorted(announced) == ['my-stream', 'weather_pred']
