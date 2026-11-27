@@ -4792,53 +4792,27 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.server = SatoriServerClient(self.alias)
 
     def authWithCentral(self):
-        """Register peer with central-lite server.
-
-        Tries until central answers. A neuron that holds central's relay plan
-        from an earlier run does not wait for that: after a first try without
-        an answer it starts with the relays it was given last, and goes on
-        trying in the background.
-        """
-        if self._checkin():
-            return
-        if self._hasStoredRelayPlan():
-            logging.warning(
-                'central does not answer; starting with the relays it gave last')
-            threading.Thread(
-                target=self._checkinUntilAnswered, daemon=True).start()
-            return
-        self._checkinUntilAnswered()
-
-    def _checkin(self) -> bool:
-        try:
-            # Register the alias, with the wallet's link once there is
-            # one (made when the wallet is unlocked, kept beside the keys)
-            answer = self.server.checkin(
-                walletLink=readWalletLink(),
-                nostrPubkey=self.nostrPubkey,
-                version=VERSION)
-            self.linkedWalletAddress = answer.get('walletAddress')
-            logging.info("authenticated with central-lite", color="green")
-            return True
-        except Exception as e:
-            logging.warning(f"connecting to central err: {e}")
-            return False
-
-    def _checkinUntilAnswered(self):
+        """Register peer with central-lite server."""
         x = 30
+        attempt = 0
         while True:
+            attempt += 1
+            try:
+                # Register the alias, with the wallet's link once there is
+                # one (made when the wallet is unlocked, kept beside the keys)
+                answer = self.server.checkin(
+                    walletLink=readWalletLink(),
+                    nostrPubkey=self.nostrPubkey,
+                    version=VERSION)
+                self.linkedWalletAddress = answer.get('walletAddress')
+
+                logging.info("authenticated with central-lite", color="green")
+                break
+            except Exception as e:
+                logging.warning(f"connecting to central err: {e}")
             x = x * 1.5 if x < 60 * 60 * 6 else 60 * 60 * 6
             logging.warning(f"trying again in {x}")
             time.sleep(x)
-            if self._checkin():
-                return
-
-    def _hasStoredRelayPlan(self) -> bool:
-        try:
-            plan = json.loads(self.networkDB.get_meta(self.PLAN_META_KEY) or '{}')
-            return bool(plan.get('relays'))
-        except Exception:
-            return False
 
     def getBalance(self, currency: str = 'currency') -> float:
         return self.balances.get(currency, 0)
