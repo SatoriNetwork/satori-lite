@@ -61,7 +61,7 @@ def load_batch(path: str) -> list[dict]:
 def synthetic_batches(stream_uuid: str, n: int = 40) -> list[list[dict]]:
     """A sequence of single-observation batches for one stream.
 
-    Models the real world: each 11h poll delivers one new observation per
+    Models the real world: each poll delivers one new observation per
     stream. Accumulating them is the only way a stream crosses the >10-row
     threshold and reaches the XGB path (a single real batch is 1 row/stream).
     """
