@@ -164,7 +164,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.latestObservationTime: float = 0
         self.configRewardAddress: str = None
         self.setupWalletManager()
-        # Health check thread: monitors observations and restarts if none received in 24 hours
+        # Health check thread: monitors observations and restarts if none received in 48 hours
         self.checkinCheckThread = threading.Thread(
             target=self.checkinCheck,
             daemon=True)
@@ -4564,8 +4564,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         while True:
             time.sleep(60 * 60 * 6)  # Check every 6 hours
             current_time = time.time()
-            if self.latestObservationTime and (current_time - self.latestObservationTime > 60*60*24):
-                logging.warning("No observations in 24 hours, restarting", print=True)
+            # two polls missed: they come a day apart (each contest open)
+            if self.latestObservationTime and (current_time - self.latestObservationTime > 60*60*48):
+                logging.warning("No observations in 48 hours, restarting", print=True)
                 self.triggerRestart()
             if hasattr(self, 'server') and hasattr(self.server, 'checkinCheck') and self.server.checkinCheck():
                 logging.warning("Server check failed, restarting", print=True)

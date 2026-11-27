@@ -5,9 +5,9 @@ hour of the contest's open (GET /api/v1/contests/open; the daily run at 00:01
 UTC writes the opens). After each poll the neuron waits for the next open
 (waitForContestOpen), acts on it once, restart or not (the config keeps the
 open it acted on), 0 to 15 minutes after it sees it; a Central without contests
-(404) or one that keeps failing keeps the 11 hours of before. The real
-StartupDag methods against a fake clock (start.time) and a fake Central
-(requests.get).
+(404) or one that keeps failing keeps the 11 hours of before. The watchdog
+(checkinCheck) lets a day pass between polls. The real StartupDag methods
+against a fake clock (start.time) and a fake Central (requests.get).
 """
 import random
 import types
@@ -208,3 +208,26 @@ def test_a_central_that_keeps_failing_keeps_the_11_hours(neuron, failing):
     assert central.gets == ['2026-11-27T00:05:00Z', '2026-11-27T00:10:00Z', '2026-11-27T00:15:00Z']
     assert clock.sleeps == [5 * MINUTE, 5 * MINUTE, 11 * HOUR]
 
+
+class Stop(Exception):
+    pass
+
+
+@pytest.mark.parametrize('since, restarts', [(25 * HOUR, False), (49 * HOUR, True)])
+def test_the_watchdog_lets_a_day_pass_between_polls(neuron, since, restarts):
+    # Polls a day apart (each contest's open, give or take the spread): a day
+    # and an hour without observations is no reason to restart; two days is.
+    n, clock, central, config = neuron('2026-11-27T12:00:00Z')
+    n.server.checkinCheck = lambda: False
+    n.latestObservationTime = clock.now + 6 * HOUR - since
+    restarted = []
+    n.triggerRestart = lambda: restarted.append(clock.now)
+
+    def sleepOnce(seconds):
+        if clock.sleeps:
+            raise Stop
+        Clock.sleep(clock, seconds)
+    clock.sleep = sleepOnce
+    with pytest.raises(Stop):
+        n.checkinCheck()
+    assert bool(restarted) is restarts
