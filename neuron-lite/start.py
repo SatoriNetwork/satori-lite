@@ -1,6 +1,7 @@
 from typing import Union, Optional
 import math
 import os
+import random
 import re
 import time
 import json
@@ -15,6 +16,7 @@ from satorineuron import logging
 from satorineuron import config
 from satorineuron import VERSION
 from satorineuron.relay_manager import LocalRelayManager
+from satorineuron.relay_watch import RelayWatch
 from satorineuron.init.wallet import WalletManager, readWalletLink
 from satorineuron.structs.start import RunMode, StartupDagStruct
 # from satorilib.utils.ip import getPublicIpv4UsingCurl  # Removed - not needed
@@ -147,6 +149,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._networkRecentSeqs: dict = {}  # (stream_name, provider_pubkey) -> seqs of the values last taken
         self._networkPlan: dict = {}  # central's relay plan for this neuron: relays (in order), keep, publisher
         self._networkHeld: list = []  # the relays of the plan this neuron holds now
+        self._networkWatch = RelayWatch()  # what each held relay delivered, and which to leave
+        self._networkUnsent: dict = {}  # stream_name -> (observation, metadata) no relay took yet
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
         self._baseNoGame: dict = {}  # base stream_id -> last time it had no game
         self._basePredictThread = None
@@ -289,6 +293,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # contamination and silent crashes on every await.
         self._networkClients.clear()
         self._networkHeld = []
+        self._networkWatch = RelayWatch()
+        self._networkPlanLock = asyncio.Lock()
         self._networkListeners.clear()
         self._channelListeners.clear()
         self._channelOpenListeners.clear()
@@ -312,13 +318,15 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             logging.error(f'Network: paid-stream market not started: {e}')
 
         fetch_task = None
+        watch_task = None
         next_relay_publish_at = 0.0
         published_relays = None
         try:
             while True:
                 try:
-                    await self._networkRefreshPlan()
-                    await self._networkHoldPlan(SatoriNostrConfig)
+                    async with self._networkPlanLock:
+                        await self._networkRefreshPlan()
+                        await self._networkHoldPlan(SatoriNostrConfig)
                 except Exception as e:
                     logging.error(f'Network relay plan error: {e}')
                 try:
@@ -338,9 +346,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 except Exception as e:
                     logging.error(f'Network publisher connect error: {e}')
                 try:
-                    await self._networkPrune()
+                    async with self._networkPlanLock:
+                        await self._networkPrune()
                 except Exception as e:
                     logging.error(f'Network relay prune error: {e}')
+                if watch_task is None or watch_task.done():
+                    watch_task = asyncio.create_task(
+                        self._networkWatchLoop(SatoriNostrConfig))
                 if self.market is not None:
                     await self.market.pass_()
                 # Start the data source manager after the first reconcile
@@ -364,14 +376,17 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     except Exception as e:
                         logging.error(f'NIP-65 relay list publish error: {e}')
                     next_relay_publish_at = time.monotonic() + 86400
-                await asyncio.sleep(3600)
+                # Not exactly an hour: neurons that started together drift
+                # apart, so they do not all return to a relay in one moment.
+                await asyncio.sleep(3600 + random.uniform(0, 300))
         finally:
-            if fetch_task is not None and not fetch_task.done():
-                fetch_task.cancel()
-                try:
-                    await fetch_task
-                except BaseException:
-                    pass
+            for task in (fetch_task, watch_task):
+                if task is not None and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except BaseException:
+                        pass
             for _sn, (task, _cad) in list(self._dataSourceTasks.items()):
                 task.cancel()
             self._dataSourceTasks.clear()
@@ -438,33 +453,163 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         await asyncio.to_thread(
             self.networkDB.set_meta, self.PLAN_META_KEY, json.dumps(plan))
 
+    async def _networkTake(self, relay_url: str, ConfigClass) -> bool:
+        """Connect to a relay of the plan and announce our streams there.
+        True when it answers."""
+        new = relay_url not in self._networkClients
+        client = await self._networkConnect(relay_url, ConfigClass)
+        if not client:
+            return False
+        if new:
+            await self._networkAnnouncePublications(relay_url)
+            if await asyncio.to_thread(self.networkDB.get_active_publications):
+                self._networkEnsurePredictionListener(relay_url)
+                self._networkEnsureAccessRequestListener(relay_url)
+        try:
+            return bool(await client.is_connected())
+        except Exception:
+            return False
+
     async def _networkHoldPlan(self, ConfigClass) -> None:
         """Hold the first `keep` relays of central's list that answer.
 
         Central lists the healthy relays first, in this neuron's own order,
         so taking them from the top spreads the neurons over the relays. A
-        relay that does not answer is passed over for the next one.
+        relay that does not answer is passed over for the next one. This
+        hourly pass is also when a neuron returns to a relay it had left.
         """
         held = []
         for relay_url in self._networkPlanRelays():
             if len(held) >= self._networkPlanKeep():
                 break
-            new = relay_url not in self._networkClients
-            client = await self._networkConnect(relay_url, ConfigClass)
-            if not client:
-                continue
-            if new:
-                await self._networkAnnouncePublications(relay_url)
-            try:
-                if await client.is_connected():
-                    held.append(relay_url)
-            except Exception:
-                pass
+            if await self._networkTake(relay_url, ConfigClass):
+                held.append(relay_url)
         if held != self._networkHeld and (held or self._networkHeld):
             logging.info(
                 f"Network: holding {', '.join(held) or 'no relay'} "
                 f"of central's list", color='green')
+        for relay_url in set(self._networkHeld) - set(held):
+            self._networkWatch.forget(relay_url)
+        self._networkWatch.let_go.clear()  # central's order decides again
         self._networkHeld = held
+
+    async def _networkWatchLoop(self, ConfigClass) -> None:
+        """Between the hourly passes, look at the held relays every few seconds."""
+        from satorineuron.relay_watch import WATCH_EVERY
+        while True:
+            await asyncio.sleep(WATCH_EVERY)
+            try:
+                async with self._networkPlanLock:
+                    await self._networkWatchHeld(ConfigClass)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logging.error(f'Network relay watch error: {e}')
+
+    async def _networkWatchHeld(self, ConfigClass) -> None:
+        """Leave a held relay that fails for the next one on central's list
+        (satorineuron/relay_watch.py says when), fill an empty place, and
+        send again what no relay took."""
+        from satorineuron.relay_watch import FILL_EVERY
+        plan = self._networkPlanRelays()
+        if not plan:
+            return
+        watch = self._networkWatch
+        for relay_url in list(self._networkHeld):
+            client = self._networkClients.get(relay_url)
+            try:
+                connected = bool(client) and await client.is_connected()
+            except Exception:
+                connected = False
+            if not connected:
+                reason = 'does not answer'
+            elif watch.behind(relay_url, self._networkHeld):
+                reason = 'is behind the other relay'
+            else:
+                watch.well(relay_url)
+                continue
+            if watch.due(relay_url, reason):
+                if not await self._networkMove(relay_url, reason, ConfigClass):
+                    watch.retry_later(relay_url)
+        if (len(self._networkHeld) < self._networkPlanKeep()
+                and watch.every('fill', FILL_EVERY)):
+            for candidate in watch.candidates(plan, self._networkHeld):
+                if await self._networkTake(candidate, ConfigClass):
+                    self._networkHeld.append(candidate)
+                    logging.info(
+                        f'Network: holding {candidate} as well', color='green')
+                    break
+                await self._networkLetGoUnlessNeeded(candidate)
+        await self._networkTryNextIfOverdue(ConfigClass)
+        await self._networkResendUnsent()
+
+    async def _networkMove(self, relay_url: str, reason: str, ConfigClass) -> bool:
+        """Hold the next relay of the plan that answers in place of this one."""
+        watch = self._networkWatch
+        for candidate in watch.candidates(
+                self._networkPlanRelays(), self._networkHeld):
+            if await self._networkTake(candidate, ConfigClass):
+                self._networkHeld[self._networkHeld.index(relay_url)] = candidate
+                watch.left(relay_url)
+                logging.info(
+                    f'Network: {relay_url} {reason}; holding {candidate} '
+                    f'in its place', color='yellow')
+                await self._networkLetGoUnlessNeeded(relay_url)
+                return True
+            await self._networkLetGoUnlessNeeded(candidate)
+        return False
+
+    async def _networkLetGoUnlessNeeded(self, relay_url: str) -> None:
+        if (relay_url in self._networkClients
+                and relay_url not in self._neededRelays()):
+            await self._networkDisconnect(relay_url)
+
+    async def _networkTryNextIfOverdue(self, ConfigClass) -> None:
+        """A value of one of central's streams is overdue on every held
+        relay: try another relay of the plan. It delivers what it holds like
+        any connected relay, so a newer value there is taken at once; the
+        relay is then held in place of the last held one. With nothing newer
+        the publisher is late, and the relay is let go."""
+        from satorineuron.relay_watch import PROBE_EVERY, PROBE_WAIT
+        watch = self._networkWatch
+        held = self._networkHeld
+        if watch.probe:
+            relay_url, since = watch.probe
+            if watch.now() - since < PROBE_WAIT:
+                return
+            watch.probe = None
+            newer = any(
+                at > watch.newest(stream, held)
+                for stream, at in watch.values.get(relay_url, {}).items())
+            if newer and held and relay_url in self._networkClients:
+                leaving = held[-1]
+                held[-1] = relay_url
+                watch.left(leaving)
+                logging.info(
+                    f'Network: {leaving} holds no new value and {relay_url} '
+                    f'does; holding {relay_url} in its place', color='yellow')
+                await self._networkLetGoUnlessNeeded(leaving)
+            else:
+                watch.forget(relay_url)
+                await self._networkLetGoUnlessNeeded(relay_url)
+            return
+        publisher = self._networkPlan.get('publisher')
+        subs = await asyncio.to_thread(self.networkDB.get_active)
+        overdue = watch.overdue(
+            {s['stream_name']: s.get('cadence_seconds') for s in subs
+             if s['provider_pubkey'] == publisher}, held, time.time())
+        candidates = watch.candidates(self._networkPlanRelays(), held)
+        if not overdue or not candidates or not watch.every('probe', PROBE_EVERY):
+            return
+        relay_url = candidates[watch.probes % len(candidates)]
+        watch.probes += 1
+        logging.info(
+            f"Network: {', '.join(overdue[:3])} overdue on the held relays; "
+            f'trying {relay_url}', color='yellow')
+        if await self._networkTake(relay_url, ConfigClass):
+            watch.probe = (relay_url, watch.now())
+        else:
+            await self._networkLetGoUnlessNeeded(relay_url)
 
     async def _networkPrune(self) -> None:
         """With a plan, let go of every relay that is not needed: not held,
@@ -1065,6 +1210,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     obs.stream_name, obs.nostr_pubkey)
                 if not subscribed:
                     continue
+                if (obs.observation is not None
+                        and obs.nostr_pubkey == self._networkPlan.get('publisher')):
+                    self._networkWatch.delivered(
+                        relay_url, obs.stream_name, obs.observation.timestamp)
                 # The same value comes from every relay we hold. This check
                 # and its record run with no await between them, so one copy
                 # gets through; save_observation's own check runs in a thread,
@@ -3382,21 +3531,13 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             cadence_seconds=pub.get('cadence_seconds'),
             tags=(pub.get('tags') or '').split(',') if pub.get('tags') else [],
             metadata=source or None)
-        delivered = 0
-        for relay_url, client in list(self._networkClients.items()):
-            try:
-                if await client.publish_observation(observation, metadata):
-                    delivered += 1
-                    logging.info(
-                        f'Network: published {stream_name} seq={seq_num} '
-                        f'value={value} to {relay_url}', color='green')
-                else:
-                    logging.warning(
-                        f'Network: {relay_url} did not take {stream_name} '
-                        f'seq={seq_num}')
-            except Exception as e:
-                logging.warning(
-                    f'Network: publish failed on {relay_url}: {e}')
+        delivered = await self._networkSend(observation, metadata)
+        # What no relay took is sent again once one answers (the newest
+        # value of a stream only; _networkResendUnsent).
+        if delivered:
+            self._networkUnsent.pop(stream_name, None)
+        else:
+            self._networkUnsent[stream_name] = (observation, metadata)
         # A priced stream: the value to each paying buyer (after its heartbeat)
         if int(pub.get('price_per_obs') or 0) > 0 and self.market is not None:
             try:
@@ -3417,6 +3558,36 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 f'Network: {stream_name} seq={seq_num} not delivered '
                 f'(no connected relays) — seq advanced locally only')
         return delivered
+
+    async def _networkSend(self, observation, metadata) -> int:
+        """Send an observation to every connected relay at the same time, so
+        a relay that hangs does not hold back the others. Returns how many
+        took it."""
+        async def send(relay_url, client) -> int:
+            try:
+                if await client.publish_observation(observation, metadata):
+                    logging.info(
+                        f'Network: published {observation.stream_name} '
+                        f'seq={observation.seq_num} value={observation.value} '
+                        f'to {relay_url}', color='green')
+                    return 1
+                logging.warning(
+                    f'Network: {relay_url} did not take '
+                    f'{observation.stream_name} seq={observation.seq_num}')
+            except Exception as e:
+                logging.warning(
+                    f'Network: publish failed on {relay_url}: {e}')
+            return 0
+        return sum(await asyncio.gather(*(
+            send(relay_url, client)
+            for relay_url, client in list(self._networkClients.items()))))
+
+    async def _networkResendUnsent(self) -> None:
+        """Send again the values no relay took when they were published."""
+        for stream_name, (observation, metadata) in list(self._networkUnsent.items()):
+            if await self._networkSend(observation, metadata):
+                if self._networkUnsent.get(stream_name, (None,))[0] is observation:
+                    del self._networkUnsent[stream_name]
 
     def publishObservation(self, stream_name: str, value):
         """Publish an observation from a sync context (e.g. Flask route, engine).

@@ -47,6 +47,8 @@ def harness(monkeypatch):
         h._networkSubscribed = {}
         h._networkPlan = {}
         h._networkHeld = []
+        h._networkWatch = start.RelayWatch()
+        h._networkUnsent = {}
         h._networkListeners = {}
         h._channelListeners = {}
         h._channelOpenListeners = {}

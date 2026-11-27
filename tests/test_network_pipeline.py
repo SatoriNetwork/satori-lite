@@ -50,6 +50,8 @@ def harness(monkeypatch):
         h._networkRecentSeqs = {}
         h._networkPlan = {}
         h._networkHeld = []
+        h._networkWatch = start.RelayWatch()
+        h._networkUnsent = {}
         # No engine: a prediction echoes its observation (_networkRunEngine's
         # fallback). A test of a forecast sets _relayPredict.
         h.ensureEngine = lambda: None
@@ -1135,3 +1137,209 @@ class TestRelayPlan:
         asyncio.run(planned._networkReconcile(None))
         assert len(planned.server.asked) == asked           # no relay list fetched to hunt with
         assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b'] and planned.dropped == []
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 5000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def watched(planned, monkeypatch):
+    """A neuron holding relay-a and relay-b, with a clock the test moves."""
+    clock = _Clock()
+    planned._networkWatch = start.RelayWatch(clock=clock, spread=lambda low, high: low)
+    planned.clock = clock
+    _refresh_and_hold(planned)
+    assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b']
+    return planned
+
+
+def _look(h, seconds=0):
+    h.clock.now += seconds
+    asyncio.run(h._networkWatchHeld(None))
+
+
+def _delivers(h, relay_url, stream, at):
+    h._networkWatch.delivered(relay_url, stream, at)
+
+
+class TestRelayWatch:
+    """Between the hourly passes a failed relay is left for the next one on the list."""
+
+    def test_a_relay_that_stops_answering_is_replaced_after_a_minute(self, watched):
+        watched._networkClients['ws://relay-a'].connected = False
+        _look(watched)
+        _look(watched, 59)
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-b']   # not yet
+        _look(watched, 1)
+        assert watched._networkHeld == ['ws://relay-c', 'ws://relay-b']
+        assert watched.dropped == ['ws://relay-a'] and 'ws://relay-c' in watched.announced
+
+    def test_a_short_drop_moves_nobody(self, watched):
+        watched._networkClients['ws://relay-a'].connected = False
+        _look(watched)
+        _look(watched, 30)
+        watched._networkClients['ws://relay-a'].connected = True
+        _look(watched, 30)
+        _look(watched, 120)
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-b'] and watched.dropped == []
+
+    def test_a_relay_that_is_connected_but_not_fed_is_left(self, watched):
+        for relay_url in watched._networkHeld:
+            _delivers(watched, relay_url, 'gold', 1000)
+        _delivers(watched, 'ws://relay-a', 'gold', 4600)    # relay-b did not get the next value
+        _look(watched)
+        _look(watched, 60)
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-c']
+
+    def test_a_relay_that_catches_up_in_time_is_kept(self, watched):
+        for relay_url in watched._networkHeld:
+            _delivers(watched, relay_url, 'gold', 1000)
+        _delivers(watched, 'ws://relay-a', 'gold', 4600)
+        _look(watched)
+        _delivers(watched, 'ws://relay-b', 'gold', 4600)    # the publisher sent it again
+        _look(watched, 60)
+        _look(watched, 60)
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-b']
+
+    def test_with_no_other_relay_answering_the_failed_one_stays_held(self, watched):
+        watched.unreachable = {'ws://relay-c'}
+        watched._networkClients['ws://relay-a'].connected = False
+        _look(watched)
+        _look(watched, 60)
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        assert 'ws://relay-c' not in watched._networkClients    # the one tried is let go again
+        watched._networkClients['ws://relay-a'].connected = True
+        _look(watched, 15)
+        assert watched._networkWatch.faults == {}
+
+    def test_an_empty_place_is_filled(self, planned, monkeypatch):
+        clock = _Clock()
+        planned._networkWatch = start.RelayWatch(clock=clock)
+        planned.clock = clock
+        planned.unreachable = {'ws://relay-b', 'ws://relay-c'}
+        _refresh_and_hold(planned)
+        asyncio.run(planned._networkPrune())
+        assert planned._networkHeld == ['ws://relay-a']
+        planned.unreachable = set()
+        _look(planned)
+        assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b']
+
+    def _overdue_gold(self, h, keep=2):
+        h.networkDB.subscribe({'stream_name': 'gold', 'nostr_pubkey': CENTRAL,
+                               'name': 'gold', 'cadence_seconds': 3600}, 'ws://relay-a')
+        last = int(time.time()) - 3600 - 600      # the next value is 10 minutes late
+        for relay_url in h._networkHeld:
+            _delivers(h, relay_url, 'gold', last)
+        return last
+
+    def test_an_overdue_value_makes_it_try_the_next_relay_and_take_it_if_it_has_the_value(self, watched):
+        last = self._overdue_gold(watched)
+        _look(watched)
+        assert 'ws://relay-c' in watched._networkClients and watched._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        _delivers(watched, 'ws://relay-c', 'gold', last + 3600)   # relay-c holds the new value
+        _look(watched, 10)
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-c']
+        # relay-a is now behind relay-c and is left in turn, for the only relay there is.
+        _look(watched, 15)
+        _look(watched, 60)
+        assert watched._networkHeld == ['ws://relay-b', 'ws://relay-c']
+
+    def test_when_the_publisher_is_late_nobody_moves(self, watched):
+        last = self._overdue_gold(watched)
+        _look(watched)
+        _delivers(watched, 'ws://relay-c', 'gold', last)          # relay-c has nothing newer
+        _look(watched, 10)
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        assert 'ws://relay-c' not in watched._networkClients
+        clients_before = dict(watched._networkClients)
+        _look(watched, 300)                                       # and it is not tried again at once
+        assert watched._networkClients == clients_before
+        _look(watched, 300)
+        assert 'ws://relay-c' in watched._networkClients          # ten minutes on, once more
+
+    def test_holding_one_relay_an_unfed_relay_is_left_through_the_overdue_value(self, planned, monkeypatch):
+        planned.server.config = {'keep': 1, 'stream_publisher_pubkey': CENTRAL}
+        clock = _Clock()
+        planned._networkWatch = start.RelayWatch(clock=clock, spread=lambda low, high: low)
+        planned.clock = clock
+        _refresh_and_hold(planned)
+        assert planned._networkHeld == ['ws://relay-a']
+        last = self._overdue_gold(planned)
+        _look(planned)
+        _delivers(planned, 'ws://relay-b', 'gold', last + 3600)
+        _look(planned, 10)
+        assert planned._networkHeld == ['ws://relay-b'] and planned.dropped == ['ws://relay-a']
+
+    def test_the_hourly_pass_returns_to_centrals_first_choices(self, watched):
+        watched._networkClients['ws://relay-a'].connected = False
+        _look(watched)
+        _look(watched, 60)
+        assert watched._networkHeld == ['ws://relay-c', 'ws://relay-b']
+        _look(watched, 600)                                       # relay-a is back; nothing moves by itself
+        assert watched._networkHeld == ['ws://relay-c', 'ws://relay-b']
+        _refresh_and_hold(watched)
+        asyncio.run(watched._networkPrune())
+        assert watched._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        assert set(watched._networkClients) == {'ws://relay-a', 'ws://relay-b'}
+
+    def test_without_a_plan_nothing_is_watched(self, harness):
+        asyncio.run(harness._networkWatchHeld(None))
+        assert harness._networkClients == {}
+
+
+class _Publishes:
+    def __init__(self, takes=True, delay=0.0):
+        self.takes, self.delay, self.sent = takes, delay, []
+
+    async def publish_observation(self, observation, metadata):
+        await asyncio.sleep(self.delay)
+        self.sent.append(observation.seq_num)
+        return self.takes
+
+
+class TestSending:
+
+    def _publish(self, h, value='1.5'):
+        async def no_bounty(**kwargs):
+            return None
+        h._bountyScoreAndPay = no_bounty
+        h.market = None
+        return asyncio.run(h._networkPublishObservation('gold_pred', value))
+
+    def test_a_value_no_relay_took_is_sent_again_when_one_answers(self, harness):
+        harness.networkDB.add_publication('gold_pred')
+        down = harness._networkClients['ws://relay-a'] = _Publishes(takes=False)
+        assert self._publish(harness) == 0
+        assert list(harness._networkUnsent) == ['gold_pred']
+        down.takes = True
+        asyncio.run(harness._networkResendUnsent())
+        assert harness._networkUnsent == {} and down.sent == [1, 1]   # the same value, the same seq
+
+    def test_only_the_newest_value_of_a_stream_is_kept_for_sending_again(self, harness):
+        harness.networkDB.add_publication('gold_pred')
+        down = harness._networkClients['ws://relay-a'] = _Publishes(takes=False)
+        self._publish(harness, '1.5')
+        self._publish(harness, '1.6')
+        down.takes = True
+        down.sent.clear()
+        asyncio.run(harness._networkResendUnsent())
+        assert down.sent == [2]
+
+    def test_one_relay_taking_it_is_enough(self, harness):
+        harness.networkDB.add_publication('gold_pred')
+        harness._networkClients['ws://relay-a'] = _Publishes(takes=False)
+        harness._networkClients['ws://relay-b'] = _Publishes()
+        assert self._publish(harness) == 1 and harness._networkUnsent == {}
+
+    def test_a_relay_that_hangs_does_not_hold_back_the_other(self, harness):
+        harness.networkDB.add_publication('gold_pred')
+        harness._networkClients['ws://slow'] = _Publishes(delay=0.3)
+        harness._networkClients['ws://quick'] = _Publishes(delay=0.3)
+        began = time.monotonic()
+        assert self._publish(harness) == 2
+        assert time.monotonic() - began < 0.5    # together, not one after the other
