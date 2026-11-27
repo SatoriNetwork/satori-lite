@@ -47,7 +47,9 @@ def harness(monkeypatch):
         h._networkClients = {}
         h._networkSubscribed = {}
         h._networkListeners = {}
-        h._networkLastSeq = {}
+        h._networkRecentSeqs = {}
+        h._networkPlan = {}
+        h._networkHeld = []
         # No engine: a prediction echoes its observation (_networkRunEngine's
         # fallback). A test of a forecast sets _relayPredict.
         h.ensureEngine = lambda: None
@@ -912,6 +914,23 @@ class TestFollowedStreams:
         asyncio.run(listen_on_all())
         assert processed == [('gold', 7), ('gold', 8)]
 
+    def test_a_slower_relays_copy_of_an_older_value_is_not_taken_again(self, harness):
+        self._subscribe(harness, 'gold')
+        processed = []
+
+        async def process(obs):
+            processed.append(obs.observation.seq_num)
+        harness._networkProcessObservation = process
+
+        def copy(seq, relay):
+            return make_observation(stream_name='gold', seq_num=seq, event_id=f'evt{seq}-{relay}')
+        # relay-a is level; relay-b delivers 7 only after 8 was taken, then 8 and a new 9.
+        harness._networkClients['ws://relay-a'] = _RelayOf([copy(7, 'a'), copy(8, 'a')])
+        asyncio.run(harness._networkListen('ws://relay-a'))
+        harness._networkClients['ws://relay-b'] = _RelayOf([copy(7, 'b'), copy(8, 'b'), copy(9, 'b')])
+        asyncio.run(harness._networkListen('ws://relay-b'))
+        assert processed == [7, 8, 9]
+
     def test_a_stream_not_subscribed_is_dropped(self, harness):
         self._subscribe(harness, 'gold')
         processed = []
@@ -923,3 +942,196 @@ class TestFollowedStreams:
             [make_observation(stream_name='eth'), make_observation(stream_name='gold')])
         asyncio.run(harness._networkListen('ws://relay-a'))
         assert processed == ['gold']
+
+
+# ── Central's relay plan: a neuron holds the relays central gave it ──
+
+CENTRAL = 'c' * 64   # the key that signs central's streams
+
+
+class _Central:
+    """Central as the neuron sees it: /peer/relay-config and /peer/relays."""
+
+    def __init__(self, relays=None, config=None, down=False):
+        self.relays = relays
+        self.config = {'max_streams': 60, 'stream_publisher_pubkey': CENTRAL, 'keep': 2} if config is None else config
+        self.down = down
+        self.asked = []
+
+    def getRelayConfig(self):
+        return {} if self.down else self.config
+
+    def getRelays(self, forPubkey=None):
+        self.asked.append(forPubkey)
+        if self.down:
+            raise ConnectionError('central is down')
+        return self.relays
+
+
+def _planned(*names, healthy=True):
+    return [{'relay_url': f'ws://relay-{n}', 'nostr_pubkey': None, 'address': None, 'healthy': healthy}
+            for n in names]
+
+
+class _Held:
+    """A relay client: connected or not."""
+
+    def __init__(self, connected=True):
+        self.connected = connected
+
+    async def is_connected(self):
+        return self.connected
+
+
+@pytest.fixture
+def planned(harness):
+    """The harness with relays that connect on request; `harness.unreachable` do not answer."""
+    harness.unreachable = set()
+    harness.announced, harness.dropped = [], []
+
+    async def connect(relay_url, ConfigClass):
+        if relay_url not in harness._networkClients:
+            harness._networkClients[relay_url] = _Held(relay_url not in harness.unreachable)
+        return harness._networkClients[relay_url]
+
+    async def announce(relay_url):
+        harness.announced.append(relay_url)
+
+    async def disconnect(relay_url):
+        harness._networkClients.pop(relay_url, None)
+        harness.dropped.append(relay_url)
+
+    harness._networkConnect = connect
+    harness._networkAnnouncePublications = announce
+    harness._networkDisconnect = disconnect
+    harness._networkEnsurePredictionListener = lambda relay_url: None
+    harness._networkEnsureAccessRequestListener = lambda relay_url: None
+    harness.server = _Central(_planned('a', 'b', 'c'))
+    return harness
+
+
+def _refresh_and_hold(h):
+    async def run():
+        await h._networkRefreshPlan()
+        await h._networkHoldPlan(None)
+    asyncio.run(run())
+
+
+class TestRelayPlan:
+
+    def _subscribe(self, harness, name, pubkey, relay_url):
+        harness.networkDB.subscribe({
+            'stream_name': name, 'nostr_pubkey': pubkey,
+            'name': name, 'cadence_seconds': 3600}, relay_url)
+
+    def test_it_asks_with_its_own_key_and_holds_the_first_two(self, planned):
+        _refresh_and_hold(planned)
+        assert planned.server.asked == ['a' * 64]
+        assert planned._networkPlanRelays() == ['ws://relay-a', 'ws://relay-b', 'ws://relay-c']
+        assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        assert set(planned._networkClients) == {'ws://relay-a', 'ws://relay-b'}   # the third is never dialled
+        assert planned.announced == ['ws://relay-a', 'ws://relay-b']
+
+    def test_a_relay_that_does_not_answer_is_passed_over(self, planned):
+        planned.unreachable = {'ws://relay-a'}
+        _refresh_and_hold(planned)
+        assert planned._networkHeld == ['ws://relay-b', 'ws://relay-c']
+        asyncio.run(planned._networkPrune())
+        assert set(planned._networkClients) == {'ws://relay-b', 'ws://relay-c'}
+
+    def test_central_says_how_many_to_hold(self, planned):
+        for keep, held in ((1, 1), (3, 3), (None, 2), (0, 2), (9, 3), ('x', 2)):
+            planned.server.config = {'keep': keep}
+            _refresh_and_hold(planned)
+            assert len(planned._networkHeld) == held, keep
+
+    def test_holding_again_changes_nothing_and_announces_nothing_new(self, planned):
+        _refresh_and_hold(planned)
+        _refresh_and_hold(planned)
+        assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        assert planned.announced == ['ws://relay-a', 'ws://relay-b']
+
+    def test_a_held_relay_central_calls_unhealthy_gives_way_to_the_next(self, planned):
+        _refresh_and_hold(planned)
+        # Central moved relay-a to the end of the list (unhealthy).
+        planned.server.relays = _planned('b', 'c') + _planned('a', healthy=False)
+        _refresh_and_hold(planned)
+        assert planned._networkHeld == ['ws://relay-b', 'ws://relay-c']
+        asyncio.run(planned._networkPrune())
+        assert planned.dropped == ['ws://relay-a']
+
+    def test_an_older_central_answers_with_every_relay_which_is_not_a_plan(self, planned):
+        planned.server.relays = [{'relay_url': f'wss://r{i}.example', 'nostr_pubkey': None, 'address': None}
+                                 for i in range(40)]
+        planned.server.config = {'max_streams': 60}
+        _refresh_and_hold(planned)
+        assert planned._networkPlanRelays() == [] and planned._networkHeld == []
+        assert planned._networkClients == {}
+
+    def test_an_empty_list_is_no_plan(self, planned):
+        _refresh_and_hold(planned)
+        planned.server.relays = []
+        _refresh_and_hold(planned)
+        assert planned._networkPlanRelays() == [] and planned._networkHeld == []
+
+    def test_when_central_does_not_answer_the_last_list_is_used_also_after_a_restart(self, planned):
+        _refresh_and_hold(planned)
+        planned.server.down = True
+        _refresh_and_hold(planned)
+        assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        # A restart: nothing in memory, central still down.
+        planned._networkPlan, planned._networkHeld, planned._networkClients = {}, [], {}
+        _refresh_and_hold(planned)
+        assert planned._networkPlanRelays() == ['ws://relay-a', 'ws://relay-b', 'ws://relay-c']
+        assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b']
+        assert planned._networkPlanKeep() == 2 and planned._networkPlan['publisher'] == CENTRAL
+
+    def test_needed_relays_are_the_held_ones_a_community_streams_relay_and_those_added_in_settings(self, planned):
+        self._subscribe(planned, 'gold', CENTRAL, 'ws://relay-c')          # central's: arrives on the held relays
+        self._subscribe(planned, 'weather', 'pub123', 'ws://community')    # someone else's stream
+        planned.networkDB.upsert_relay('ws://mine', user_added=True)
+        planned.networkDB.upsert_relay('ws://seen-once')
+        _refresh_and_hold(planned)
+        assert planned._neededRelays() == {'ws://relay-a', 'ws://relay-b', 'ws://community'}
+        planned.networkDB.add_publication('gold_pred')
+        assert planned._neededRelays() == {'ws://relay-a', 'ws://relay-b', 'ws://community', 'ws://mine'}
+
+    def test_without_a_plan_the_needed_relays_are_as_before(self, harness):
+        self._subscribe(harness, 'gold', CENTRAL, 'ws://relay-c')
+        harness.networkDB.upsert_relay('ws://seen-once')
+        assert harness._neededRelays() == {'ws://relay-c'}
+        harness.networkDB.add_publication('gold_pred')
+        assert harness._neededRelays() == {'ws://relay-c', 'ws://seen-once'}
+
+    def test_a_predicting_neuron_connects_to_the_needed_relays_and_no_others(self, planned):
+        planned.networkDB.add_publication('gold_pred')
+        planned.networkDB.upsert_relay('ws://mine', user_added=True)
+        for i in range(20):
+            planned.networkDB.upsert_relay(f'ws://seen-{i}')
+        _refresh_and_hold(planned)
+        asked = len(planned.server.asked)
+
+        async def run():
+            await planned._networkEnsurePublisherConnections(None)
+            await planned._networkPrune()
+        asyncio.run(run())
+        assert set(planned._networkClients) == {'ws://relay-a', 'ws://relay-b', 'ws://mine'}
+        assert len(planned.server.asked) == asked   # central's every-relay list is not fetched
+        assert planned.dropped == []
+
+    def test_prune_lets_go_of_what_is_not_needed_only_with_a_plan(self, planned):
+        planned._networkClients['ws://left-over'] = _Held()
+        asyncio.run(planned._networkPrune())
+        assert 'ws://left-over' in planned._networkClients   # no plan yet: nothing is dropped
+        _refresh_and_hold(planned)
+        asyncio.run(planned._networkPrune())
+        assert set(planned._networkClients) == {'ws://relay-a', 'ws://relay-b'}
+
+    def test_centrals_streams_are_not_hunted_relay_by_relay(self, planned):
+        self._subscribe(planned, 'gold', CENTRAL, 'ws://relay-c')
+        planned._networkFirstRun = True
+        _refresh_and_hold(planned)
+        asked = len(planned.server.asked)
+        asyncio.run(planned._networkReconcile(None))
+        assert len(planned.server.asked) == asked           # no relay list fetched to hunt with
+        assert planned._networkHeld == ['ws://relay-a', 'ws://relay-b'] and planned.dropped == []

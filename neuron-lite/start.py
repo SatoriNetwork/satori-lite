@@ -144,7 +144,9 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self.localRelay = LocalRelayManager(self)
         self._networkClients: dict = {}  # relay_url -> SatoriNostr client
         self._networkSubscribed: dict = {}  # relay_url -> set of (stream_name, provider_pubkey)
-        self._networkLastSeq: dict = {}  # (stream_name, provider_pubkey) -> seq of the value last taken
+        self._networkRecentSeqs: dict = {}  # (stream_name, provider_pubkey) -> seqs of the values last taken
+        self._networkPlan: dict = {}  # central's relay plan for this neuron: relays (in order), keep, publisher
+        self._networkHeld: list = []  # the relays of the plan this neuron holds now
         self._networkListeners: dict = {}  # relay_url -> asyncio.Task
         self._baseNoGame: dict = {}  # base stream_id -> last time it had no game
         self._basePredictThread = None
@@ -286,6 +288,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         # (now-dead) event loop.  Keeping them would cause cross-loop
         # contamination and silent crashes on every await.
         self._networkClients.clear()
+        self._networkHeld = []
         self._networkListeners.clear()
         self._channelListeners.clear()
         self._channelOpenListeners.clear()
@@ -301,18 +304,6 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         self._dataSourceTasks.clear()
         self._networkFirstRun = True
 
-        # One-shot fetch of server-driven relay config (e.g. max_streams) at
-        # neuron startup. The cap rarely changes; refetching every reconcile
-        # cycle would be wasteful. Best-effort — failures leave the local
-        # fallback in place.
-        try:
-            from satorineuron import network_db as _ndb
-            cfg = await asyncio.to_thread(self.server.getRelayConfig)
-            if isinstance(cfg, dict) and 'max_streams' in cfg:
-                _ndb.setMaxTotalStreams(cfg['max_streams'])
-        except Exception:
-            pass
-
         try:
             self.market = await asyncio.to_thread(self._networkCreateMarket)
             await self.market.load()
@@ -325,6 +316,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         published_relays = None
         try:
             while True:
+                try:
+                    await self._networkRefreshPlan()
+                    await self._networkHoldPlan(SatoriNostrConfig)
+                except Exception as e:
+                    logging.error(f'Network relay plan error: {e}')
                 try:
                     await self._networkReconcile(SatoriNostrConfig)
                 except Exception as e:
@@ -341,6 +337,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                     await self._networkEnsurePublisherConnections(SatoriNostrConfig)
                 except Exception as e:
                     logging.error(f'Network publisher connect error: {e}')
+                try:
+                    await self._networkPrune()
+                except Exception as e:
+                    logging.error(f'Network relay prune error: {e}')
                 if self.market is not None:
                     await self.market.pass_()
                 # Start the data source manager after the first reconcile
@@ -376,25 +376,130 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 task.cancel()
             self._dataSourceTasks.clear()
 
-    async def _networkEnsurePublisherConnections(self, ConfigClass):
-        """Connect to all known relays if we have active publications.
+    # ── Central's relay plan ─────────────────────────────────────────────
+    # A neuron does not connect to every relay. Central gives it its own
+    # ordered list (/peer/relays?for=<nostr pubkey>) and says how many to hold
+    # (`keep` in /peer/relay-config). With no list, relays are used as before.
 
-        Ensures _networkClients is populated for the fetch loop even when
-        there are no active subscriptions keeping connections open.
+    PLAN_META_KEY = 'central_relay_plan'
+
+    def _networkPlanRelays(self) -> list:
+        """Central's relays for this neuron, in the order to take them.
+        Empty when central has no plan for it."""
+        return list(self._networkPlan.get('relays') or [])
+
+    def _networkPlanKeep(self) -> int:
+        """How many relays of the plan to hold: 2 unless central says 1 or 3."""
+        try:
+            keep = int(self._networkPlan.get('keep') or 2)
+        except (TypeError, ValueError):
+            keep = 2
+        return min(max(keep, 1), 3)
+
+    async def _networkRefreshPlan(self) -> None:
+        """Ask central which relays are this neuron's, how many to hold, and
+        which key signs central's streams.
+
+        The answers are kept in the database: when central does not answer,
+        also after a restart, the neuron goes on with the last ones.
+        Central's plan carries `healthy` on every relay. An older central
+        ignores the key and answers with every relay it knows, which is not
+        a plan, so relays are then used as before.
+        """
+        plan = dict(self._networkPlan)
+        if not plan:
+            try:
+                plan = json.loads(await asyncio.to_thread(
+                    self.networkDB.get_meta, self.PLAN_META_KEY) or '{}')
+            except Exception:
+                plan = {}
+        try:
+            cfg = await asyncio.to_thread(self.server.getRelayConfig)
+        except Exception:
+            cfg = {}
+        if isinstance(cfg, dict) and cfg:
+            if 'max_streams' in cfg:
+                from satorineuron import network_db as _ndb
+                _ndb.setMaxTotalStreams(cfg['max_streams'])
+            plan['keep'] = cfg.get('keep')
+            plan['publisher'] = cfg.get('stream_publisher_pubkey')
+        try:
+            rows = await asyncio.to_thread(
+                self.server.getRelays, self.nostrPubkey)
+            planned = isinstance(rows, list) and all(
+                isinstance(r, dict) and r.get('relay_url') and 'healthy' in r
+                for r in rows)
+            plan['relays'] = [r['relay_url'] for r in rows] if planned else []
+        except Exception as e:
+            logging.warning(
+                f'Network: no relay list from central ({e}); '
+                f'keeping the last one ({len(plan.get("relays") or [])} relays)')
+        self._networkPlan = plan
+        await asyncio.to_thread(
+            self.networkDB.set_meta, self.PLAN_META_KEY, json.dumps(plan))
+
+    async def _networkHoldPlan(self, ConfigClass) -> None:
+        """Hold the first `keep` relays of central's list that answer.
+
+        Central lists the healthy relays first, in this neuron's own order,
+        so taking them from the top spreads the neurons over the relays. A
+        relay that does not answer is passed over for the next one.
+        """
+        held = []
+        for relay_url in self._networkPlanRelays():
+            if len(held) >= self._networkPlanKeep():
+                break
+            new = relay_url not in self._networkClients
+            client = await self._networkConnect(relay_url, ConfigClass)
+            if not client:
+                continue
+            if new:
+                await self._networkAnnouncePublications(relay_url)
+            try:
+                if await client.is_connected():
+                    held.append(relay_url)
+            except Exception:
+                pass
+        if held != self._networkHeld and (held or self._networkHeld):
+            logging.info(
+                f"Network: holding {', '.join(held) or 'no relay'} "
+                f"of central's list", color='green')
+        self._networkHeld = held
+
+    async def _networkPrune(self) -> None:
+        """With a plan, let go of every relay that is not needed: not held,
+        not the relay of a community subscription, not added in Settings."""
+        if not self._networkPlanRelays():
+            return
+        needed = self._neededRelays()
+        for relay_url in list(self._networkClients):
+            if relay_url not in needed:
+                await self._networkDisconnect(relay_url)
+
+    async def _networkEnsurePublisherConnections(self, ConfigClass):
+        """Connect to the relays we publish on, if we have active publications.
+
+        With central's plan these are the needed relays (_neededRelays: the
+        held ones and those added in Settings). Without one, every known
+        relay. Ensures _networkClients is populated for the fetch loop even
+        when there are no active subscriptions keeping connections open.
         """
         pubs = await asyncio.to_thread(self.networkDB.get_active_publications)
         if not pubs:
             return
-        # Sync relay URLs from the server into the DB so we always publish
-        # to the canonical relay (avoids stale wss:// vs ws:// mismatches).
-        try:
-            server_relays = await asyncio.to_thread(self.server.getRelays)
-            for r in server_relays:
-                await asyncio.to_thread(
-                    self.networkDB.upsert_relay, r['relay_url'])
-        except Exception:
-            pass
-        relays = await asyncio.to_thread(self.networkDB.get_relays)
+        if self._networkPlanRelays():
+            relays = [{'relay_url': u} for u in sorted(self._neededRelays())]
+        else:
+            # Sync relay URLs from the server into the DB so we always publish
+            # to the canonical relay (avoids stale wss:// vs ws:// mismatches).
+            try:
+                server_relays = await asyncio.to_thread(self.server.getRelays)
+                for r in server_relays:
+                    await asyncio.to_thread(
+                        self.networkDB.upsert_relay, r['relay_url'])
+            except Exception:
+                pass
+            relays = await asyncio.to_thread(self.networkDB.get_relays)
         for r in relays:
             relay_url = r['relay_url']
             if relay_url not in self._networkClients:
@@ -964,12 +1069,16 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 # and its record run with no await between them, so one copy
                 # gets through; save_observation's own check runs in a thread,
                 # where two copies arriving together could both look new and
-                # the engine would predict twice.
+                # the engine would predict twice. The last few seqs are
+                # remembered, not only the last: a slower relay's copy of an
+                # older value can arrive after a newer one was taken.
                 if obs.observation is not None:
-                    key = (obs.stream_name, obs.nostr_pubkey)
-                    if self._networkLastSeq.get(key) == obs.observation.seq_num:
+                    recent = self._networkRecentSeqs.setdefault(
+                        (obs.stream_name, obs.nostr_pubkey), [])
+                    if obs.observation.seq_num in recent:
                         continue
-                    self._networkLastSeq[key] = obs.observation.seq_num
+                    recent.append(obs.observation.seq_num)
+                    del recent[:-8]
                 logging.info(
                     f'Network: received data from {relay_url} '
                     f'stream={obs.stream_name} value={obs.observation.value if obs.observation else None}',
@@ -3806,8 +3915,22 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         pin every known relay — the publisher broadcasts to all of them and
         needs the connection alive between publishes to keep settlement /
         tombstone listeners running and to stay discoverable.
+
+        With central's relay plan: the relays held from it, the relay of
+        each subscription that is not to one of central's streams (those
+        arrive on the held relays), and, with active publications, the
+        relays added in Settings.
         """
         subs = self.networkDB.get_active()
+        if self._networkPlanRelays():
+            publisher = self._networkPlan.get('publisher')
+            needed = set(self._networkHeld)
+            needed |= {s['relay_url'] for s in subs
+                       if s.get('relay_url') and s['provider_pubkey'] != publisher}
+            if self.networkDB.get_active_publications():
+                needed |= {r['relay_url']
+                           for r in self.networkDB.get_user_added_relays()}
+            return needed
         needed = {s['relay_url'] for s in subs}
         if self.networkDB.get_active_publications():
             for r in self.networkDB.get_relays():
@@ -4115,6 +4238,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
             for p in await asyncio.to_thread(self.networkDB.get_active_publications)
         }
         desired = [s for s in desired if s['stream_name'] not in my_pub_names]
+        # With central's relay plan its streams arrive on the held relays,
+        # so they are not hunted relay by relay.
+        if self._networkPlanRelays() and self._networkPlan.get('publisher'):
+            desired = [s for s in desired
+                       if s['provider_pubkey'] != self._networkPlan['publisher']]
         if not desired:
             return
 
@@ -4189,7 +4317,8 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                      if not int(hunting[m.stream_name].get(
                          'price_per_obs', 0) or 0) > 0])
             except Exception:
-                await self._networkDisconnect(relay_url)
+                if relay_url not in self._networkHeld:
+                    await self._networkDisconnect(relay_url)
                 continue
 
             # Check which of our wanted streams are on this relay and active
@@ -4233,7 +4362,7 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 self._networkEnsureListener(relay_url)
                 # Announce our publications to this relay
                 await self._networkAnnouncePublications(relay_url)
-            else:
+            elif relay_url not in self._networkHeld:
                 # Disconnect if this relay had nothing we needed
                 await self._networkDisconnect(relay_url)
 

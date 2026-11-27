@@ -45,6 +45,8 @@ def harness(monkeypatch):
         h._networkSecretHex = 'b' * 64
         h._networkClients = {}
         h._networkSubscribed = {}
+        h._networkPlan = {}
+        h._networkHeld = []
         h._networkListeners = {}
         h._channelListeners = {}
         h._channelOpenListeners = {}
