@@ -4411,9 +4411,11 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
         01:05 UTC, for an open newer than the one last acted on ('contest last
         open' in the config, so a restart does not act on one open twice); an
         open whose hour has passed (the neuron was down) is acted on too. The
-        spread keeps thousands of neurons from polling at once, well inside
-        the hour. A Central without contests (404) or one that keeps failing:
-        the 11 hours of before.
+        day's first check comes 0 to 5 minutes after 00:05 and the poll 0 to
+        15 after the open is seen, both at random: thousands of neurons wait
+        for the same moment and must not ask Central in the same second. Both
+        stay well inside the hour. A Central without contests (404) or one
+        that keeps failing: the 11 hours of before.
         """
         import random
         import requests
@@ -4443,7 +4445,10 @@ class StartupDag(StartupDagStruct, metaclass=SingletonMeta):
                 time.sleep(60 * 5)
                 continue
             sinceCheckStart = (time.time() - 60 * 5) % (60 * 60 * 24)  # since 00:05 UTC
-            time.sleep(60 * 5 if sinceCheckStart < 60 * 60 else 60 * 60 * 24 - sinceCheckStart)
+            if sinceCheckStart < 60 * 60:
+                time.sleep(60 * 5)
+            else:  # to 00:05 UTC, plus this neuron's own 0 to 5 minutes
+                time.sleep(60 * 60 * 24 - sinceCheckStart + random.uniform(0, 60 * 5))
         logging.info('No open contests from Central, next observation poll in 11 hours', color='blue')
         time.sleep(60 * 60 * 11)
 

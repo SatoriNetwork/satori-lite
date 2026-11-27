@@ -4,10 +4,11 @@ Central's contests count a prediction only if Central receives it within an
 hour of the contest's open (GET /api/v1/contests/open; the daily run at 00:01
 UTC writes the opens). After each poll the neuron waits for the next open
 (waitForContestOpen), acts on it once, restart or not (the config keeps the
-open it acted on), 0 to 15 minutes after it sees it; a Central without contests
-(404) or one that keeps failing keeps the 11 hours of before. The watchdog
-(checkinCheck) lets a day pass between polls. The real StartupDag methods
-against a fake clock (start.time) and a fake Central (requests.get).
+open it acted on), 0 to 15 minutes after it sees it; the day's first check
+comes at 00:05 UTC plus the neuron's own 0 to 5 minutes; a Central without
+contests (404) or one that keeps failing keeps the 11 hours of before. The
+watchdog (checkinCheck) lets a day pass between polls. The real StartupDag
+methods against a fake clock (start.time) and a fake Central (requests.get).
 """
 import random
 import types
@@ -98,8 +99,11 @@ class Central:
 @pytest.fixture
 def neuron(monkeypatch):
     """make(now, opens, ...) -> (a neuron, its clock, Central, its config);
-    neuron() again is a restarted one: the same clock, Central and config."""
+    neuron() again is a restarted one: the same clock, Central and config.
+    The day's first check comes at 00:05 sharp here; its 0 to 5 minutes have
+    their own test."""
     made = {}
+    monkeypatch.setattr(random, 'uniform', lambda a, b: 0)
 
     def make(now=None, opens=(), last=None, status=200, down=False):
         if not made:
@@ -177,19 +181,36 @@ def test_a_new_neuron_acts_on_the_open_it_finds(neuron):
     assert config.data['contest last open'] == utc('2026-11-27T00:03:10Z')
 
 
+def test_the_days_first_check_is_each_neurons_own_moment(neuron, monkeypatch):
+    # Thousands of neurons wait for the same 00:05 UTC: each adds its own 0 to
+    # 5 minutes, so they do not all ask Central in one second, and keeps its
+    # 5-minute steps from there.
+    asked = []
+    monkeypatch.setattr(random, 'uniform', lambda a, b: asked.append((a, b)) or 137)
+    n, clock, central, config = neuron(
+        '2026-11-26T14:30:00Z', opens=['2026-11-26T00:02:05Z', '2026-11-27T00:12:00Z'],
+        last='2026-11-26T00:02:05Z')
+    n.waitForContestOpen()
+    assert asked == [(0, 5 * MINUTE)]
+    assert central.gets == ['2026-11-26T14:30:00Z', '2026-11-27T00:07:17Z', '2026-11-27T00:12:17Z']
+    assert config.data['contest last open'] == utc('2026-11-27T00:12:00Z')
+
+
 @pytest.mark.parametrize('opened', ['2026-11-27T00:02:05Z', '2026-11-27T00:41:30Z'])
 def test_the_spread_stays_inside_the_hour(neuron, monkeypatch, opened):
-    # The longest spread, waiting since the evening before; the run done in
-    # minutes, or a slow one.
+    # The latest first check and the longest spread, waiting since the evening
+    # before; the run done in minutes, or a slow one.
     asked = []
+    monkeypatch.setattr(random, 'uniform', lambda a, b: b)
     monkeypatch.setattr(random, 'randint', lambda a, b: asked.append((a, b)) or b)
     n, clock, central, config = neuron(
         '2026-11-26T20:00:00Z', opens=[opened], last='2026-11-26T00:02:05Z')
     n.waitForContestOpen()
     assert asked == [(0, 15 * MINUTE)]
     assert clock.sleeps[-1] == 15 * MINUTE
-    # Seen within 5 minutes of the open, then at most 15: inside its hour.
-    assert clock.now <= utc(opened) + 20 * MINUTE < utc(opened) + HOUR
+    # Seen by 00:10 or within 5 minutes of the open, then at most 15: inside its hour.
+    seen = max(utc('2026-11-27T00:10:00Z'), utc(opened) + 5 * MINUTE)
+    assert clock.now <= seen + 15 * MINUTE < utc(opened) + HOUR
 
 
 def test_a_central_without_contests_keeps_the_11_hours(neuron):
